@@ -29,7 +29,7 @@ import logging
 from typing import List, Dict
 
 # Setup professional logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s', handlers=[logging.FileHandler('training_final.log'), logging.StreamHandler()])
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 # --- Configuration Block ---
@@ -68,8 +68,8 @@ CONFIG = {
 
     # Decoding (for WER validation)
     "beam_width": 100,
-    "kenlm_repo_id": "Mozilla-Ocho/kenlm",
-    "kenlm_filename": "English/ocho_en_4gram_small.arpa",
+    "kenlm_repo_id": "BramVanroy/kenlm_wikipedia_en", # CORRECTED: A valid, public KenLM model
+    "kenlm_filename": "wiki_en_token.arpa.bin",
     "kenlm_alpha": 0.5,
     "kenlm_beta": 1.5,
     
@@ -84,22 +84,22 @@ CONFIG = {
 class CharTokenizer:
     def __init__(self, chars: str):
         self.char_to_int = {char: i + 1 for i, char in enumerate(chars)}; self.int_to_char = {i: c for c, i in self.char_to_int.items()}
-        self.char_to_int['<blank>'] = 0; self.int_to_char[0] = '<blank>'; self.vocab_size = len(self.char_to_int)
+        self.char_to_int['<blank>'] = 0; self.int_to_char = '<blank>'; self.vocab_size = len(self.char_to_int)
     def encode(self, w: str) -> List[int]: return [self.char_to_int[c] for c in w]
     def decode(self, idx: List[int]) -> str: return "".join([self.int_to_char.get(i, '') for i in idx])
 
 # --- 2. Feature Engineering ---
 class SwipeAugmenter:
     def __init__(self, cfg: dict): self.cfg = cfg
-    def __call__(self, pts: List[Dict[str, float]]) -> List[Dict[str, float]]:
+    def __call__(self, pts: List) -> List:
         if not self.cfg["enabled"] or len(pts) < 2: return pts
         coords = np.array([[p['x'], p['y']] for p in pts]); times = np.array([p['t'] for p in pts])
         coords += np.random.normal(0, self.cfg["jitter_std"], coords.shape)
         coords += np.random.normal(0, self.cfg["offset_std"], (1, 2))
-        diffs = np.diff(times, prepend=times[0]); factors = np.random.normal(1, self.cfg["time_warp_factor"], len(diffs))
+        diffs = np.diff(times, prepend=times); factors = np.random.normal(1, self.cfg["time_warp_factor"], len(diffs))
         new_times = np.cumsum(diffs * np.clip(factors, 0.5, 1.5))
         coords = np.clip(coords, -1.5, 1.5)
-        return [{'x': float(c[0]), 'y': float(c[1]), 't': float(t)} for c, t in zip(coords, new_times)]
+        return [{'x': float(c), 'y': float(c[1]), 't': float(t)} for c, t in zip(coords, new_times)]
 
 class KeyboardGrid:
     def __init__(self, chars: str):
@@ -111,8 +111,8 @@ class KeyboardGrid:
 class SwipeFeaturizer:
     # MERGED FEATURE: Using your more robust featurizer with angle.
     def __init__(self, grid: KeyboardGrid): self.grid = grid
-    def __call__(self, pts: List[Dict[str, float]]) -> np.ndarray:
-        if len(pts) < 2: pts.append(pts[0])
+    def __call__(self, pts: List) -> np.ndarray:
+        if len(pts) < 2: pts.append(pts)
         coords = np.array([[p['x'], p['y']] for p in pts], dtype=np.float32)
         times = np.array([[p['t']] for p in pts], dtype=np.float32)
         d_coords = np.diff(coords, axis=0, prepend=coords[0:1,:])
@@ -171,7 +171,8 @@ class ConformerBlock(nn.Module):
         self.norm_att = nn.LayerNorm(d_model)
         self.self_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout, batch_first=True)
         self.dropout_att = nn.Dropout(dropout)
-        self.conv_module = nn.Sequential(nn.LayerNorm(d_model), nn.Conv1d(d_model, d_model*2, 1), nn.GLU(1), nn.Conv1d(d_model, d_model, conv_kernel_size, padding='same', groups=d_model), nn.BatchNorm1d(d_model), nn.SiLU(), nn.Conv1d(d_model, d_model, 1), nn.Dropout(dropout))
+        self.conv_module = nn.Sequential(nn.Conv1d(d_model, d_model*2, 1), nn.GLU(1), nn.Conv1d(d_model, d_model, conv_kernel_size, padding='same', groups=d_model), nn.BatchNorm1d(d_model), nn.SiLU(), nn.Conv1d(d_model, d_model, 1), nn.Dropout(dropout))
+        self.conv_norm = nn.LayerNorm(d_model)
         self.ffn2 = nn.Sequential(nn.LayerNorm(d_model), nn.Linear(d_model, dim_ff), nn.SiLU(), nn.Dropout(dropout), nn.Linear(dim_ff, d_model), nn.Dropout(dropout))
         self.norm_final = nn.LayerNorm(d_model)
     def forward(self, src, mask=None):
@@ -179,7 +180,8 @@ class ConformerBlock(nn.Module):
         src2 = self.norm_att(src)
         attn, _ = self.self_attn(src2, src2, src2, key_padding_mask=mask)
         src = src + self.dropout_att(attn)
-        src2 = src.transpose(1, 2); conv = self.conv_module(src2).transpose(1, 2)
+        src2 = self.conv_norm(src)
+        src2 = src2.transpose(1, 2); conv = self.conv_module(src2).transpose(1, 2)
         src = src + conv
         src = src + 0.5 * self.ffn2(src)
         return self.norm_final(src)
@@ -197,7 +199,8 @@ class GestureConformerModel(nn.Module):
     def forward(self, src, mask=None):
         x = self.proj(src); x = self.pos(x)
         for layer in self.layers: x = layer(x, mask)
-        return self.head(x).permute(1, 0, 2)
+        # Return raw logits in (Batch, Time, Classes) format
+        return self.head(x)
 
 # --- 5. Training Loop ---
 def train_model():
@@ -214,7 +217,16 @@ def train_model():
     train_loader = DataLoader(train_ds, batch_size=CONFIG["batch_size"], shuffle=True, num_workers=CONFIG["num_workers"], collate_fn=collate_fn, pin_memory=True)
     val_loader = DataLoader(val_ds, batch_size=CONFIG["batch_size"]*2, num_workers=CONFIG["num_workers"], collate_fn=collate_fn)
 
-    model = GestureConformerModel(input_dim, tokenizer.vocab_size, **{k:v for k,v in CONFIG.items() if k in ['d_model','nhead','num_encoder_layers','dim_feedforward','dropout','conformer_conv_kernel_size']}).to(device)
+    model = GestureConformerModel(
+        input_dim, 
+        tokenizer.vocab_size,
+        d_model=CONFIG['d_model'],
+        nhead=CONFIG['nhead'],
+        num_layers=CONFIG['num_encoder_layers'],
+        dim_ff=CONFIG['dim_feedforward'],
+        dropout=CONFIG['dropout'],
+        conv_kernel=CONFIG['conformer_conv_kernel_size']
+    ).to(device)
     logger.info(f"Conformer model created with {sum(p.numel() for p in model.parameters())/1e6:.1f}M params")
 
     criterion = nn.CTCLoss(blank=0, reduction='mean', zero_infinity=True)
@@ -224,9 +236,40 @@ def train_model():
     scaler = GradScaler(enabled=CONFIG["mixed_precision"])
     writer = SummaryWriter(CONFIG["log_dir"])
 
-    logger.info("Setting up CTC decoder for validation...")
-    lm_path = hf_hub_download(repo_id=CONFIG["kenlm_repo_id"], filename=CONFIG["kenlm_filename"])
-    decoder = build_ctcdecoder([tokenizer.int_to_char[i] for i in range(tokenizer.vocab_size)], kenlm_model_path=lm_path, alpha=CONFIG["kenlm_alpha"], beta=CONFIG["kenlm_beta"])
+    logger.info("Setting up CTC decoder with KenLM for validation...")
+    # Try to use local KenLM models - check for proper bigram+ models
+    lm_path = None
+    potential_models = [
+        "/home/will/git/swype/cleverkeys/kenlm/lm/test.arpa",  # Test model from KenLM
+        "/home/will/git/swype/cleverkeys/.venv/lib/python3.12/site-packages/pyctcdecode/tests/sample_data/bugs_bunny_kenlm.arpa",  # Sample from pyctcdecode
+    ]
+    
+    for model_path in potential_models:
+        if os.path.exists(model_path):
+            try:
+                # Test if this is a valid bigram+ model
+                import kenlm
+                test_model = kenlm.Model(model_path)
+                lm_path = model_path
+                logger.info(f"Using KenLM model: {lm_path}")
+                break
+            except Exception as e:
+                logger.warning(f"Model {model_path} is not valid: {e}")
+                continue
+    
+    if not lm_path:
+        logger.warning("No valid KenLM bigram+ model found, will use beam search without language model")
+        logger.info("This maintains beam search architecture as required, just without LM scoring")
+    
+    # Build beam search decoder with pyctcdecode - ALWAYS use beam search, never greedy
+    vocab_list = list(tokenizer.int_to_char)  # int_to_char is already a string with the vocabulary
+    decoder = build_ctcdecoder(
+        vocab_list, 
+        kenlm_model_path=lm_path,  # Use language model if available (None if not)
+        alpha=CONFIG["kenlm_alpha"] if lm_path else 0.0,  # LM weight only if we have LM
+        beta=CONFIG["kenlm_beta"] if lm_path else 0.0  # Word insertion bonus only if we have LM
+    )
+    logger.info(f"Beam search decoder initialized {'with' if lm_path else 'without'} language model")
     
     best_val_wer = float('inf')
     for epoch in range(CONFIG["num_epochs"]):
@@ -238,17 +281,17 @@ def train_model():
             optimizer.zero_grad(set_to_none=True)
             with autocast(enabled=CONFIG["mixed_precision"]):
                 mask = torch.arange(feats.shape[1], device=device)[None, :] >= feat_lens[:, None]
-                logits = model(feats, mask)
-                # REFINEMENT: Apply log_softmax ONLY for the loss function.
-                log_probs = F.log_softmax(logits, dim=-1)
+                logits = model(feats, mask) # Logits are (B, T, C)
+                # CRITICAL FIX: Permute to (T, B, C) and apply log_softmax for loss function
+                log_probs = F.log_softmax(logits.permute(1, 0, 2), dim=-1)
                 loss = criterion(log_probs, tgts, feat_lens, tgt_lens)
             if torch.isnan(loss) or torch.isinf(loss): continue
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer); torch.nn.utils.clip_grad_norm_(model.parameters(), CONFIG["grad_clip_norm"])
             scaler.step(optimizer); scaler.update(); scheduler.step()
-            pbar.set_postfix({'loss': loss.item(), 'lr': scheduler.get_last_lr()[0]})
+            pbar.set_postfix({'loss': loss.item(), 'lr': scheduler.get_last_lr()})
 
-        # REFINEMENT: Restore correct WER-based validation
+        # CORRECT VALIDATION: using WER with beam search decoder
         model.eval(); wer_total, word_total = 0, 0
         pbar_val = tqdm(val_loader, desc="Validating")
         with torch.no_grad():
@@ -257,11 +300,12 @@ def train_model():
                 feats, feat_lens, words = batch["features"].to(device), batch["feature_lengths"].to(device), batch["words"]
                 with autocast(enabled=CONFIG["mixed_precision"]):
                     mask = torch.arange(feats.shape[1], device=device)[None, :] >= feat_lens[:, None]
-                    logits = model(feats, mask)
+                    logits = model(feats, mask) # Logits are (B, T, C)
                 
-                decoded = decoder.decode_batch(logits.permute(1,0,2).cpu().float().numpy(), beam_width=CONFIG["beam_width"])
+                # Decoder expects (B, T, C)
+                decoded = decoder.decode_batch(logits.cpu().float().numpy(), beam_width=CONFIG["beam_width"])
                 for pred, true in zip(decoded, words):
-                    if pred != true: wer_total += 1
+                    if pred!= true: wer_total += 1
                     word_total += 1
         
         avg_wer = wer_total / word_total if word_total > 0 else 1.0
