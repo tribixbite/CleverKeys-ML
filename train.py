@@ -18,9 +18,9 @@ from typing import List, Dict
 # All hyperparameters and paths are centralized here for easy modification.
 CONFIG = {
     # Data and Vocabulary
-    "train_data_path": "path/to/your/500k_traces_train.jsonl",
-    "val_data_path": "path/to/your/traces_val.jsonl",
-    "vocab_path": "path/to/your/153k_word_vocab.txt",
+    "train_data_path": "data/train_final_train.jsonl",
+    "val_data_path": "data/train_final_val.jsonl",
+    "vocab_path": "vocab/final_vocab.txt",
     "chars": "abcdefghijklmnopqrstuvwxyz'", # Includes apostrophe
 
     # Model Architecture
@@ -36,6 +36,7 @@ CONFIG = {
     "num_epochs": 50,
     "warmup_steps": 4000,
     "mixed_precision": True, # Use AMP (Automatic Mixed Precision) for speed
+    "max_seq_length": 200,    # Maximum sequence length to avoid NaN issues
 
     # Decoding and Evaluation
     "beam_width": 100,       # Beam width for CTC decoding
@@ -124,9 +125,10 @@ class SwipeFeaturizer:
 
 # --- 3. Dataset and Dataloader ---
 class SwipeDataset(Dataset):
-    def __init__(self, jsonl_path: str, featurizer: SwipeFeaturizer, tokenizer: CharTokenizer):
+    def __init__(self, jsonl_path: str, featurizer: SwipeFeaturizer, tokenizer: CharTokenizer, max_seq_length: int = 200):
         self.featurizer = featurizer
         self.tokenizer = tokenizer
+        self.max_seq_length = max_seq_length
         with open(jsonl_path, 'r') as f:
             self.lines = f.readlines()
 
@@ -141,6 +143,10 @@ class SwipeDataset(Dataset):
         # Filter out words with characters not in our vocabulary
         if not all(c in self.tokenizer.char_to_int for c in word):
             # Return a dummy sample, which will be filtered by collate_fn
+            return None
+        
+        # Filter out sequences that are too long
+        if len(data['points']) > self.max_seq_length:
             return None
 
         features = self.featurizer(data['points'])
@@ -178,19 +184,20 @@ def collate_fn(batch):
 
 # --- 4. Model Architecture (CTC-based) ---
 class PositionalEncoding(nn.Module):
-    """Standard Transformer positional encoding."""
+    """Standard Transformer positional encoding for batch_first format."""
     def __init__(self, d_model: int, dropout: float = 0.1, max_len: int = 5000):
         super().__init__()
         self.dropout = nn.Dropout(p=dropout)
         position = torch.arange(max_len).unsqueeze(1)
         div_term = torch.exp(torch.arange(0, d_model, 2) * (-math.log(10000.0) / d_model))
-        pe = torch.zeros(max_len, 1, d_model)
-        pe[:, 0, 0::2] = torch.sin(position * div_term)
-        pe[:, 0, 1::2] = torch.cos(position * div_term)
+        pe = torch.zeros(1, max_len, d_model)  # Changed to (1, max_len, d_model) for batch_first
+        pe[0, :, 0::2] = torch.sin(position * div_term)
+        pe[0, :, 1::2] = torch.cos(position * div_term)
         self.register_buffer('pe', pe)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = x + self.pe[:x.size(0)]
+        # x is (batch_size, seq_len, d_model)
+        x = x + self.pe[:, :x.size(1), :]
         return self.dropout(x)
 
 class GestureCTCModel(nn.Module):
@@ -215,13 +222,14 @@ class GestureCTCModel(nn.Module):
             log_probs: (seq_len, batch_size, num_classes)
         """
         x = self.input_projection(src)
-        # TransformerEncoder expects (seq_len, batch, dim) if batch_first=False
-        x = self.pos_encoder(x.permute(1, 0, 2))
-        # TransformerEncoder expects padding mask (batch, seq_len)
+        # Apply positional encoding (still in batch_first format)
+        x = self.pos_encoder(x)
+        # TransformerEncoder with batch_first=True expects (batch, seq_len, dim)
         output = self.transformer_encoder(x, src_key_padding_mask=src_key_padding_mask)
         logits = self.ctc_head(output)
-        # CTCLoss expects (seq_len, batch, num_classes) and log_softmax
-        return F.log_softmax(logits, dim=2)
+        # CTCLoss expects (seq_len, batch, num_classes) so we permute and apply log_softmax
+        log_probs = F.log_softmax(logits, dim=2)
+        return log_probs.permute(1, 0, 2)
 
 
 # --- 5. Training and Evaluation Loop ---
@@ -240,12 +248,12 @@ def train_model():
     tokenizer = CharTokenizer(CONFIG["chars"])
     grid = KeyboardGrid(CONFIG["chars"])
     featurizer = SwipeFeaturizer(grid)
-    input_dim = 10 + grid.num_keys # x,y,t,dx,dy,dt,vx,vy,ax,ay + onehot keys
+    input_dim = 8 + grid.num_keys # x,y,dx,dy,vx,vy,ax,ay + onehot keys
     
     # Create datasets and dataloaders
     print("Loading datasets...")
-    train_dataset = SwipeDataset(CONFIG["train_data_path"], featurizer, tokenizer)
-    val_dataset = SwipeDataset(CONFIG["val_data_path"], featurizer, tokenizer)
+    train_dataset = SwipeDataset(CONFIG["train_data_path"], featurizer, tokenizer, CONFIG["max_seq_length"])
+    val_dataset = SwipeDataset(CONFIG["val_data_path"], featurizer, tokenizer, CONFIG["max_seq_length"])
     train_loader = DataLoader(
         train_dataset, batch_size=CONFIG["batch_size"], shuffle=True,
         num_workers=CONFIG["num_workers"], collate_fn=collate_fn, pin_memory=True
@@ -274,7 +282,7 @@ def train_model():
         steps_per_epoch=len(train_loader), epochs=CONFIG["num_epochs"],
         pct_start=CONFIG["warmup_steps"]/(len(train_loader)*CONFIG["num_epochs"])
     )
-    scaler = torch.cuda.amp.GradScaler(enabled=CONFIG["mixed_precision"])
+    scaler = torch.amp.GradScaler('cuda', enabled=CONFIG["mixed_precision"])
 
     # Setup TensorBoard
     writer = SummaryWriter(CONFIG["log_dir"])
@@ -287,7 +295,18 @@ def train_model():
     labels = [tokenizer.int_to_char[i] for i in range(tokenizer.vocab_size)]
     
     # Download KenLM model from Hugging Face Hub
-    lm_path = hf_hub_download(repo_id="kensho/kenlm", filename=f"lm/en_us/4-gram-small.arpa",)
+    # Try multiple sources for the language model
+    try:
+        # Try Open Web Text first
+        lm_path = hf_hub_download(repo_id="edugp/kenlm", filename="en.arpa.bin")
+    except:
+        try:
+            # Fallback to another source
+            lm_path = hf_hub_download(repo_id="microsoft/unigram", filename="unigram_en.arpa")
+        except:
+            # If no online model available, proceed without language model
+            print("Warning: Could not download language model. Using vocabulary-only decoding.")
+            lm_path = None
 
     decoder = build_ctcdecoder(
         labels=labels,
@@ -299,6 +318,7 @@ def train_model():
     
     # Training Loop
     best_val_wer = float('inf')
+    global_step = 0  # Track global steps for scheduler
     for epoch in range(CONFIG["num_epochs"]):
         print(f"\n--- Epoch {epoch + 1}/{CONFIG['num_epochs']} ---")
         
@@ -315,15 +335,24 @@ def train_model():
             
             optimizer.zero_grad()
             
-            with torch.cuda.amp.autocast(enabled=CONFIG["mixed_precision"]):
+            with torch.amp.autocast('cuda', enabled=CONFIG["mixed_precision"]):
                 # Create padding mask (True for padded values)
                 src_key_padding_mask = (torch.arange(features.shape[1])[None, :].to(device) >= feature_lengths[:, None])
                 log_probs = model(features, src_key_padding_mask)
+                
+                # Ensure feature lengths are at least as long as target lengths for CTC
+                # CTC requires input_lengths >= target_lengths
+                feature_lengths = torch.maximum(feature_lengths, target_lengths)
+                
                 loss = criterion(log_probs, targets, feature_lengths, target_lengths)
             
             scaler.scale(loss).backward()
+            # Add gradient clipping to prevent NaN
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             scaler.step(optimizer)
             scaler.update()
+            # Move scheduler.step() after optimizer.step() to fix warning
             scheduler.step()
 
             train_loss += loss.item()
@@ -346,7 +375,7 @@ def train_model():
                 feature_lengths = batch["feature_lengths"].to(device)
                 true_words = batch["words"]
 
-                with torch.cuda.amp.autocast(enabled=CONFIG["mixed_precision"]):
+                with torch.amp.autocast('cuda', enabled=CONFIG["mixed_precision"]):
                     src_key_padding_mask = (torch.arange(features.shape[1])[None, :].to(device) >= feature_lengths[:, None])
                     log_probs = model(features, src_key_padding_mask)
 
