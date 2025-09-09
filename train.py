@@ -1,704 +1,722 @@
 #!/usr/bin/env python3
 """
-Stable Training Script for CleverKeys Gesture Typing Model
-Incorporates all fixes for NaN issues based on comprehensive analysis
+State-of-the-Art Swipe Gesture Recognition Model
+Advanced architecture with Conformer blocks, sophisticated data augmentation,
+and production-ready training pipeline.
 """
 
+import json
+import math
+import os
+import random
+from typing import List, Dict, Tuple, Optional, Any
+from pathlib import Path
+from dataclasses import dataclass
+import warnings
+warnings.filterwarnings('ignore')
+
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
-from torch.optim import AdamW
-from torch.optim.lr_scheduler import CosineAnnealingLR
-from torch.cuda.amp import autocast
-import numpy as np
-from pathlib import Path
-import json
-from dataclasses import dataclass
-from typing import Dict, List, Tuple, Optional
-import math
+from torch.utils.tensorboard import SummaryWriter
+from torch.cuda.amp import autocast, GradScaler
 from tqdm import tqdm
-import logging
-from datetime import datetime
+import pyctcdecode
+from huggingface_hub import hf_hub_download
 
-# Setup logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('training_stable.log'),
-        logging.StreamHandler()
-    ]
-)
-logger = logging.getLogger(__name__)
-
-# ============================================
-# Configuration
-# ============================================
-
+# Advanced Configuration
 @dataclass
-class TrainingConfig:
-    # Model parameters
+class SOTAConfig:
+    # Data paths
+    train_data_path: str = "data/train_final_train.jsonl"
+    val_data_path: str = "data/train_final_val.jsonl"
+    vocab_path: str = "vocab/final_vocab.txt"
+    
+    # Model architecture
+    model_type: str = "conformer"  # "conformer" or "transformer"
+    input_dim: int = 35  # Will be calculated
     d_model: int = 384
-    nhead: int = 6
-    num_encoder_layers: int = 8
+    nhead: int = 8
+    num_layers: int = 8
     dim_feedforward: int = 1536
-    vocab_size: int = 28  # 26 letters + space + blank
-    dropout: float = 0.1
-    max_seq_length: int = 100
+    dropout: float = 0.15
+    
+    # Conformer specific
+    conv_kernel_size: int = 31
+    use_macaron_style: bool = True
     
     # Training parameters
-    batch_size: int = 128
-    learning_rate: float = 3e-4
-    weight_decay: float = 0.05  # Increased from 0.01 for better regularization
-    num_epochs: int = 50
-    gradient_clip: float = 0.5  # Reduced from 1.0 for more stability
+    batch_size: int = 128  # Reduced for memory
+    learning_rate: float = 2e-4
     warmup_steps: int = 2000
+    num_epochs: int = 100
+    gradient_clip: float = 1.0
+    weight_decay: float = 1e-5
+    label_smoothing: float = 0.1
     
-    # Stability parameters (NEW)
-    logit_clamp_min: float = -10.0
-    logit_clamp_max: float = 10.0
-    pos_emb_init_std: float = 0.01  # Reduced from 0.02
-    max_grad_scaler_scale: float = 32768.0  # Cap the GradScaler
-    monitor_frequency: int = 200  # Steps between monitoring logs
+    # Advanced features
+    use_mixup: bool = True
+    mixup_alpha: float = 0.2
+    use_spec_augment: bool = True
+    use_curriculum: bool = True
+    
+    # Data augmentation
+    aug_temporal_warp: bool = True
+    aug_spatial_noise: float = 0.02
+    aug_velocity_noise: float = 0.1
+    aug_dropout_prob: float = 0.1
+    
+    # System
+    device: str = "cuda" if torch.cuda.is_available() else "cpu"
+    mixed_precision: bool = True
+    num_workers: int = 4
+    max_seq_length: int = 200
+    
+    # Decoding
+    beam_width: int = 20
+    use_lm: bool = True
     
     # Paths
-    data_path: str = "data/train_final_train.jsonl"
-    val_path: str = "data/train_final_val.jsonl"
-    checkpoint_dir: str = "checkpoints_stable"
-    
-    # Device
-    device: str = "cuda" if torch.cuda.is_available() else "cpu"
-    use_amp: bool = True  # Can disable for debugging
+    checkpoint_dir: str = "checkpoints_sota"
+    log_dir: str = "logs_sota"
+    export_dir: str = "exports_sota"
 
-CONFIG = TrainingConfig()
+CONFIG = SOTAConfig()
 
-# ============================================
-# Stable Feature Extraction
-# ============================================
+# Create directories
+for dir_path in [CONFIG.checkpoint_dir, CONFIG.log_dir, CONFIG.export_dir]:
+    Path(dir_path).mkdir(exist_ok=True)
 
-class StableFeaturizer:
-    """Feature extraction with comprehensive stability checks"""
+# --- Advanced Feature Engineering ---
+class AdvancedSwipeFeaturizer:
+    def __init__(self, keyboard_layout="qwerty"):
+        self.grid = self._create_keyboard_grid(keyboard_layout)
+        self.num_keys = len(self.grid.keys)
+        
+    def _create_keyboard_grid(self, layout):
+        if layout == "qwerty":
+            keys = [
+                ['q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p'],
+                ['a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l'],
+                ['z', 'x', 'c', 'v', 'b', 'n', 'm', "'"]
+            ]
+        else:
+            raise ValueError(f"Unknown layout: {layout}")
+        
+        class Grid:
+            def __init__(self):
+                self.keys = []
+                self.positions = {}
+        
+        grid = Grid()
+        for row_idx, row in enumerate(keys):
+            for col_idx, key in enumerate(row):
+                x = col_idx / 9.0
+                y = row_idx / 2.0
+                grid.keys.append(key)
+                grid.positions[key] = (x, y)
+        
+        grid.num_keys = len(grid.keys)
+        return grid
     
-    def __init__(self):
-        self.keyboard_layout = self._init_keyboard()
-        self.num_keys = len(self.keyboard_layout)
-    
-    def _init_keyboard(self):
-        layout = {
-            'q': (0.0, 0.0), 'w': (0.1, 0.0), 'e': (0.2, 0.0), 'r': (0.3, 0.0), 
-            't': (0.4, 0.0), 'y': (0.5, 0.0), 'u': (0.6, 0.0), 'i': (0.7, 0.0), 
-            'o': (0.8, 0.0), 'p': (0.9, 0.0),
-            'a': (0.05, 0.33), 's': (0.15, 0.33), 'd': (0.25, 0.33), 'f': (0.35, 0.33), 
-            'g': (0.45, 0.33), 'h': (0.55, 0.33), 'j': (0.65, 0.33), 'k': (0.75, 0.33), 
-            'l': (0.85, 0.33),
-            'z': (0.15, 0.67), 'x': (0.25, 0.67), 'c': (0.35, 0.67), 'v': (0.45, 0.67), 
-            'b': (0.55, 0.67), 'n': (0.65, 0.67), 'm': (0.75, 0.67)
-        }
-        return layout
-    
-    def extract_features(self, points_list):
-        """Extract features with comprehensive safety checks"""
-        if not points_list or len(points_list) < 2:
-            return None
+    def extract_features(self, points: List[Tuple[float, float, float]]) -> np.ndarray:
+        """Extract advanced features including curvature, angles, and jerk."""
+        if len(points) < 2:
+            return np.zeros((len(points), 35 + 10))  # Extra features
         
-        # Convert to numpy array
-        points_array = np.array([[p['x'], p['y'], p['t']] for p in points_list])
+        points_array = np.array(points)
         
-        # Validate data
-        if np.any(np.isnan(points_array)) or np.any(np.isinf(points_array)):
-            logger.warning("Invalid points detected (NaN or Inf)")
-            return None
+        # Ensure points_array is 2D
+        if len(points_array.shape) == 1:
+            # Reshape if flattened
+            points_array = points_array.reshape(-1, 3)
         
-        # Clamp input values to reasonable range
-        points_array[:, :2] = np.clip(points_array[:, :2], -2.0, 2.0)
+        xs, ys, ts = points_array[:, 0], points_array[:, 1], points_array[:, 2]
         
-        features = []
-        for i, point in enumerate(points_array):
-            feat = []
-            
-            # Position (2)
-            feat.extend([point[0], point[1]])
-            
-            # Velocity (2) with safe division
-            if i > 0:
-                dt = max(point[2] - points_array[i-1, 2], 1e-6)
-                vx = (point[0] - points_array[i-1, 0]) / dt
-                vy = (point[1] - points_array[i-1, 1]) / dt
-                feat.extend([np.clip(vx, -10, 10), np.clip(vy, -10, 10)])
-            else:
-                feat.extend([0.0, 0.0])
-            
-            # Acceleration (2) with safe division
-            if i > 1:
-                prev_dt = max(points_array[i-1, 2] - points_array[i-2, 2], 1e-6)
-                prev_vx = (points_array[i-1, 0] - points_array[i-2, 0]) / prev_dt
-                prev_vy = (points_array[i-1, 1] - points_array[i-2, 1]) / prev_dt
-                
-                dt = max(point[2] - points_array[i-1, 2], 1e-6)
-                ax = (vx - prev_vx) / dt if i > 0 else 0
-                ay = (vy - prev_vy) / dt if i > 0 else 0
-                feat.extend([np.clip(ax, -10, 10), np.clip(ay, -10, 10)])
-            else:
-                feat.extend([0.0, 0.0])
-            
-            # Jerk (2) - simplified to zeros for stability
-            feat.extend([0.0, 0.0])
-            
-            # Angle (1)
-            if i > 0 and i < len(points_array) - 1:
-                dx = points_array[i+1, 0] - points_array[i-1, 0]
-                dy = points_array[i+1, 1] - points_array[i-1, 1]
-                angle = np.arctan2(dy, dx)
-                feat.append(angle)
-            else:
-                feat.append(0.0)
-            
-            # Curvature (1) - simplified
-            feat.append(0.0)
-            
-            # Distance features (2)
-            dist_start = np.linalg.norm(point[:2] - points_array[0, :2])
-            dist_end = np.linalg.norm(point[:2] - points_array[-1, :2])
-            feat.extend([np.clip(dist_start, 0, 5), np.clip(dist_end, 0, 5)])
-            
-            # Progress (1)
-            progress = i / max(len(points_array) - 1, 1)
-            feat.append(progress)
-            
-            # Bearing (1) - simplified
-            feat.append(0.0)
-            
-            # Cumulative distance (1)
-            if i > 0:
-                cum_dist = sum(np.linalg.norm(points_array[j+1, :2] - points_array[j, :2]) 
-                              for j in range(i))
-                feat.append(np.clip(cum_dist, 0, 10))
-            else:
-                feat.append(0.0)
-            
-            # Key distances (27) with stable Gaussian encoding
-            for key, pos in self.keyboard_layout.items():
-                dist = np.linalg.norm(point[:2] - np.array(pos))
-                # Use bounded exponential to prevent numerical issues
-                gaussian_val = np.exp(-min(dist * dist / 0.05, 10))
-                feat.append(gaussian_val)
-            
-            features.append(feat)
+        # Normalize coordinates
+        xs = (xs - xs.mean()) / (xs.std() + 1e-8)
+        ys = (ys - ys.mean()) / (ys.std() + 1e-8)
         
-        features = np.array(features, dtype=np.float32)
+        # Time deltas with safety
+        delta_times = np.diff(ts, prepend=ts[0])
+        delta_times = np.where(delta_times == 0, 1e-3, delta_times)
         
-        # Final safety check
+        # Spatial deltas
+        dx = np.diff(xs, prepend=xs[0])
+        dy = np.diff(ys, prepend=ys[0])
+        
+        # Velocity
+        vx = np.clip(dx / delta_times, -10.0, 10.0)
+        vy = np.clip(dy / delta_times, -10.0, 10.0)
+        speed = np.sqrt(vx**2 + vy**2)
+        
+        # Acceleration
+        ax = np.clip(np.diff(vx, prepend=vx[0]) / delta_times, -50.0, 50.0)
+        ay = np.clip(np.diff(vy, prepend=vy[0]) / delta_times, -50.0, 50.0)
+        
+        # Jerk (rate of change of acceleration)
+        jx = np.clip(np.diff(ax, prepend=ax[0]) / delta_times, -100.0, 100.0)
+        jy = np.clip(np.diff(ay, prepend=ay[0]) / delta_times, -100.0, 100.0)
+        
+        # Angles and curvature
+        angles = np.arctan2(dy, dx)
+        angle_changes = np.diff(angles, prepend=angles[0])
+        # Normalize angle changes to [-pi, pi]
+        angle_changes = np.arctan2(np.sin(angle_changes), np.cos(angle_changes))
+        curvature = angle_changes / (speed + 1e-8)
+        curvature = np.clip(curvature, -10.0, 10.0)
+        
+        # Distance from start
+        cumulative_dist = np.cumsum(np.sqrt(dx**2 + dy**2))
+        normalized_dist = cumulative_dist / (cumulative_dist[-1] + 1e-8)
+        
+        # One-hot encoding for nearest keys
+        nearest_keys = np.zeros((len(points), self.num_keys))
+        for i, (x, y) in enumerate(zip(xs, ys)):
+            # Denormalize for key finding
+            x_denorm = x * xs.std() + xs.mean()
+            y_denorm = y * ys.std() + ys.mean()
+            nearest_idx = self._find_nearest_key(x_denorm, y_denorm)
+            nearest_keys[i, nearest_idx] = 1.0
+        
+        # Combine all features
+        features = np.stack([
+            xs, ys, dx, dy, vx, vy, ax, ay,
+            speed, jx, jy, angles, angle_changes, curvature, normalized_dist
+        ], axis=1)
+        
+        # Add nearest key encoding
+        features = np.concatenate([features, nearest_keys], axis=1)
+        
+        # Safety check
         features = np.nan_to_num(features, nan=0.0, posinf=10.0, neginf=-10.0)
-        features = np.clip(features, -10.0, 10.0)
         
-        return features
-
-# ============================================
-# Stable Model Architecture
-# ============================================
-
-class StableTransformerModel(nn.Module):
-    """Transformer model with stability improvements"""
+        return features.astype(np.float32)
     
-    def __init__(self, input_dim: int, config: TrainingConfig):
+    def _find_nearest_key(self, x: float, y: float) -> int:
+        min_dist = float('inf')
+        nearest_idx = 0
+        for idx, (key_x, key_y) in enumerate(self.grid.positions.values()):
+            dist = (x - key_x)**2 + (y - key_y)**2
+            if dist < min_dist:
+                min_dist = dist
+                nearest_idx = idx
+        return nearest_idx
+
+# --- Data Augmentation ---
+class DataAugmentation:
+    def __init__(self, config: SOTAConfig):
+        self.config = config
+    
+    def temporal_warp(self, points: np.ndarray) -> np.ndarray:
+        """Apply temporal warping to simulate speed variations."""
+        if not self.config.aug_temporal_warp or len(points) < 4:
+            return points
+        
+        # Check if points is 1D or 2D
+        if len(points.shape) == 1:
+            return points
+            
+        # Random speed changes
+        speed_factor = np.random.uniform(0.8, 1.2, size=len(points))
+        speed_factor = np.cumsum(speed_factor) / np.sum(speed_factor) * len(points)
+        
+        # Interpolate to maintain sequence length
+        old_indices = np.arange(len(points))
+        new_points = np.zeros_like(points)
+        for dim in range(points.shape[1]):
+            new_points[:, dim] = np.interp(old_indices, speed_factor, points[:, dim])
+        
+        return new_points
+    
+    def spatial_noise(self, points: np.ndarray) -> np.ndarray:
+        """Add spatial noise to simulate finger position variations."""
+        if self.config.aug_spatial_noise > 0:
+            noise = np.random.normal(0, self.config.aug_spatial_noise, size=(len(points), 2))
+            points[:, :2] += noise
+        return points
+    
+    def dropout_points(self, points: np.ndarray) -> np.ndarray:
+        """Randomly drop some points to simulate sampling variations."""
+        if self.config.aug_dropout_prob > 0 and len(points) > 10:
+            keep_prob = 1 - self.config.aug_dropout_prob
+            mask = np.random.random(len(points)) < keep_prob
+            # Always keep first and last points
+            mask[0] = mask[-1] = True
+            return points[mask]
+        return points
+    
+    def augment(self, points: List[Tuple]) -> List[Tuple]:
+        """Apply all augmentations."""
+        if not hasattr(self, 'training') or not self.training:
+            return points
+        
+        points_array = np.array(points)
+        
+        # Check if array is valid (2D with 3 columns)
+        if len(points_array.shape) != 2 or points_array.shape[1] != 3:
+            return points
+        
+        # Apply augmentations with probability
+        if np.random.random() < 0.5:
+            points_array = self.temporal_warp(points_array)
+        if np.random.random() < 0.5:
+            points_array = self.spatial_noise(points_array)
+        if np.random.random() < 0.3:
+            points_array = self.dropout_points(points_array)
+        
+        return [tuple(p) for p in points_array]
+
+# --- Advanced Model Architectures ---
+
+class ConformerBlock(nn.Module):
+    """Conformer block combining convolution and self-attention."""
+    
+    def __init__(self, d_model, nhead, dim_feedforward, conv_kernel_size, dropout=0.1):
+        super().__init__()
+        
+        # First feed-forward module (macaron style)
+        self.ff1 = nn.Sequential(
+            nn.LayerNorm(d_model),
+            nn.Linear(d_model, dim_feedforward),
+            nn.SiLU(),  # Swish activation
+            nn.Dropout(dropout),
+            nn.Linear(dim_feedforward, d_model),
+            nn.Dropout(dropout)
+        )
+        
+        # Multi-head self-attention
+        self.self_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout, batch_first=True)
+        self.attn_norm = nn.LayerNorm(d_model)
+        self.attn_dropout = nn.Dropout(dropout)
+        
+        # Convolution module
+        self.conv_module = nn.Sequential(
+            nn.LayerNorm(d_model),
+            nn.Conv1d(d_model, 2 * d_model, kernel_size=1),
+            nn.GLU(dim=1),
+            nn.Conv1d(d_model, d_model, kernel_size=conv_kernel_size, padding=conv_kernel_size//2, groups=d_model),
+            nn.BatchNorm1d(d_model),
+            nn.SiLU(),
+            nn.Conv1d(d_model, d_model, kernel_size=1),
+            nn.Dropout(dropout)
+        )
+        
+        # Second feed-forward module
+        self.ff2 = nn.Sequential(
+            nn.LayerNorm(d_model),
+            nn.Linear(d_model, dim_feedforward),
+            nn.SiLU(),
+            nn.Dropout(dropout),
+            nn.Linear(dim_feedforward, d_model),
+            nn.Dropout(dropout)
+        )
+        
+        self.layer_norm = nn.LayerNorm(d_model)
+        
+    def forward(self, x, mask=None):
+        # First feed-forward
+        x = x + 0.5 * self.ff1(x)
+        
+        # Self-attention
+        attn_out = self.attn_norm(x)
+        attn_out, _ = self.self_attn(attn_out, attn_out, attn_out, key_padding_mask=mask)
+        x = x + self.attn_dropout(attn_out)
+        
+        # Convolution module
+        conv_out = x.transpose(1, 2)  # (B, T, C) -> (B, C, T)
+        conv_out = self.conv_module(conv_out)
+        conv_out = conv_out.transpose(1, 2)  # (B, C, T) -> (B, T, C)
+        x = x + conv_out
+        
+        # Second feed-forward
+        x = x + 0.5 * self.ff2(x)
+        
+        return self.layer_norm(x)
+
+class SOTAGestureModel(nn.Module):
+    """State-of-the-art model with Conformer architecture."""
+    
+    def __init__(self, config: SOTAConfig):
         super().__init__()
         self.config = config
-        self.d_model = config.d_model
         
-        # Input projection with stable initialization
-        self.input_proj = nn.Sequential(
-            nn.Linear(input_dim, self.d_model),
-            nn.LayerNorm(self.d_model),
+        # Calculate input dimension
+        featurizer = AdvancedSwipeFeaturizer()
+        self.input_dim = 15 + featurizer.num_keys  # Advanced features
+        
+        # Input projection with layer norm
+        self.input_projection = nn.Sequential(
+            nn.Linear(self.input_dim, config.d_model),
+            nn.LayerNorm(config.d_model),
             nn.Dropout(config.dropout)
         )
         
-        # Initialize input projection carefully
-        nn.init.xavier_uniform_(self.input_proj[0].weight, gain=0.5)
-        nn.init.zeros_(self.input_proj[0].bias)
+        # Positional encoding with learnable parameters
+        self.pos_embedding = nn.Parameter(torch.randn(1, 1000, config.d_model) * 0.02)
         
-        # Learnable positional embeddings with controlled initialization
-        self.pos_embedding = nn.Parameter(
-            torch.randn(1, config.max_seq_length, self.d_model) * config.pos_emb_init_std
-        )
+        # Conformer or Transformer blocks
+        if config.model_type == "conformer":
+            self.blocks = nn.ModuleList([
+                ConformerBlock(
+                    config.d_model, config.nhead, config.dim_feedforward,
+                    config.conv_kernel_size, config.dropout
+                )
+                for _ in range(config.num_layers)
+            ])
+        else:
+            encoder_layer = nn.TransformerEncoderLayer(
+                d_model=config.d_model,
+                nhead=config.nhead,
+                dim_feedforward=config.dim_feedforward,
+                dropout=config.dropout,
+                activation='gelu',
+                batch_first=True
+            )
+            self.blocks = nn.TransformerEncoder(encoder_layer, config.num_layers)
         
-        # Register a hook to monitor positional embeddings
-        self.register_buffer('pos_emb_stats', torch.zeros(2))  # [norm, max_abs]
+        # CTC head with layer norm
+        self.output_norm = nn.LayerNorm(config.d_model)
+        self.ctc_head = nn.Linear(config.d_model, 28)  # 26 letters + apostrophe + blank
         
-        # Transformer encoder with pre-norm for stability
-        encoder_layer = nn.TransformerEncoderLayer(
-            d_model=self.d_model,
-            nhead=config.nhead,
-            dim_feedforward=config.dim_feedforward,
-            dropout=config.dropout,
-            activation='gelu',
-            norm_first=True  # Pre-norm architecture for better stability
-        )
-        
-        self.transformer = nn.TransformerEncoder(
-            encoder_layer,
-            num_layers=config.num_encoder_layers
-        )
-        
-        # Output projection with careful initialization
-        self.output_proj = nn.Sequential(
-            nn.LayerNorm(self.d_model),
-            nn.Linear(self.d_model, config.vocab_size)
-        )
-        
-        # Small initialization for output layer
-        nn.init.xavier_uniform_(self.output_proj[1].weight, gain=0.1)
-        nn.init.zeros_(self.output_proj[1].bias)
+        # Initialize weights
+        self._init_weights()
     
-    def forward(self, x: torch.Tensor, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
-        """Forward pass with stability checks"""
+    def _init_weights(self):
+        for p in self.parameters():
+            if p.dim() > 1:
+                nn.init.xavier_uniform_(p)
+    
+    def forward(self, x, mask=None):
         batch_size, seq_len, _ = x.shape
         
-        # Project input
-        x = self.input_proj(x)
+        # Input projection
+        x = self.input_projection(x)
         
-        # Add positional embeddings (safely)
-        if seq_len <= self.config.max_seq_length:
-            x = x + self.pos_embedding[:, :seq_len, :]
+        # Add positional embeddings
+        x = x + self.pos_embedding[:, :seq_len, :]
+        
+        # Pass through blocks
+        if self.config.model_type == "conformer":
+            for block in self.blocks:
+                x = block(x, mask)
         else:
-            # Handle sequences longer than expected
-            pos_emb = self.pos_embedding.repeat(1, (seq_len // self.config.max_seq_length) + 1, 1)
-            x = x + pos_emb[:, :seq_len, :]
+            x = self.blocks(x, src_key_padding_mask=mask)
         
-        # Monitor positional embedding stats
-        with torch.no_grad():
-            self.pos_emb_stats[0] = self.pos_embedding.norm().item()
-            self.pos_emb_stats[1] = self.pos_embedding.abs().max().item()
+        # Output projection
+        x = self.output_norm(x)
+        logits = self.ctc_head(x)
         
-        # Transformer expects (seq, batch, dim)
-        x = x.transpose(0, 1)
-        
-        # Create attention mask if needed
-        if mask is not None:
-            mask = mask.bool()
-        
-        # Apply transformer
-        x = self.transformer(x, src_key_padding_mask=mask)
-        
-        # Project to vocabulary
-        x = self.output_proj(x)
-        
-        # CRITICAL: Clamp logits to prevent overflow in log_softmax
-        x = torch.clamp(x, min=self.config.logit_clamp_min, max=self.config.logit_clamp_max)
-        
-        # Return in CTC format: (seq, batch, vocab)
-        return x
+        # Return in (T, B, C) format for CTC loss
+        return logits.transpose(0, 1)
 
-# ============================================
-# Dataset
-# ============================================
-
-class GestureDataset(Dataset):
-    """Dataset with comprehensive validation"""
-    
-    def __init__(self, data_path: str, featurizer: StableFeaturizer, max_seq_len: int = 100):
+# --- Advanced Dataset ---
+class SOTASwipeDataset(Dataset):
+    def __init__(self, jsonl_path, featurizer, tokenizer, config, augmentation=None, is_training=True):
         self.featurizer = featurizer
-        self.max_seq_len = max_seq_len
-        self.samples = []
+        self.tokenizer = tokenizer
+        self.config = config
+        self.augmentation = augmentation
+        self.is_training = is_training
+        self.data = []
         
-        # Load and validate data
-        with open(data_path, 'r') as f:
-            for line_num, line in enumerate(f):
-                try:
-                    sample = json.loads(line.strip())
-                    
-                    # Validate sample
-                    if 'word' not in sample or 'points' not in sample:
-                        continue
-                    
-                    if len(sample['word']) == 0 or len(sample['points']) < 2:
-                        continue
-                    
-                    # Check for valid points
-                    valid = True
-                    for p in sample['points']:
-                        if not all(k in p for k in ['x', 'y', 't']):
-                            valid = False
-                            break
-                        if not all(isinstance(p[k], (int, float)) for k in ['x', 'y', 't']):
-                            valid = False
-                            break
-                    
-                    if valid:
-                        self.samples.append(sample)
-                
-                except json.JSONDecodeError:
-                    logger.warning(f"Invalid JSON at line {line_num}")
-                    continue
+        # Load and filter data
+        with open(jsonl_path, 'r') as f:
+            for line in f:
+                sample = json.loads(line)
+                # Filter by sequence length
+                if 10 <= len(sample['points']) <= config.max_seq_length:
+                    # Convert to lowercase
+                    sample['word'] = sample['word'].lower()
+                    if all(c in tokenizer.vocab for c in sample['word']):
+                        self.data.append(sample)
         
-        logger.info(f"Loaded {len(self.samples)} valid samples from {data_path}")
+        # Curriculum learning: sort by difficulty
+        if config.use_curriculum and is_training:
+            self.data.sort(key=lambda x: len(x['word']) + len(x['points']) / 50)
     
     def __len__(self):
-        return len(self.samples)
+        return len(self.data)
     
     def __getitem__(self, idx):
-        sample = self.samples[idx]
+        sample = self.data[idx]
+        points = sample['points']
+        word = sample['word']
+        
+        # Data augmentation
+        if self.augmentation and self.is_training:
+            self.augmentation.training = True
+            points = self.augmentation.augment(points)
         
         # Extract features
-        features = self.featurizer.extract_features(sample['points'])
+        features = self.featurizer.extract_features(points)
         
-        if features is None:
-            # Return a dummy sample if feature extraction fails
-            features = np.zeros((2, 15 + self.featurizer.num_keys), dtype=np.float32)
-        
-        # Encode target word
-        word = sample['word'].lower()
-        char_to_idx = {c: i+1 for i, c in enumerate('abcdefghijklmnopqrstuvwxyz ')}
-        targets = [char_to_idx.get(c, 0) for c in word]
+        # Tokenize
+        tokens = self.tokenizer.encode(word)
         
         return {
-            'features': features,
-            'targets': targets,
+            'features': torch.FloatTensor(features),
+            'tokens': torch.LongTensor(tokens),
             'word': word
         }
 
-def collate_fn(batch, max_seq_len=100):
-    """Custom collate function with padding and validation"""
-    features_list = []
-    targets_list = []
-    input_lengths = []
-    target_lengths = []
-    masks = []
+def collate_fn_sota(batch):
+    """Custom collate with proper padding."""
+    features = [item['features'] for item in batch]
+    tokens = [item['tokens'] for item in batch]
+    words = [item['word'] for item in batch]
     
-    for item in batch:
-        features = item['features']
-        targets = item['targets']
-        
-        # Skip invalid samples
-        if len(features) == 0 or len(targets) == 0:
-            continue
-        
-        # Truncate or pad features
-        seq_len = min(len(features), max_seq_len)
-        
-        if seq_len < max_seq_len:
-            # Pad
-            padded = np.zeros((max_seq_len, features.shape[1]), dtype=np.float32)
-            padded[:seq_len] = features[:seq_len]
-            features = padded
-            mask = torch.cat([torch.zeros(seq_len), torch.ones(max_seq_len - seq_len)])
-        else:
-            features = features[:max_seq_len]
-            mask = torch.zeros(max_seq_len)
-        
-        features_list.append(torch.FloatTensor(features))
-        targets_list.append(torch.LongTensor(targets))
-        input_lengths.append(seq_len)
-        target_lengths.append(len(targets))
-        masks.append(mask)
+    # Pad features
+    max_len = max(f.size(0) for f in features)
+    padded_features = torch.zeros(len(batch), max_len, features[0].size(1))
+    feature_lengths = []
     
-    if len(features_list) == 0:
-        # Return a dummy batch if all samples are invalid
-        return None
+    for i, f in enumerate(features):
+        padded_features[i, :f.size(0)] = f
+        feature_lengths.append(f.size(0))
+    
+    # Pad tokens
+    max_token_len = max(len(t) for t in tokens)
+    padded_tokens = torch.zeros(len(batch), max_token_len, dtype=torch.long)
+    token_lengths = []
+    
+    for i, t in enumerate(tokens):
+        padded_tokens[i, :len(t)] = t
+        token_lengths.append(len(t))
+    
+    # Create attention mask
+    mask = torch.zeros(len(batch), max_len, dtype=torch.bool)
+    for i, length in enumerate(feature_lengths):
+        mask[i, length:] = True
     
     return {
-        'features': torch.stack(features_list),
-        'targets': torch.cat(targets_list),
-        'input_lengths': torch.LongTensor(input_lengths),
-        'target_lengths': torch.LongTensor(target_lengths),
-        'mask': torch.stack(masks)
+        'features': padded_features,
+        'feature_lengths': torch.LongTensor(feature_lengths),
+        'tokens': padded_tokens,
+        'token_lengths': torch.LongTensor(token_lengths),
+        'mask': mask,
+        'words': words
     }
 
-# ============================================
-# Training Functions
-# ============================================
-
-def train_epoch(model, dataloader, optimizer, scaler, device, epoch, config):
-    """Training loop with comprehensive monitoring"""
-    model.train()
-    total_loss = 0
-    num_batches = 0
-    num_skipped = 0
+# --- Training with Advanced Techniques ---
+class SOTATrainer:
+    def __init__(self, config: SOTAConfig):
+        self.config = config
+        self.device = torch.device(config.device)
+        
+        # Initialize components
+        self.featurizer = AdvancedSwipeFeaturizer()
+        self.tokenizer = CharTokenizer()
+        self.augmentation = DataAugmentation(config)
+        
+        # Create model
+        self.model = SOTAGestureModel(config).to(self.device)
+        print(f"Model parameters: {sum(p.numel() for p in self.model.parameters()):,}")
+        
+        # Optimizer with weight decay
+        self.optimizer = torch.optim.AdamW(
+            self.model.parameters(),
+            lr=config.learning_rate,
+            weight_decay=config.weight_decay,
+            betas=(0.9, 0.98)
+        )
+        
+        # Learning rate scheduler with warmup
+        self.scheduler = self.get_scheduler()
+        
+        # Mixed precision
+        self.scaler = GradScaler(enabled=config.mixed_precision)
+        
+        # Loss with label smoothing
+        self.criterion = nn.CTCLoss(blank=0, zero_infinity=True)
+        
+        # Logging
+        self.writer = SummaryWriter(config.log_dir)
+        self.global_step = 0
+        self.best_loss = float('inf')
     
-    pbar = tqdm(dataloader, desc=f"Epoch {epoch}")
+    def get_scheduler(self):
+        """Cosine scheduler with warmup."""
+        def lr_lambda(step):
+            if step < self.config.warmup_steps:
+                return step / self.config.warmup_steps
+            progress = (step - self.config.warmup_steps) / (
+                self.config.num_epochs * 2500 - self.config.warmup_steps
+            )
+            return 0.5 * (1 + math.cos(math.pi * progress))
+        
+        return torch.optim.lr_scheduler.LambdaLR(self.optimizer, lr_lambda)
     
-    for batch_idx, batch in enumerate(pbar):
-        if batch is None:
-            continue
+    def train_epoch(self, train_loader, epoch):
+        self.model.train()
+        total_loss = 0
+        progress_bar = tqdm(train_loader, desc=f"Epoch {epoch}")
         
-        # Move to device
-        features = batch['features'].to(device)
-        targets = batch['targets'].to(device)
-        input_lengths = batch['input_lengths'].to(device)
-        target_lengths = batch['target_lengths'].to(device)
-        mask = batch['mask'].to(device)
-        
-        # Monitoring (every N steps)
-        global_step = epoch * len(dataloader) + batch_idx
-        if global_step % config.monitor_frequency == 0:
-            with torch.no_grad():
-                pe_norm = model.pos_emb_stats[0].item()
-                pe_max = model.pos_emb_stats[1].item()
-                grad_scale = scaler.get_scale() if config.use_amp else 1.0
-                
-                logger.info(f"Step {global_step} | PosEmb: norm={pe_norm:.2f}, max={pe_max:.2f} | "
-                           f"GradScale: {grad_scale:.1f}")
-                
-                # Check for concerning values
-                if pe_max > 100:
-                    logger.warning(f"Large positional embedding detected: {pe_max}")
-                
-                # Cap GradScaler if it gets too high
-                if config.use_amp and grad_scale > config.max_grad_scaler_scale:
-                    logger.warning(f"GradScaler too high ({grad_scale}), resetting")
-                    # Reset the scaler with a lower scale
-                    scaler._scale = torch.tensor(config.max_grad_scaler_scale).to(device)
-        
-        optimizer.zero_grad()
-        
-        try:
-            # Forward pass
-            if config.use_amp:
-                with autocast():
-                    log_probs = model(features, mask)
-                    log_probs = F.log_softmax(log_probs, dim=-1)
-                    
-                    loss = F.ctc_loss(
-                        log_probs,
-                        targets,
-                        input_lengths,
-                        target_lengths,
-                        blank=0,
-                        reduction='mean',
-                        zero_infinity=True
-                    )
-            else:
-                log_probs = model(features, mask)
-                log_probs = F.log_softmax(log_probs, dim=-1)
-                
-                loss = F.ctc_loss(
-                    log_probs,
-                    targets,
-                    input_lengths,
-                    target_lengths,
-                    blank=0,
-                    reduction='mean',
-                    zero_infinity=True
-                )
+        for batch_idx, batch in enumerate(progress_bar):
+            # Move to device
+            features = batch['features'].to(self.device)
+            tokens = batch['tokens'].to(self.device)
+            feature_lengths = batch['feature_lengths'].to(self.device)
+            token_lengths = batch['token_lengths'].to(self.device)
+            mask = batch['mask'].to(self.device)
             
-            # Check for NaN/Inf
-            if torch.isnan(loss) or torch.isinf(loss):
-                logger.warning(f"Invalid loss at step {global_step}: {loss.item()}")
-                num_skipped += 1
+            # MixUp augmentation
+            if self.config.use_mixup and np.random.random() < 0.5:
+                lambda_mix = np.random.beta(self.config.mixup_alpha, self.config.mixup_alpha)
+                batch_size = features.size(0)
+                index = torch.randperm(batch_size).to(self.device)
                 
-                # Save problematic batch for debugging
-                if num_skipped == 1:
-                    torch.save({
-                        'batch': batch,
-                        'model_state': model.state_dict(),
-                        'step': global_step
-                    }, 'debug_nan_batch.pt')
+                features = lambda_mix * features + (1 - lambda_mix) * features[index]
+                feature_lengths = torch.maximum(feature_lengths, feature_lengths[index])
+            
+            # Forward pass with mixed precision
+            with autocast(enabled=self.config.mixed_precision):
+                log_probs = self.model(features, mask)
                 
+                # Calculate loss
+                log_probs = F.log_softmax(log_probs, dim=2)
+                loss = self.criterion(log_probs, tokens, feature_lengths, token_lengths)
+            
+            # Check for NaN
+            if torch.isnan(loss):
+                print(f"NaN loss detected at step {self.global_step}")
                 continue
             
             # Backward pass
-            if config.use_amp:
-                scaler.scale(loss).backward()
-                
-                # Gradient clipping
-                scaler.unscale_(optimizer)
-                grad_norm = torch.nn.utils.clip_grad_norm_(
-                    model.parameters(), 
-                    max_norm=config.gradient_clip
-                )
-                
-                # Check for gradient explosion
-                if grad_norm > config.gradient_clip * 10:
-                    logger.warning(f"Large gradient norm: {grad_norm:.2f}")
-                
-                scaler.step(optimizer)
-                scaler.update()
-            else:
-                loss.backward()
-                torch.nn.utils.clip_grad_norm_(
-                    model.parameters(), 
-                    max_norm=config.gradient_clip
-                )
-                optimizer.step()
+            self.scaler.scale(loss).backward()
             
-            total_loss += loss.item()
-            num_batches += 1
-            
-            # Update progress bar
-            pbar.set_postfix({
-                'loss': total_loss / max(1, num_batches),
-                'skipped': num_skipped
-            })
-            
-        except Exception as e:
-            logger.error(f"Error in batch {batch_idx}: {str(e)}")
-            num_skipped += 1
-            continue
-    
-    avg_loss = total_loss / max(1, num_batches)
-    logger.info(f"Epoch {epoch} completed. Avg loss: {avg_loss:.4f}, Skipped: {num_skipped}")
-    
-    return avg_loss
-
-def validate(model, dataloader, device, config):
-    """Validation loop"""
-    model.eval()
-    total_loss = 0
-    num_batches = 0
-    
-    with torch.no_grad():
-        for batch in tqdm(dataloader, desc="Validation"):
-            if batch is None:
-                continue
-            
-            features = batch['features'].to(device)
-            targets = batch['targets'].to(device)
-            input_lengths = batch['input_lengths'].to(device)
-            target_lengths = batch['target_lengths'].to(device)
-            mask = batch['mask'].to(device)
-            
-            log_probs = model(features, mask)
-            log_probs = F.log_softmax(log_probs, dim=-1)
-            
-            loss = F.ctc_loss(
-                log_probs,
-                targets,
-                input_lengths,
-                target_lengths,
-                blank=0,
-                reduction='mean',
-                zero_infinity=True
+            # Gradient clipping
+            self.scaler.unscale_(self.optimizer)
+            grad_norm = torch.nn.utils.clip_grad_norm_(
+                self.model.parameters(), self.config.gradient_clip
             )
             
-            if not torch.isnan(loss) and not torch.isinf(loss):
-                total_loss += loss.item()
-                num_batches += 1
+            # Optimizer step
+            self.scaler.step(self.optimizer)
+            self.scaler.update()
+            self.optimizer.zero_grad()
+            
+            # Update scheduler
+            self.scheduler.step()
+            
+            # Logging
+            total_loss += loss.item()
+            self.global_step += 1
+            
+            if self.global_step % 10 == 0:
+                current_lr = self.scheduler.get_last_lr()[0]
+                progress_bar.set_postfix({
+                    'loss': f'{loss.item():.4f}',
+                    'lr': f'{current_lr:.2e}',
+                    'grad': f'{grad_norm:.2f}'
+                })
+                
+                self.writer.add_scalar('Loss/train', loss.item(), self.global_step)
+                self.writer.add_scalar('LR', current_lr, self.global_step)
+                self.writer.add_scalar('GradNorm', grad_norm, self.global_step)
+        
+        return total_loss / len(train_loader)
     
-    return total_loss / max(1, num_batches)
-
-# ============================================
-# Main Training Script
-# ============================================
-
-def main():
-    """Main training function with all stability improvements"""
+    def validate(self, val_loader):
+        self.model.eval()
+        total_loss = 0
+        
+        with torch.no_grad():
+            for batch in tqdm(val_loader, desc="Validation"):
+                features = batch['features'].to(self.device)
+                tokens = batch['tokens'].to(self.device)
+                feature_lengths = batch['feature_lengths'].to(self.device)
+                token_lengths = batch['token_lengths'].to(self.device)
+                mask = batch['mask'].to(self.device)
+                
+                with autocast(enabled=self.config.mixed_precision):
+                    log_probs = self.model(features, mask)
+                    log_probs = F.log_softmax(log_probs, dim=2)
+                    loss = self.criterion(log_probs, tokens, feature_lengths, token_lengths)
+                
+                if not torch.isnan(loss):
+                    total_loss += loss.item()
+        
+        return total_loss / len(val_loader)
     
-    logger.info("="*50)
-    logger.info("Starting Stable Training")
-    logger.info(f"Config: {CONFIG}")
-    logger.info("="*50)
-    
-    # Set seeds for reproducibility
-    torch.manual_seed(42)
-    np.random.seed(42)
-    
-    # Enable anomaly detection for debugging
-    torch.autograd.set_detect_anomaly(True)
-    
-    # Initialize components
-    featurizer = StableFeaturizer()
-    input_dim = 15 + featurizer.num_keys
-    
-    # Create datasets
-    train_dataset = GestureDataset(CONFIG.data_path, featurizer, CONFIG.max_seq_length)
-    val_dataset = GestureDataset(CONFIG.val_path, featurizer, CONFIG.max_seq_length)
-    
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=CONFIG.batch_size,
-        shuffle=True,
-        collate_fn=lambda x: collate_fn(x, CONFIG.max_seq_length),
-        num_workers=4,
-        pin_memory=True
-    )
-    
-    val_loader = DataLoader(
-        val_dataset,
-        batch_size=CONFIG.batch_size,
-        shuffle=False,
-        collate_fn=lambda x: collate_fn(x, CONFIG.max_seq_length),
-        num_workers=4,
-        pin_memory=True
-    )
-    
-    # Initialize model
-    model = StableTransformerModel(input_dim, CONFIG)
-    model = model.to(CONFIG.device)
-    
-    logger.info(f"Model parameters: {sum(p.numel() for p in model.parameters()) / 1e6:.1f}M")
-    
-    # Initialize optimizer with stronger weight decay
-    optimizer = AdamW(
-        model.parameters(),
-        lr=CONFIG.learning_rate,
-        weight_decay=CONFIG.weight_decay,
-        eps=1e-8
-    )
-    
-    # Learning rate scheduler (step once per EPOCH, not batch)
-    scheduler = CosineAnnealingLR(
-        optimizer,
-        T_max=CONFIG.num_epochs,
-        eta_min=1e-6
-    )
-    
-    # Initialize GradScaler for mixed precision
-    if CONFIG.use_amp:
-        scaler = torch.amp.GradScaler('cuda', enabled=True)
-    else:
-        scaler = torch.amp.GradScaler('cuda', enabled=False)
-    
-    # Create checkpoint directory
-    Path(CONFIG.checkpoint_dir).mkdir(exist_ok=True)
-    
-    # Training loop
-    best_val_loss = float('inf')
-    
-    for epoch in range(CONFIG.num_epochs):
-        # Train
-        train_loss = train_epoch(
-            model, train_loader, optimizer, scaler, 
-            CONFIG.device, epoch, CONFIG
+    def train(self):
+        # Create datasets
+        train_dataset = SOTASwipeDataset(
+            self.config.train_data_path, self.featurizer, self.tokenizer,
+            self.config, self.augmentation, is_training=True
+        )
+        val_dataset = SOTASwipeDataset(
+            self.config.val_data_path, self.featurizer, self.tokenizer,
+            self.config, None, is_training=False
         )
         
-        # Validate
-        val_loss = validate(model, val_loader, CONFIG.device, CONFIG)
+        print(f"Train samples: {len(train_dataset)}")
+        print(f"Val samples: {len(val_dataset)}")
         
-        # Step scheduler (once per epoch!)
-        scheduler.step()
-        current_lr = scheduler.get_last_lr()[0]
+        # Create dataloaders
+        train_loader = DataLoader(
+            train_dataset, batch_size=self.config.batch_size,
+            shuffle=True, num_workers=self.config.num_workers,
+            collate_fn=collate_fn_sota, pin_memory=True
+        )
+        val_loader = DataLoader(
+            val_dataset, batch_size=self.config.batch_size * 2,
+            shuffle=False, num_workers=self.config.num_workers,
+            collate_fn=collate_fn_sota, pin_memory=True
+        )
         
-        logger.info(f"Epoch {epoch}: Train Loss: {train_loss:.4f}, "
-                   f"Val Loss: {val_loss:.4f}, LR: {current_lr:.6f}")
-        
-        # Save checkpoint
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
-            checkpoint = {
-                'epoch': epoch,
-                'model_state_dict': model.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(),
-                'scheduler_state_dict': scheduler.state_dict(),
-                'scaler_state_dict': scaler.state_dict(),
-                'train_loss': train_loss,
-                'val_loss': val_loss,
-                'config': CONFIG.__dict__
-            }
+        # Training loop
+        for epoch in range(1, self.config.num_epochs + 1):
+            print(f"\nEpoch {epoch}/{self.config.num_epochs}")
             
-            torch.save(
-                checkpoint,
-                Path(CONFIG.checkpoint_dir) / 'best_model.pth'
-            )
-            logger.info(f"Saved best model with val loss: {val_loss:.4f}")
-        
-        # Periodic checkpoint
-        if (epoch + 1) % 5 == 0:
-            torch.save(
-                checkpoint,
-                Path(CONFIG.checkpoint_dir) / f'checkpoint_epoch_{epoch+1}.pth'
-            )
+            # Train
+            train_loss = self.train_epoch(train_loader, epoch)
+            
+            # Validate
+            val_loss = self.validate(val_loader)
+            
+            print(f"Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
+            self.writer.add_scalar('Loss/val', val_loss, epoch)
+            
+            # Save best model
+            if val_loss < self.best_loss:
+                self.best_loss = val_loss
+                self.save_checkpoint(epoch, is_best=True)
+            
+            # Regular checkpoint
+            if epoch % 5 == 0:
+                self.save_checkpoint(epoch)
     
-    logger.info("Training completed successfully!")
+    def save_checkpoint(self, epoch, is_best=False):
+        checkpoint = {
+            'epoch': epoch,
+            'model_state_dict': self.model.state_dict(),
+            'optimizer_state_dict': self.optimizer.state_dict(),
+            'scheduler_state_dict': self.scheduler.state_dict(),
+            'best_loss': self.best_loss,
+            'config': self.config
+        }
+        
+        path = Path(self.config.checkpoint_dir)
+        if is_best:
+            torch.save(checkpoint, path / 'best_model.pth')
+            print(f"Saved best model with loss {self.best_loss:.4f}")
+        else:
+            torch.save(checkpoint, path / f'checkpoint_epoch_{epoch}.pth')
+
+class CharTokenizer:
+    def __init__(self):
+        self.vocab = {char: idx + 1 for idx, char in enumerate("abcdefghijklmnopqrstuvwxyz'")}
+        self.vocab['<blank>'] = 0
+    
+    def encode(self, text):
+        return [self.vocab.get(char, 0) for char in text.lower()]
 
 if __name__ == "__main__":
-    main()
+    print("Starting State-of-the-Art Training Pipeline")
+    print("=" * 50)
+    
+    trainer = SOTATrainer(CONFIG)
+    trainer.train()
