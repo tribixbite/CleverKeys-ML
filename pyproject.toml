@@ -1,0 +1,17 @@
+[project]
+name = "cleverkeys"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "huggingface-hub>=0.34.4",
+    "kenlm>=0.3.0",
+    "numpy>=1.26.4",
+    "pyctcdecode>=0.5.0",
+    "tensorboard>=2.20.0",
+    "torch>=2.8.0",
+    "torchaudio>=2.8.0",
+    "torchvision>=0.23.0",
+    "tqdm>=4.67.1",
+]
