@@ -19,7 +19,7 @@ from torch.nn.utils.rnn import pad_sequence
 from torch.utils.tensorboard import SummaryWriter
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import OneCycleLR
-from torch.cuda.amp import autocast, GradScaler
+from torch.amp import autocast, GradScaler
 from huggingface_hub import hf_hub_download
 from pyctcdecode import build_ctcdecoder
 from tqdm import tqdm
@@ -68,8 +68,8 @@ CONFIG = {
 
     # Decoding (for WER validation)
     "beam_width": 100,
-    "kenlm_repo_id": "BramVanroy/kenlm_wikipedia_en", # CORRECTED: A valid, public KenLM model
-    "kenlm_filename": "wiki_en_token.arpa.bin",
+    # "kenlm_repo_id": "BramVanroy/kenlm_wikipedia_en", # CORRECTED: A valid, public KenLM model
+    # "kenlm_filename": "wiki_en_token.arpa.bin",
     "kenlm_alpha": 0.5,
     "kenlm_beta": 1.5,
     
@@ -79,12 +79,33 @@ CONFIG = {
     "checkpoint_dir": "checkpoints_final",
     "log_dir": "logs_final",
 }
-
+def _make_decoder_inputs(logits: torch.Tensor, lengths: torch.Tensor, vocab_size: int) -> list:
+    """
+    logits: (B, T, C) float tensor
+    lengths: (B,) lengths on CPU or GPU
+    returns: list of numpy arrays [ (Ti, C) ] for each item i
+    """
+    assert logits.dim() == 3, f"expected (B,T,C), got {tuple(logits.shape)}"
+    B, T, C = logits.shape
+    if C != vocab_size:
+        raise ValueError(f"logits last dim {C} != vocab_size {vocab_size}")
+    # convert to log-probs in a stable dtype, on CPU
+    lp = torch.log_softmax(logits.float(), dim=-1).detach().cpu()  # (B,T,C), float32
+    out = []
+    for i in range(B):
+        t = int(lengths[i].item())
+        t = max(1, min(t, T))                    # clamp to [1, T]
+        arr = lp[i, :t, :].contiguous().numpy()  # (t, C) float32
+        if not np.isfinite(arr).all():
+            # sanitize any accidental NaN/-inf:
+            arr = np.nan_to_num(arr, neginf=-1e9, posinf=0.0)
+        out.append(arr)
+    return out
 # --- 1. Tokenizer ---
 class CharTokenizer:
     def __init__(self, chars: str):
         self.char_to_int = {char: i + 1 for i, char in enumerate(chars)}; self.int_to_char = {i: c for c, i in self.char_to_int.items()}
-        self.char_to_int['<blank>'] = 0; self.int_to_char = '<blank>'; self.vocab_size = len(self.char_to_int)
+        self.char_to_int['<blank>'] = 0; self.int_to_char = {i: c for c, i in self.char_to_int.items()}; self.int_to_char[0] = ''; self.vocab_size = len(self.char_to_int)
     def encode(self, w: str) -> List[int]: return [self.char_to_int[c] for c in w]
     def decode(self, idx: List[int]) -> str: return "".join([self.int_to_char.get(i, '') for i in idx])
 
@@ -99,7 +120,8 @@ class SwipeAugmenter:
         diffs = np.diff(times, prepend=times); factors = np.random.normal(1, self.cfg["time_warp_factor"], len(diffs))
         new_times = np.cumsum(diffs * np.clip(factors, 0.5, 1.5))
         coords = np.clip(coords, -1.5, 1.5)
-        return [{'x': float(c), 'y': float(c[1]), 't': float(t)} for c, t in zip(coords, new_times)]
+        return [{'x': float(c[0]), 'y': float(c[1]), 't': float(t)} for c, t in zip(coords, new_times)]
+        # return [{'x': float(c), 'y': float(c[1]), 't': float(t)} for c, t in zip(coords, new_times)]
 
 class KeyboardGrid:
     def __init__(self, chars: str):
@@ -112,7 +134,9 @@ class SwipeFeaturizer:
     # MERGED FEATURE: Using your more robust featurizer with angle.
     def __init__(self, grid: KeyboardGrid): self.grid = grid
     def __call__(self, pts: List) -> np.ndarray:
-        if len(pts) < 2: pts.append(pts)
+        if len(pts) < 2:
+            pts = pts + [pts[-1]]
+        
         coords = np.array([[p['x'], p['y']] for p in pts], dtype=np.float32)
         times = np.array([[p['t']] for p in pts], dtype=np.float32)
         d_coords = np.diff(coords, axis=0, prepend=coords[0:1,:])
@@ -233,7 +257,7 @@ def train_model():
     optimizer = AdamW(model.parameters(), lr=CONFIG["learning_rate"], weight_decay=CONFIG["weight_decay"])
     total_steps = len(train_loader) * CONFIG["num_epochs"]
     scheduler = OneCycleLR(optimizer, max_lr=CONFIG["learning_rate"], total_steps=total_steps, pct_start=CONFIG["warmup_steps"]/total_steps)
-    scaler = GradScaler(enabled=CONFIG["mixed_precision"])
+    scaler = GradScaler('cuda', enabled=CONFIG["mixed_precision"])
     writer = SummaryWriter(CONFIG["log_dir"])
 
     logger.info("Setting up CTC decoder with KenLM for validation...")
@@ -241,15 +265,16 @@ def train_model():
     lm_path = None
     potential_models = [
         "/home/will/git/swype/cleverkeys/kenlm/lm/test.arpa",  # Test model from KenLM
-        "/home/will/git/swype/cleverkeys/.venv/lib/python3.12/site-packages/pyctcdecode/tests/sample_data/bugs_bunny_kenlm.arpa",  # Sample from pyctcdecode
+        # "/home/will/git/swype/cleverkeys/.venv/lib/python3.12/site-packages/pyctcdecode/tests/sample_data/bugs_bunny_kenlm.arpa",  # Sample from pyctcdecode
+        "./wikipedia/en.arpa.bin",
     ]
     
     for model_path in potential_models:
         if os.path.exists(model_path):
             try:
                 # Test if this is a valid bigram+ model
-                import kenlm
-                test_model = kenlm.Model(model_path)
+                # import kenlm
+                # test_model = kenlm.Model(model_path)
                 lm_path = model_path
                 logger.info(f"Using KenLM model: {lm_path}")
                 break
@@ -262,7 +287,7 @@ def train_model():
         logger.info("This maintains beam search architecture as required, just without LM scoring")
     
     # Build beam search decoder with pyctcdecode - ALWAYS use beam search, never greedy
-    vocab_list = list(tokenizer.int_to_char)  # int_to_char is already a string with the vocabulary
+    vocab_list = [tokenizer.int_to_char[i] for i in range(tokenizer.vocab_size)]
     decoder = build_ctcdecoder(
         vocab_list, 
         kenlm_model_path=lm_path,  # Use language model if available (None if not)
@@ -279,7 +304,7 @@ def train_model():
             if not batch: continue
             feats, tgts, feat_lens, tgt_lens = batch["features"].to(device), batch["targets"].to(device), batch["feature_lengths"].to(device), batch["target_lengths"].to(device)
             optimizer.zero_grad(set_to_none=True)
-            with autocast(enabled=CONFIG["mixed_precision"]):
+            with autocast('cuda', enabled=CONFIG["mixed_precision"]):
                 mask = torch.arange(feats.shape[1], device=device)[None, :] >= feat_lens[:, None]
                 logits = model(feats, mask) # Logits are (B, T, C)
                 # CRITICAL FIX: Permute to (T, B, C) and apply log_softmax for loss function
@@ -288,7 +313,7 @@ def train_model():
             if torch.isnan(loss) or torch.isinf(loss): continue
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer); torch.nn.utils.clip_grad_norm_(model.parameters(), CONFIG["grad_clip_norm"])
-            scaler.step(optimizer); scaler.update(); scheduler.step()
+            scaler.step(optimizer); scaler.update(); scheduler.step() # This is the correct order
             pbar.set_postfix({'loss': loss.item(), 'lr': scheduler.get_last_lr()})
 
         # CORRECT VALIDATION: using WER with beam search decoder
@@ -298,12 +323,23 @@ def train_model():
             for batch in pbar_val:
                 if not batch: continue
                 feats, feat_lens, words = batch["features"].to(device), batch["feature_lengths"].to(device), batch["words"]
-                with autocast(enabled=CONFIG["mixed_precision"]):
+                with autocast('cuda', enabled=CONFIG["mixed_precision"]):
                     mask = torch.arange(feats.shape[1], device=device)[None, :] >= feat_lens[:, None]
                     logits = model(feats, mask) # Logits are (B, T, C)
                 
+                # logits: (B, T, C). Convert to log-probs, slice to real lengths, make list[ (T, C) ]
+                log_probs = F.log_softmax(logits, dim=-1)  # stays (B, T, C)
+
+                # Create list of numpy arrays, one per batch item with actual sequence length
+                logits_list = [
+                    log_probs[i, :feat_lens[i].item()].detach().cpu().numpy().astype("float32")
+                    for i in range(log_probs.size(0))
+                ]
+
+                decoded = decoder.decode_batch(logits_list, beam_width=CONFIG["beam_width"])
+
                 # Decoder expects (B, T, C)
-                decoded = decoder.decode_batch(logits.cpu().float().numpy(), beam_width=CONFIG["beam_width"])
+                # decoded = decoder.decode_batch(logits.cpu().float().numpy(), beam_width=CONFIG["beam_width"])
                 for pred, true in zip(decoded, words):
                     if pred!= true: wer_total += 1
                     word_total += 1

@@ -3,12 +3,19 @@ name = "cleverkeys"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.12,<3.13"
 dependencies = [
     "huggingface-hub>=0.34.4",
     "kenlm>=0.3.0",
+    "mnn>=3.2.3",
+    "nemo-toolkit[asr]>=2.4.0",
     "numpy>=1.26.4",
+    "onnx>=1.19.0",
+    "onnxruntime>=1.22.1",
+    "onnxruntime-gpu>=1.22.0",
+    "onnxruntime-tools>=1.7.0",
     "pyctcdecode>=0.5.0",
+    "pytorch-lightning>=2.5.5",
     "tensorboard>=2.20.0",
     "torch>=2.8.0",
     "torchaudio>=2.8.0",
