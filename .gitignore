@@ -15,3 +15,11 @@ kenlm/
 *.log
 wikipedia/
 *_logs*/
+__pycache__/
+.specstory/
+.specstory/history/
+.specstory/ai_rules_backups/
+.specstory/.project.json
+.specstory/.gitignore
+.specstory/.what-is-this.md
+.specstory/.specstory/

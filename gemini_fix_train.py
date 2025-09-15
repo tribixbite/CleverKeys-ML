@@ -17,11 +17,11 @@ from typing import List, Dict
 # All hyperparameters and paths are centralized here for easy modification.
 CONFIG = {
     # Data and Vocabulary
-    "train_data_path": "path/to/your/traces_train.jsonl",
-    "val_data_path": "path/to/your/traces_val.jsonl",
-    "vocab_path": "path/to/your/153k_word_vocab.txt",
+    "train_data_path": "data/train_final_train.jsonl",
+    "val_data_path": "data/train_final_val.jsonl",
+    "vocab_path": "vocab/final_vocab.txt",
     "chars": "abcdefghijklmnopqrstuvwxyz'", # Includes apostrophe
-    "max_seq_len": 500, # FIX 8: Add max sequence length to prevent OOM
+    "max_seq_len": 200, # FIX 8: Add max sequence length to prevent OOM
 
     # Model Architecture
     "d_model": 256,
@@ -33,7 +33,7 @@ CONFIG = {
     # Training Parameters
     "batch_size": 256,
     "learning_rate": 3e-4,
-    "num_epochs": 50,
+    "num_epochs": 150,
     "grad_clip_norm": 1.0, # FIX 7: Add gradient clipping for stability
     "mixed_precision": True,
 
