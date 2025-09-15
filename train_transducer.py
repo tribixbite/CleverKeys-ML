@@ -5,7 +5,7 @@ Uses proper RNN-T joint computation for modeling output dependencies.
 Optimized for RTX 4090M with all performance enhancements.
 """
 
-import datetime
+import datetime as dt
 import os
 import json
 import torch
@@ -90,7 +90,7 @@ CONFIG = {
     }
 }
 
-runtime_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+runtime_id = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
 
 def main():
     """Main training function using NeMo's EncDecRNNTModel."""
@@ -301,12 +301,19 @@ def main():
 
         def __init__(self, cfg):
             super().__init__(cfg=cfg)
-            # Apply torch.compile if available for extra optimization
+            # Apply torch.compile if available but disable CUDA graphs to avoid conflicts
             if hasattr(torch, 'compile'):
-                logger.info("Compiling model components with torch.compile...")
-                self.encoder = torch.compile(self.encoder, mode='max-autotune')
-                self.decoder = torch.compile(self.decoder, mode='max-autotune')
-                self.joint = torch.compile(self.joint, mode='max-autotune')
+                logger.info("Compiling model components with torch.compile (CUDA graphs disabled)...")
+                # Use default mode without CUDA graphs to avoid NeMo conflicts
+                # Options: 'default' mode without cudagraphs, or 'max-autotune-no-cudagraphs'
+                compile_kwargs = {
+                    # 'mode': 'default',  # or 'max-autotune-no-cudagraphs' for more aggressive optimization
+                    'options': {'triton.cudagraphs': False, # Explicitly disable CUDA graphs
+                    'shape_padding': True}  # Explicitly enable shape padding for tensor core optimization
+                }
+                self.encoder = torch.compile(self.encoder, **compile_kwargs)
+                self.decoder = torch.compile(self.decoder, **compile_kwargs)
+                self.joint = torch.compile(self.joint, **compile_kwargs)
 
         def forward(self, input_signal=None, input_signal_length=None, processed_signal=None, processed_signal_length=None):
             """
@@ -334,14 +341,15 @@ def main():
     # Log model architecture
     logger.info(f"Model architecture:")
     logger.info(f"  Encoder: Conformer with {cfg.model.encoder.num_layers} layers, {cfg.model.encoder.subsampling_factor}x subsampling")
-    logger.info(f"  Decoder: RNN-T Prediction Network with {cfg.model.decoder.pred_rnn_layers} LSTM layer")
+    logger.info(f"  Decoder: RNN-T Prediction Network with {cfg.model.decoder.pred_rnn_layers} LSTM layer{'s' if cfg.model.decoder.pred_rnn_layers > 1 else ''}")
     logger.info(f"  Joint: RNN-T Joint Network with {cfg.model.joint.joint_hidden} hidden units")
     logger.info(f"  Total parameters: {sum(p.numel() for p in model.parameters())/1e6:.1f}M")
     logger.info(f"Optimizations:")
     logger.info(f"  • bf16 mixed precision: Enabled")
     logger.info(f"  • {cfg.model.encoder.subsampling_factor}x subsampling: 200→{200//cfg.model.encoder.subsampling_factor} timesteps")
+    logger.info(f"  • TF32 and cuDNN autotuning: Enabled")
     if hasattr(torch, 'compile'):
-        logger.info(f"  • torch.compile: Enabled (mode=max-autotune)")
+        logger.info(f"  • torch.compile: Enabled (default mode, CUDA graphs disabled)")
     else:
         logger.info(f"  • torch.compile: Not available (upgrade to PyTorch 2.0+)")
     
@@ -363,6 +371,8 @@ def main():
         default_root_dir="./rnnt_checkpoints_" + runtime_id, # use the date and time to make it unique
         enable_model_summary=False,  # Disable to reduce overhead
         enable_progress_bar=True,
+        # Early validation to catch errors quickly
+        num_sanity_val_steps=2,  # Run 2 validation batches before training starts to catch errors
         # Performance optimizations
         benchmark=True,  # Enable cuDNN benchmark
         sync_batchnorm=False,  # Not needed for single GPU
