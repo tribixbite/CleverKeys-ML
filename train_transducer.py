@@ -8,7 +8,7 @@ Optimized for RTX 4090M with all performance enhancements.
 import os
 import json
 import torch
-import pytorch_lightning as pl
+import lightning.pytorch as pl
 import numpy as np
 from torch.utils.data import Dataset, DataLoader
 from torch.nn.utils.rnn import pad_sequence
@@ -23,14 +23,31 @@ from nemo.utils import logging as nemo_logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Import feature engineering from train_nemo1.py
-from train_nemo1 import (
+# Import feature engineering utilities
+from swipe_data_utils import (
     KeyboardGrid,
     SwipeFeaturizer,
     SwipeDataset,
-    collate_fn,
-    PredictionLogger
+    collate_fn
 )
+
+
+class PredictionLogger(pl.Callback):
+    """Logs sample predictions during validation."""
+    def __init__(self, val_loader, vocab):
+        self.val_loader = val_loader
+        self.vocab = vocab
+        self.inv_vocab = {v: k for k, v in vocab.items()}
+    
+    def on_validation_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
+        if batch_idx == 0:  # Only log first batch
+            # Get predictions (simplified - just log batch info)
+            features, feature_lengths, tokens, token_lengths = batch
+            
+            # Log some statistics
+            logger.info(f"Validation batch {batch_idx}: "
+                       f"Features shape: {features.shape}, "
+                       f"Tokens shape: {tokens.shape}")
 
 # Configuration optimized for RTX 4090M
 CONFIG = {
@@ -49,7 +66,7 @@ CONFIG = {
         "gradient_accumulation": 2,  # Effective batch = 512
         "accelerator": "gpu",
         "devices": 1,
-        "precision": "bf16-mixed" if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else 32,
+        "precision": "16-mixed",  # Use fp16 instead of bf16 to avoid CUDA graph issues
     },
     "model": {
         "encoder": {
@@ -100,20 +117,26 @@ def main():
     featurizer = SwipeFeaturizer(grid)
     
     # Create datasets
+    logger.info("Creating training dataset...")
     train_dataset = SwipeDataset(
         manifest_path=cfg.data.train_manifest,
         featurizer=featurizer,
         vocab=vocab,
         max_trace_len=cfg.data.max_trace_len
     )
+    logger.info(f"Training dataset created with {len(train_dataset)} samples")
+    
+    logger.info("Creating validation dataset...")
     val_dataset = SwipeDataset(
         manifest_path=cfg.data.val_manifest,
         featurizer=featurizer,
         vocab=vocab,
         max_trace_len=cfg.data.max_trace_len
     )
+    logger.info(f"Validation dataset created with {len(val_dataset)} samples")
     
     # Create dataloaders with optimizations
+    logger.info("Creating training dataloader...")
     train_loader = DataLoader(
         dataset=train_dataset,
         batch_size=cfg.training.batch_size,
@@ -124,6 +147,9 @@ def main():
         persistent_workers=True,
         prefetch_factor=4
     )
+    logger.info(f"Training dataloader created with batch_size={cfg.training.batch_size}")
+    
+    logger.info("Creating validation dataloader...")
     val_loader = DataLoader(
         dataset=val_dataset,
         batch_size=cfg.training.batch_size * 2,
@@ -133,9 +159,20 @@ def main():
         pin_memory=True,
         persistent_workers=True
     )
+    logger.info(f"Validation dataloader created with batch_size={cfg.training.batch_size * 2}")
     
     # Configure the full EncDecRNNTModel with proper RNN-T components
     model_config = DictConfig({
+        # Vocabulary labels and required fields
+        'labels': list(vocab.keys()),
+        'sample_rate': 16000,  # Required by NeMo even though we don't use audio
+        
+        # Model defaults required by NeMo
+        'model_defaults': {
+            'enc_hidden': cfg.model.encoder.d_model,
+            'pred_hidden': cfg.model.decoder.pred_hidden,
+        },
+        
         # Required preprocessor config (we'll bypass it but NeMo needs it)
         'preprocessor': {
             '_target_': 'nemo.collections.asr.modules.AudioToMelSpectrogramPreprocessor',
@@ -183,7 +220,7 @@ def main():
         
         # RNN-T Decoder (Prediction Network)
         'decoder': {
-            '_target_': 'nemo.collections.asr.modules.RNNTDecoder',
+            '_target_': 'nemo.collections.asr.modules.rnnt.RNNTDecoder',
             'prednet': {
                 'pred_hidden': cfg.model.decoder.pred_hidden,
                 'pred_rnn_layers': cfg.model.decoder.pred_rnn_layers,
@@ -192,16 +229,15 @@ def main():
                 'dropout': 0.1,
             },
             'vocab_size': vocab_size,
-            'embed_dim': 256,  # Embedding dimension
             'blank_as_pad': True,  # Use blank token as padding
         },
         
         # RNN-T Joint Network
         'joint': {
-            '_target_': 'nemo.collections.asr.modules.RNNTJoint',
+            '_target_': 'nemo.collections.asr.modules.rnnt.RNNTJoint',
             'fuse_loss_wer': False,
             'jointnet': {
-                'joint': cfg.model.joint.joint_hidden,
+                'joint_hidden': cfg.model.joint.joint_hidden,
                 'activation': cfg.model.joint.activation,
                 'dropout': cfg.model.joint.dropout,
             },
@@ -247,40 +283,38 @@ def main():
             'clamp': -1.0,  # Clamp for logits (-1 = disabled)
         },
         
-        # Training configuration
-        'train_ds': {
-            'manifest_filepath': cfg.data.train_manifest,
-            'sample_rate': 16000,  # Required field, dummy value for non-audio data
-            'labels': list(vocab.keys()),  # Required: vocabulary labels
-            'batch_size': cfg.training.batch_size,
-            'shuffle': True,
-            'num_workers': cfg.training.num_workers,
-            'pin_memory': True,
-        },
-        'validation_ds': {
-            'manifest_filepath': cfg.data.val_manifest,
-            'sample_rate': 16000,  # Required field, dummy value for non-audio data
-            'labels': list(vocab.keys()),  # Required: vocabulary labels
-            'batch_size': cfg.training.batch_size * 2,
-            'shuffle': False,
-            'num_workers': cfg.training.num_workers,
-            'pin_memory': True,
-        },
+        # Training configuration - set to None to skip NeMo's default data loading
+        'train_ds': None,
+        'validation_ds': None,
         
         # Spec augmentation (optional, for robustness)
-        'spec_augment': {
-            'freq_masks': 0,  # No frequency masking for gesture data
-            'time_masks': 2,
-            'freq_width': 0,
-            'time_width': 10,
-        },
+        'spec_augment': None,  # Disable spec augmentation for gesture data
     })
     
-    # Instantiate the NeMo EncDecRNNTModel
-    logger.info("Creating EncDecRNNTModel with full RNN-T architecture...")
-    model = nemo_asr.models.EncDecRNNTModel(cfg=model_config)
-    
-    # Override with our custom dataloaders
+    # Create a custom subclass to handle our feature format
+    class GestureRNNTModel(nemo_asr.models.EncDecRNNTModel):
+        """Custom RNN-T model that bypasses audio preprocessing."""
+
+        def forward(self, input_signal=None, input_signal_length=None, processed_signal=None, processed_signal_length=None):
+            """
+            Override forward to bypass preprocessor since we already have features.
+            Our input_signal is already features with shape (batch, time, features).
+            """
+            # NeMo expects (batch, features, time) for the encoder
+            # Our data is (batch, time, features) so transpose
+            if input_signal is not None:
+                processed_signal = input_signal.transpose(1, 2)  # (batch, features, time)
+                processed_signal_length = input_signal_length
+
+            # Pass to encoder
+            encoded, encoded_len = self.encoder(audio_signal=processed_signal, length=processed_signal_length)
+            return encoded, encoded_len
+
+    # Instantiate our custom NeMo model
+    logger.info("Creating GestureRNNTModel...")
+    model = GestureRNNTModel(cfg=model_config)
+
+    # Assign our custom dataloaders directly to the NeMo model
     model._train_dl = train_loader
     model._validation_dl = val_loader
     
@@ -318,10 +352,10 @@ def main():
             name="conformer_rnnt"
         ),
     )
-    
+
     # Attach trainer to model (required by NeMo)
     model.set_trainer(trainer)
-    
+
     # Start training
     logger.info("\n" + "="*60)
     logger.info("Starting RNN-Transducer training...")
@@ -333,7 +367,7 @@ def main():
     
     trainer.fit(model)
     
-    # Save the final model
+    # Save the final model in NeMo format
     save_path = "conformer_rnnt_gesture.nemo"
     model.save_to(save_path)
     logger.info(f"\n✓ Model saved to {save_path}")
