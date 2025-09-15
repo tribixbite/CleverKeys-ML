@@ -14,7 +14,7 @@ def split_dataset(input_file: str, train_output: str, val_output: str, val_split
     """
     print(f"Reading dataset from {input_file}...")
     try:
-        with open(input_file, 'r') as f:
+        with open(input_file, 'r', encoding='utf-8') as f:
             lines = f.readlines()
     except FileNotFoundError:
         print(f"Error: Input file not found at {input_file}")
@@ -29,12 +29,12 @@ def split_dataset(input_file: str, train_output: str, val_output: str, val_split
     val_lines = lines[split_index:]
 
     print(f"Writing {len(train_lines):,} lines to {train_output}...")
-    with open(train_output, 'w') as f:
+    with open(train_output, 'w', encoding='utf-8') as f:
         for line in tqdm(train_lines, desc="Writing Train Split"):
             f.write(line)
 
     print(f"Writing {len(val_lines):,} lines to {val_output}...")
-    with open(val_output, 'w') as f:
+    with open(val_output, 'w', encoding='utf-8') as f:
         for line in tqdm(val_lines, desc="Writing Val Split"):
             f.write(line)
 

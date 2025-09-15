@@ -1,0 +1,17 @@
+checkpoints*/
+logs*/
+data/
+_pycache_/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pyw
+*.pyz
+*.pywz
+*.pyzw
+*.pyz
+kenlm/
+*.log
+wikipedia/
+*_logs*/
