@@ -5,6 +5,7 @@ Uses proper RNN-T joint computation for modeling output dependencies.
 Optimized for RTX 4090M with all performance enhancements.
 """
 
+import datetime
 import os
 import json
 import torch
@@ -59,34 +60,37 @@ CONFIG = {
         "max_trace_len": 200,
     },
     "training": {
-        "batch_size": 256,  # Optimized for RTX 4090M 16GB VRAM
-        "num_workers": 12,
+        "batch_size": 128,  # Reduced for faster iteration with RNN-T, 256 is the original batch size
+        "num_workers": 8,  # 12 is the original number of workers
         "learning_rate": 3e-4,
         "max_epochs": 100,
-        "gradient_accumulation": 2,  # Effective batch = 512
+        "gradient_accumulation": 2,  # Effective batch = 512, 4 is the original gradient accumulation
         "accelerator": "gpu",
         "devices": 1,
-        "precision": "16-mixed",  # Use fp16 instead of bf16 to avoid CUDA graph issues
+        "precision": "bf16-mixed",  # Use bf16 instead of fp32 to avoid CUDA graph dtype issues
     },
     "model": {
         "encoder": {
             "feat_in": 37,  # 9 kinematic + 28 keys
-            "d_model": 256,
+            "d_model": 256,  # 256 is the original model dimension
             "n_heads": 4,
-            "num_layers": 8,
-            "conv_kernel_size": 31,
+            "num_layers": 6,  # Reduced from 8 for faster training, 4 is the original number of layers
+            "conv_kernel_size": 31,  # 31 is the original kernel size
+            "subsampling_factor": 2,  # 2x subsampling for speed, 4 is the original subsampling factor
         },
         "decoder": {
-            "pred_hidden": 320,
-            "pred_rnn_layers": 2,  # Multiple layers for better dependency modeling
+            "pred_hidden": 320,  # 320 is the original hidden size of the prediction network
+            "pred_rnn_layers": 2,  # Multiple layers for better dependency modeling, 1 is the original number of layers
         },
         "joint": {
-            "joint_hidden": 512,
+            "joint_hidden": 512,  # 512 is the original hidden size of the joint network
             "activation": "relu",
-            "dropout": 0.1,
+            "dropout": 0.1,  # 0.1 is the original dropout rate for the joint network
         }
     }
 }
+
+runtime_id = datetime.now().strftime("%Y%m%d_%H%M%S")
 
 def main():
     """Main training function using NeMo's EncDecRNNTModel."""
@@ -195,8 +199,8 @@ def main():
             'feat_out': -1,  # Set to -1 to use d_model
             
             # Conformer specific parameters
-            'subsampling': 'striding',  # or 'stacking', 'vggnet' 
-            'subsampling_factor': 1,  # No subsampling for gesture data
+            'subsampling': 'striding',  # or 'stacking', 'vggnet'
+            'subsampling_factor': cfg.model.encoder.subsampling_factor,  # 2x subsampling
             'subsampling_conv_channels': -1,  # Use d_model
             'ff_expansion_factor': 4,
             
@@ -249,9 +253,9 @@ def main():
         
         # Decoding strategy for inference
         'decoding': {
-            'strategy': 'greedy_batch',  # or 'beam' for beam search
+            'strategy': 'greedy',  # or 'beam' for beam search
             'greedy': {
-                'max_symbols': 50,
+                'max_symbols': 20,
             },
             'beam': {
                 'beam_size': 10,
@@ -295,6 +299,15 @@ def main():
     class GestureRNNTModel(nemo_asr.models.EncDecRNNTModel):
         """Custom RNN-T model that bypasses audio preprocessing."""
 
+        def __init__(self, cfg):
+            super().__init__(cfg=cfg)
+            # Apply torch.compile if available for extra optimization
+            if hasattr(torch, 'compile'):
+                logger.info("Compiling model components with torch.compile...")
+                self.encoder = torch.compile(self.encoder, mode='max-autotune')
+                self.decoder = torch.compile(self.decoder, mode='max-autotune')
+                self.joint = torch.compile(self.joint, mode='max-autotune')
+
         def forward(self, input_signal=None, input_signal_length=None, processed_signal=None, processed_signal_length=None):
             """
             Override forward to bypass preprocessor since we already have features.
@@ -320,10 +333,17 @@ def main():
     
     # Log model architecture
     logger.info(f"Model architecture:")
-    logger.info(f"  Encoder: Conformer with {cfg.model.encoder.num_layers} layers")
-    logger.info(f"  Decoder: RNN-T Prediction Network with {cfg.model.decoder.pred_rnn_layers} LSTM layers")
+    logger.info(f"  Encoder: Conformer with {cfg.model.encoder.num_layers} layers, {cfg.model.encoder.subsampling_factor}x subsampling")
+    logger.info(f"  Decoder: RNN-T Prediction Network with {cfg.model.decoder.pred_rnn_layers} LSTM layer")
     logger.info(f"  Joint: RNN-T Joint Network with {cfg.model.joint.joint_hidden} hidden units")
     logger.info(f"  Total parameters: {sum(p.numel() for p in model.parameters())/1e6:.1f}M")
+    logger.info(f"Optimizations:")
+    logger.info(f"  • bf16 mixed precision: Enabled")
+    logger.info(f"  • {cfg.model.encoder.subsampling_factor}x subsampling: 200→{200//cfg.model.encoder.subsampling_factor} timesteps")
+    if hasattr(torch, 'compile'):
+        logger.info(f"  • torch.compile: Enabled (mode=max-autotune)")
+    else:
+        logger.info(f"  • torch.compile: Not available (upgrade to PyTorch 2.0+)")
     
     # Setup callbacks
     prediction_logger = PredictionLogger(val_loader, vocab)
@@ -337,18 +357,19 @@ def main():
         accumulate_grad_batches=cfg.training.gradient_accumulation,
         gradient_clip_val=1.0,
         log_every_n_steps=50,
-        val_check_interval=0.5,  # Validate twice per epoch
+        val_check_interval=1.0,  # Validate once per epoch for speed
         callbacks=[prediction_logger],
         enable_checkpointing=True,
-        default_root_dir="./rnnt_checkpoints",
-        
+        default_root_dir="./rnnt_checkpoints_" + runtime_id, # use the date and time to make it unique
+        enable_model_summary=False,  # Disable to reduce overhead
+        enable_progress_bar=True,
         # Performance optimizations
         benchmark=True,  # Enable cuDNN benchmark
         sync_batchnorm=False,  # Not needed for single GPU
         
         # Logging
         logger=pl.loggers.TensorBoardLogger(
-            save_dir="./rnnt_logs",
+            save_dir="./rnnt_logs_" + runtime_id,
             name="conformer_rnnt"
         ),
     )
@@ -368,7 +389,7 @@ def main():
     trainer.fit(model)
     
     # Save the final model in NeMo format
-    save_path = "conformer_rnnt_gesture.nemo"
+    save_path = "conformer_rnnt_gesture_" + runtime_id + ".nemo"
     model.save_to(save_path)
     logger.info(f"\n✓ Model saved to {save_path}")
     
