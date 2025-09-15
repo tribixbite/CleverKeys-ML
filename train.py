@@ -114,11 +114,24 @@ def _make_decoder_inputs(logits: torch.Tensor, lengths: torch.Tensor, vocab_size
     return out
 # --- 1. Tokenizer ---
 class CharTokenizer:
-    def __init__(self, chars: str):
-        self.char_to_int = {char: i + 1 for i, char in enumerate(chars)}; self.int_to_char = {i: c for c, i in self.char_to_int.items()}
-        self.char_to_int['<blank>'] = 0; self.int_to_char = {i: c for c, i in self.char_to_int.items()}; self.int_to_char[0] = ''; self.vocab_size = len(self.char_to_int)
-    def encode(self, w: str) -> List[int]: return [self.char_to_int[c] for c in w]
-    def decode(self, idx: List[int]) -> str: return "".join([self.int_to_char.get(i, '') for i in idx])
+    def __init__(self, chars: str, include_space: bool = False):
+        # Build character mappings
+        self.char_to_int = {char: i + 1 for i, char in enumerate(chars)}
+        # Add space token if needed (for decoder compatibility)
+        if include_space and ' ' not in self.char_to_int:
+            self.char_to_int[' '] = len(self.char_to_int) + 1
+        # Add blank token at index 0 for CTC
+        self.char_to_int['<blank>'] = 0
+        # Build reverse mapping
+        self.int_to_char = {i: c for c, i in self.char_to_int.items()}
+        self.int_to_char[0] = ''  # Blank maps to empty string
+        self.vocab_size = len(self.char_to_int)
+    
+    def encode(self, w: str) -> List[int]: 
+        return [self.char_to_int[c] for c in w if c in self.char_to_int]
+    
+    def decode(self, idx: List[int]) -> str: 
+        return "".join([self.int_to_char.get(i, '') for i in idx])
 
 # --- 2. Feature Engineering ---
 class SwipeAugmenter:
@@ -298,7 +311,9 @@ def train_model():
     # Print optimization summary
     print_optimization_summary()
 
-    tokenizer=CharTokenizer(CONFIG["chars"]); grid=KeyboardGrid(CONFIG["chars"]); featurizer=SwipeFeaturizer(grid); augmenter=SwipeAugmenter(CONFIG["augmentation"])
+    # Create tokenizer without space for training (data doesn't have spaces)
+    tokenizer=CharTokenizer(CONFIG["chars"], include_space=False)
+    grid=KeyboardGrid(CONFIG["chars"]); featurizer=SwipeFeaturizer(grid); augmenter=SwipeAugmenter(CONFIG["augmentation"])
     input_dim = 9 + grid.num_keys
     
     logger.info("Loading datasets...");
@@ -364,12 +379,27 @@ def train_model():
     writer = SummaryWriter(CONFIG["log_dir"])
 
     logger.info("Setting up CTC decoder with KenLM for validation...")
+    
+    # Load word vocabulary (unigrams) from file
+    unigrams = None
+    if os.path.exists(CONFIG["vocab_path"]):
+        try:
+            with open(CONFIG["vocab_path"], "r") as f:
+                unigrams = [word.strip().lower() for word in f.readlines() if word.strip()]
+            logger.info(f"Loaded {len(unigrams)} unigrams from {CONFIG['vocab_path']}")
+        except Exception as e:
+            logger.warning(f"Failed to load vocabulary: {e}")
+    else:
+        logger.warning(f"Vocabulary file not found: {CONFIG['vocab_path']}")
+    
     # Try to use local KenLM models - check for proper bigram+ models
     lm_path = None
     potential_models = [
         # "/home/will/git/swype/cleverkeys/kenlm/lm/test.arpa",  # Test model from KenLM
         # "/home/will/git/swype/cleverkeys/.venv/lib/python3.12/site-packages/pyctcdecode/tests/sample_data/bugs_bunny_kenlm.arpa",  # Sample from pyctcdecode
         "./wikipedia/en.arpa.bin",
+        "./kenlm/lm/test.arpa",  # Check in built kenlm directory
+        "./kenlm/test.arpa",
     ]
     
     for model_path in potential_models:
@@ -390,10 +420,18 @@ def train_model():
         logger.info("This maintains beam search architecture as required, just without LM scoring")
     
     # Build beam search decoder with pyctcdecode - ALWAYS use beam search, never greedy
-    vocab_list = [tokenizer.int_to_char[i] for i in range(tokenizer.vocab_size)]
+    # Create labels list including space for word separation
+    labels = [tokenizer.int_to_char[i] for i in range(tokenizer.vocab_size)]
+    
+    # Add space token if not present (needed for word separation)
+    if ' ' not in labels:
+        labels.append(' ')
+        logger.info("Added space token to decoder labels for word separation")
+    
     decoder = build_ctcdecoder(
-        vocab_list, 
+        labels,  # Character labels including space
         kenlm_model_path=lm_path,  # Use language model if available (None if not)
+        unigrams=unigrams,  # Pass the word vocabulary
         alpha=CONFIG["kenlm_alpha"] if lm_path else 0.0,  # LM weight only if we have LM
         beta=CONFIG["kenlm_beta"] if lm_path else 0.0  # Word insertion bonus only if we have LM
     )
