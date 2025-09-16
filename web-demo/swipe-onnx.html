@@ -1295,17 +1295,17 @@
             const normalizedPath = [];
             const originalLength = Math.min(path.length, MAX_SEQUENCE_LENGTH);
             
-            // Take up to MAX_SEQUENCE_LENGTH points
+            // Take up to MAX_SEQUENCE_LENGTH points and normalize to [-1, 1] range
             for (let i = 0; i < Math.min(path.length, MAX_SEQUENCE_LENGTH); i++) {
                 const point = path[i];
                 normalizedPath.push({
-                    x: point.x / NORMALIZED_WIDTH,
-                    y: point.y / NORMALIZED_HEIGHT,
+                    x: (point.x / NORMALIZED_WIDTH) * 2 - 1,  // [0,1] -> [-1,1]
+                    y: (point.y / NORMALIZED_HEIGHT) * 2 - 1, // [0,1] -> [-1,1]
                     key: point.key || null
                 });
             }
             
-            // Pad with last point if too short
+            // Pad with last point if too short (use center point in [-1,1] range)
             const lastPoint = normalizedPath[normalizedPath.length - 1] || { x: 0, y: 0, key: null };
             while (normalizedPath.length < MAX_SEQUENCE_LENGTH) {
                 normalizedPath.push({ ...lastPoint });
@@ -1493,8 +1493,8 @@
                 for (let colIdx = 0; colIdx < row.length; colIdx++) {
                     const char = row[colIdx];
                     if (chars.includes(char)) {
-                        const kx = (colIdx + 0.5) / 10;  // 10 chars max width
-                        const ky = (rowIdx + 0.5) / 3;   // 3 rows
+                        const kx = ((colIdx + 0.5) / 10) * 2 - 1;  // [0,1] -> [-1,1]
+                        const ky = ((rowIdx + 0.5) / 3) * 2 - 1;   // [0,1] -> [-1,1]
                         charToPos[char] = [kx, ky];
                     }
                 }
