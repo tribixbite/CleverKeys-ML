@@ -115,12 +115,27 @@ def main():
     ap.add_argument("--layers", type=int, default=None, help="Override L (num_layers) if needed.")
     ap.add_argument("--hidden", type=int, default=None, help="Override H (hidden_size) if needed.")
     ap.add_argument("--enc_dim", type=int, default=None, help="Override encoder D if needed.")
+    ap.add_argument("--vocab", type=str, default=None, help="Path to vocabulary file for deriving blank_id.")
     args = ap.parse_args()
+
+    # Derive blank_id from vocabulary if provided
+    blank_id = 0  # default fallback
+    if args.vocab:
+        try:
+            with open(args.vocab, "r", encoding="utf-8") as f:
+                tokens = [line.strip() for line in f if line.strip()]
+            token_to_idx = {tok: i for i, tok in enumerate(tokens)}
+            blank_id = token_to_idx.get("<blank>", 0)
+            log.info(f"Derived blank_id={blank_id} from vocab file: {args.vocab}")
+        except Exception as e:
+            log.warning(f"Failed to load vocab file {args.vocab}: {e}. Using default blank_id=0")
 
     log.info(f"Loading model: {args.nemo_model}")
     model = GestureRNNTModel.restore_from(args.nemo_model, map_location="cpu").eval()
 
     step = RNNTStep(model).eval()
+    # Override the step's blank_idx with derived value
+    step.blank_idx = blank_id
 
     # Example shapes
     B = 1
@@ -149,7 +164,7 @@ def main():
                 # Last resort, guess 512
                 D = 512
 
-    y_prev = torch.zeros(B, dtype=torch.long)  # e.g., BOS or blank as start
+    y_prev = torch.tensor([blank_id], dtype=torch.long)  # Use derived blank_id as start token
     h0 = torch.zeros(L, B, H)
     c0 = torch.zeros(L, B, H)
     enc_t = torch.randn(B, D)
