@@ -9,8 +9,8 @@ import torch
 import onnx
 import onnxruntime as ort
 
-# NeMo + your training class
-from train_final import GestureRNNTModel
+# NeMo + our model class
+from model_class import GestureRNNTModel, get_default_config
 from swipe_data_utils import SwipeDataset, SwipeFeaturizer, KeyboardGrid, collate_fn
 
 from onnxruntime.quantization import (
@@ -29,7 +29,7 @@ class EncoderWrapper(torch.nn.Module):
         super().__init__()
         self.encoder = encoder.eval()
     def forward(self, feats_bft: torch.Tensor, lengths: torch.Tensor):
-        return self.encoder(feats_bft, lengths)
+        return self.encoder(audio_signal=feats_bft, length=lengths)
 
 def _to_encoder_inputs(batch):
     # collate_fn -> (features, feature_lengths, tokens, token_lengths)
@@ -73,8 +73,36 @@ def main():
     ap.add_argument("--max_trace_len", type=int, default=200, help="Nominal T used for export sample.")
     args = ap.parse_args()
 
-    log.info(f"Loading trained model from {args.nemo_model}")
-    model = GestureRNNTModel.restore_from(args.nemo_model, map_location="cpu").eval()
+    # Check if input is .nemo or .ckpt
+    if args.nemo_model.endswith('.ckpt'):
+        log.info(f"Loading checkpoint directly: {args.nemo_model}")
+        # Load checkpoint and create model compatible with it
+        ckpt = torch.load(args.nemo_model, map_location="cpu", weights_only=False)
+
+        # Create model with proper config (load from hyperparameters in checkpoint if available)
+        if 'hyper_parameters' in ckpt:
+            cfg = ckpt['hyper_parameters']['cfg']
+        else:
+            # Use default config but with torch.compile disabled
+            cfg = get_default_config()
+
+        model = GestureRNNTModel(cfg).eval()
+
+        # Clean up torch.compile keys
+        state_dict = ckpt["state_dict"]
+        new_state_dict = {}
+        for key, value in state_dict.items():
+            if key.startswith("encoder._orig_mod."):
+                new_key = key.replace("encoder._orig_mod.", "encoder.")
+                new_state_dict[new_key] = value
+            else:
+                new_state_dict[key] = value
+
+        model.load_state_dict(new_state_dict, strict=False)  # Use strict=False to ignore missing keys
+    else:
+        log.info(f"Loading trained model from {args.nemo_model}")
+        model = GestureRNNTModel.restore_from(args.nemo_model, map_location="cpu").eval()
+
     encoder = model.encoder
 
     wrapper = EncoderWrapper(encoder).eval()

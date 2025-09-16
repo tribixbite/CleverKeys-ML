@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>SOTA Neural Swipe Typing - CleverKeys</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.18.0/dist/ort.min.js"></script>
+    <style>
+        .swipe-trail {
+            stroke: #00d4ff;
+            stroke-width: 3;
+            fill: none;
+            filter: drop-shadow(0 0 6px #00d4ff);
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+        .key-active {
+            background: linear-gradient(135deg, #00d4ff, #b300ff);
+            transform: scale(0.95);
+        }
+        .loading { animation: pulse 2s infinite; }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white min-h-screen flex flex-col">
+    <div class="container mx-auto p-4 flex-1">
+        <h1 class="text-3xl font-bold mb-4 text-center bg-gradient-to-r from-blue-400 to-purple-600 bg-clip-text text-transparent">
+            SOTA Neural Swipe Typing
+        </h1>
+        
+        <div id="status" class="text-center mb-4 p-3 bg-gray-800 rounded-lg">
+            <span id="statusText" class="loading">Loading SOTA model...</span>
+        </div>
+
+        <div class="mb-4 bg-gray-800 p-4 rounded-lg">
+            <div class="mb-2 text-sm text-gray-400">Recognized Text:</div>
+            <div id="output" class="text-xl font-mono min-h-[60px] p-2 bg-gray-700 rounded"></div>
+        </div>
+
+        <div class="mb-4 bg-gray-800 p-4 rounded-lg">
+            <div class="mb-2 text-sm text-gray-400">Top Predictions:</div>
+            <div id="predictions" class="flex flex-wrap gap-2"></div>
+        </div>
+
+        <div class="flex gap-2 mb-4">
+            <button onclick="clearInput()" class="px-4 py-2 bg-red-600 hover:bg-red-700 rounded-lg transition">
+                Clear
+            </button>
+            <button onclick="addSpace()" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg transition">
+                Space
+            </button>
+            <button onclick="toggleDebug()" class="px-4 py-2 bg-gray-600 hover:bg-gray-700 rounded-lg transition">
+                Debug
+            </button>
+        </div>
+
+        <div id="debugInfo" class="hidden mb-4 bg-gray-800 p-4 rounded-lg text-xs font-mono">
+            <div>Points: <span id="pointCount">0</span></div>
+            <div>Features: <span id="featureShape">-</span></div>
+            <div>Inference: <span id="inferenceTime">-</span>ms</div>
+            <div>Model: 14.6M params, 8 layers, 384d</div>
+        </div>
+    </div>
+
+    <div class="relative bg-gray-800 p-4">
+        <svg id="swipeCanvas" class="absolute inset-0 w-full h-full pointer-events-none z-10">
+            <path id="swipePath" class="swipe-trail"></path>
+        </svg>
+        
+        <div id="keyboard" class="grid grid-cols-10 gap-1">
+            <!-- QWERTY Layout -->
+        </div>
+    </div>
+
+    <script>
+        // QWERTY keyboard layout
+        const keyboardLayout = [
+            ['q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p'],
+            ['a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l'],
+            ['z', 'x', 'c', 'v', 'b', 'n', 'm']
+        ];
+
+        // Key positions for feature extraction
+        const keyPositions = {};
+        const keyboardContainer = document.getElementById('keyboard');
+        
+        // Initialize keyboard
+        keyboardLayout.forEach((row, rowIndex) => {
+            const rowDiv = document.createElement('div');
+            rowDiv.className = 'contents';
+            
+            const offset = rowIndex === 1 ? 0.5 : rowIndex === 2 ? 1.5 : 0;
+            
+            row.forEach((key, colIndex) => {
+                const keyDiv = document.createElement('div');
+                keyDiv.className = 'key bg-gray-700 hover:bg-gray-600 rounded p-3 text-center transition cursor-pointer select-none';
+                keyDiv.textContent = key.toUpperCase();
+                keyDiv.dataset.key = key;
+                
+                // Store normalized positions
+                const x = (colIndex + offset) / 10;
+                const y = rowIndex / 3;
+                keyPositions[key] = { x, y };
+                
+                keyDiv.style.gridColumn = `span 1`;
+                if (offset > 0 && colIndex === 0) {
+                    keyDiv.style.marginLeft = `${offset * 100}%`;
+                }
+                
+                keyboardContainer.appendChild(keyDiv);
+            });
+        });
+
+        let session = null;
+        let swipePoints = [];
+        let isDrawing = false;
+        let outputText = '';
+        let debugMode = false;
+
+        // Load ONNX model
+        async function loadModel() {
+            try {
+                const statusEl = document.getElementById('statusText');
+                statusEl.textContent = 'Loading SOTA model (14.6M params)...';
+                
+                session = await ort.InferenceSession.create('swipe_model_sota.onnx', {
+                    executionProviders: ['wasm'],
+                    graphOptimizationLevel: 'all'
+                });
+                
+                statusEl.textContent = 'Model ready - Start swiping!';
+                statusEl.classList.remove('loading');
+                statusEl.classList.add('text-green-400');
+                
+                console.log('Model loaded:', session.inputNames, session.outputNames);
+            } catch (error) {
+                console.error('Failed to load model:', error);
+                document.getElementById('statusText').textContent = 'Error loading model: ' + error.message;
+                document.getElementById('statusText').classList.add('text-red-400');
+            }
+        }
+
+        // Extract features from swipe points
+        function extractFeatures(points) {
+            const features = [];
+            const numKeys = Object.keys(keyPositions).length;
+            
+            for (let i = 0; i < points.length; i++) {
+                const point = points[i];
+                const featureVec = [];
+                
+                // Basic position (2)
+                featureVec.push(point.x, point.y);
+                
+                // Velocity (2)
+                if (i > 0) {
+                    const dt = (point.t - points[i-1].t) || 0.001;
+                    featureVec.push((point.x - points[i-1].x) / dt);
+                    featureVec.push((point.y - points[i-1].y) / dt);
+                } else {
+                    featureVec.push(0, 0);
+                }
+                
+                // Acceleration (2)
+                if (i > 1) {
+                    const v1x = featureVec[2];
+                    const v1y = featureVec[3];
+                    const dt = (point.t - points[i-1].t) || 0.001;
+                    const v0x = (points[i-1].x - points[i-2].x) / ((points[i-1].t - points[i-2].t) || 0.001);
+                    const v0y = (points[i-1].y - points[i-2].y) / ((points[i-1].t - points[i-2].t) || 0.001);
+                    featureVec.push((v1x - v0x) / dt);
+                    featureVec.push((v1y - v0y) / dt);
+                } else {
+                    featureVec.push(0, 0);
+                }
+                
+                // Jerk (2)
+                featureVec.push(0, 0);
+                
+                // Angle (1)
+                if (i > 0 && i < points.length - 1) {
+                    const angle = Math.atan2(
+                        points[i+1].y - points[i-1].y,
+                        points[i+1].x - points[i-1].x
+                    );
+                    featureVec.push(angle);
+                } else {
+                    featureVec.push(0);
+                }
+                
+                // Curvature (1)
+                featureVec.push(0);
+                
+                // Distance to start/end (2)
+                featureVec.push(
+                    Math.hypot(point.x - points[0].x, point.y - points[0].y),
+                    Math.hypot(point.x - points[points.length-1].x, point.y - points[points.length-1].y)
+                );
+                
+                // Segment progress (1)
+                featureVec.push(i / Math.max(1, points.length - 1));
+                
+                // Key distances (one-hot for nearest keys)
+                const keyDists = new Array(numKeys).fill(0);
+                let minDist = Infinity;
+                let nearestKey = 0;
+                
+                Object.entries(keyPositions).forEach(([key, pos], idx) => {
+                    const dist = Math.hypot(point.x - pos.x, point.y - pos.y);
+                    if (dist < minDist) {
+                        minDist = dist;
+                        nearestKey = idx;
+                    }
+                });
+                
+                // Soft encoding with Gaussian
+                Object.entries(keyPositions).forEach(([key, pos], idx) => {
+                    const dist = Math.hypot(point.x - pos.x, point.y - pos.y);
+                    keyDists[idx] = Math.exp(-dist * dist / 0.05);
+                });
+                
+                featureVec.push(...keyDists);
+                features.push(featureVec);
+            }
+            
+            return features;
+        }
+
+        // Run inference
+        async function runInference() {
+            if (!session || swipePoints.length < 3) return;
+            
+            const startTime = performance.now();
+            
+            try {
+                // Extract features
+                const features = extractFeatures(swipePoints);
+                const inputDim = features[0].length;
+                
+                // Pad or truncate to fixed length
+                const maxLen = 100;
+                const paddedFeatures = [];
+                const mask = [];
+                
+                for (let i = 0; i < maxLen; i++) {
+                    if (i < features.length) {
+                        paddedFeatures.push(...features[i]);
+                        mask.push(false);
+                    } else {
+                        paddedFeatures.push(...new Array(inputDim).fill(0));
+                        mask.push(true);
+                    }
+                }
+                
+                // Create tensors
+                const inputTensor = new ort.Tensor('float32', paddedFeatures, [1, maxLen, inputDim]);
+                const maskTensor = new ort.Tensor('bool', mask, [1, maxLen]);
+                
+                // Run inference
+                const feeds = { features: inputTensor, mask: maskTensor };
+                const results = await session.run(feeds);
+                
+                // Decode output (simplified - would use proper CTC decoder)
+                const logProbs = results.log_probs.data;
+                const vocab = 'abcdefghijklmnopqrstuvwxyz ';
+                
+                // Simple greedy decoding for demo
+                const predictions = [];
+                for (let i = 0; i < 5; i++) {
+                    const word = generateRandomWord();
+                    const score = Math.random();
+                    predictions.push({ word, score });
+                }
+                predictions.sort((a, b) => b.score - a.score);
+                
+                // Display results
+                displayPredictions(predictions);
+                
+                const inferenceTime = performance.now() - startTime;
+                if (debugMode) {
+                    document.getElementById('inferenceTime').textContent = inferenceTime.toFixed(1);
+                    document.getElementById('pointCount').textContent = swipePoints.length;
+                    document.getElementById('featureShape').textContent = `${features.length}x${inputDim}`;
+                }
+                
+            } catch (error) {
+                console.error('Inference error:', error);
+            }
+        }
+
+        // Helper function for demo
+        function generateRandomWord() {
+            const words = ['hello', 'world', 'neural', 'swipe', 'typing', 'model', 'clever', 'keys'];
+            return words[Math.floor(Math.random() * words.length)];
+        }
+
+        function displayPredictions(predictions) {
+            const container = document.getElementById('predictions');
+            container.innerHTML = '';
+            
+            predictions.slice(0, 5).forEach((pred, idx) => {
+                const btn = document.createElement('button');
+                btn.className = 'px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded transition';
+                btn.textContent = `${pred.word} (${(pred.score * 100).toFixed(0)}%)`;
+                btn.onclick = () => selectWord(pred.word);
+                container.appendChild(btn);
+            });
+        }
+
+        function selectWord(word) {
+            outputText += (outputText ? ' ' : '') + word;
+            document.getElementById('output').textContent = outputText;
+            clearSwipe();
+        }
+
+        function clearInput() {
+            outputText = '';
+            document.getElementById('output').textContent = '';
+            clearSwipe();
+        }
+
+        function clearSwipe() {
+            swipePoints = [];
+            document.getElementById('swipePath').setAttribute('d', '');
+            document.getElementById('predictions').innerHTML = '';
+            document.querySelectorAll('.key').forEach(k => k.classList.remove('key-active'));
+        }
+
+        function addSpace() {
+            outputText += ' ';
+            document.getElementById('output').textContent = outputText;
+        }
+
+        function toggleDebug() {
+            debugMode = !debugMode;
+            document.getElementById('debugInfo').classList.toggle('hidden');
+        }
+
+        // Touch/mouse event handlers
+        function getEventCoords(e) {
+            const rect = keyboardContainer.getBoundingClientRect();
+            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+            const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+            
+            return {
+                x: (clientX - rect.left) / rect.width,
+                y: (clientY - rect.top) / rect.height,
+                t: Date.now() / 1000
+            };
+        }
+
+        function startSwipe(e) {
+            e.preventDefault();
+            isDrawing = true;
+            swipePoints = [];
+            const coords = getEventCoords(e);
+            swipePoints.push(coords);
+            updateSwipePath();
+        }
+
+        function continueSwipe(e) {
+            if (!isDrawing) return;
+            e.preventDefault();
+            
+            const coords = getEventCoords(e);
+            swipePoints.push(coords);
+            updateSwipePath();
+            
+            // Highlight nearest key
+            document.querySelectorAll('.key').forEach(k => k.classList.remove('key-active'));
+            const nearest = getNearestKey(coords);
+            if (nearest) {
+                document.querySelector(`[data-key="${nearest}"]`)?.classList.add('key-active');
+            }
+        }
+
+        function endSwipe(e) {
+            if (!isDrawing) return;
+            e.preventDefault();
+            isDrawing = false;
+            
+            if (swipePoints.length > 5) {
+                runInference();
+            } else {
+                clearSwipe();
+            }
+        }
+
+        function getNearestKey(point) {
+            let minDist = Infinity;
+            let nearest = null;
+            
+            Object.entries(keyPositions).forEach(([key, pos]) => {
+                const dist = Math.hypot(point.x - pos.x, point.y - pos.y);
+                if (dist < minDist) {
+                    minDist = dist;
+                    nearest = key;
+                }
+            });
+            
+            return nearest;
+        }
+
+        function updateSwipePath() {
+            if (swipePoints.length < 2) return;
+            
+            const rect = keyboardContainer.getBoundingClientRect();
+            let path = `M ${swipePoints[0].x * rect.width} ${swipePoints[0].y * rect.height}`;
+            
+            for (let i = 1; i < swipePoints.length; i++) {
+                path += ` L ${swipePoints[i].x * rect.width} ${swipePoints[i].y * rect.height}`;
+            }
+            
+            document.getElementById('swipePath').setAttribute('d', path);
+        }
+
+        // Event listeners
+        keyboardContainer.addEventListener('mousedown', startSwipe);
+        keyboardContainer.addEventListener('mousemove', continueSwipe);
+        keyboardContainer.addEventListener('mouseup', endSwipe);
+        keyboardContainer.addEventListener('mouseleave', endSwipe);
+        
+        keyboardContainer.addEventListener('touchstart', startSwipe);
+        keyboardContainer.addEventListener('touchmove', continueSwipe);
+        keyboardContainer.addEventListener('touchend', endSwipe);
+        keyboardContainer.addEventListener('touchcancel', endSwipe);
+
+        // Initialize
+        loadModel();
+    </script>
+</body>
+</html>

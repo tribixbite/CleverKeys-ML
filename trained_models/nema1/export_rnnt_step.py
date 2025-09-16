@@ -7,7 +7,7 @@ import logging
 import torch
 import types
 
-from train_final import GestureRNNTModel
+from model_class import GestureRNNTModel, get_default_config
 
 # ExecuTorch
 from executorch.exir import to_edge
@@ -86,8 +86,12 @@ class RNNTStep(torch.nn.Module):
         out, (h1, c1) = self.lstm(x, (h0, c0))  # out: (1,B,H)
         pred_t = out.squeeze(0)                 # (B,H)
 
-        # Joint expects (B,D_enc) & (B,H_pred) → (B,V)
-        logits = self.joint(enc_t, pred_t)      # (B,V)
+        # Joint expects specific format for NeMo RNNT joint
+        # The NeMo joint typically takes encoder_outputs as (B, D, T=1) and decoder_outputs as (B, H, T=1)
+        enc_t_3d = enc_t.unsqueeze(-1)  # (B, D) -> (B, D, 1)
+        pred_t_3d = pred_t.unsqueeze(-1)  # (B, H) -> (B, H, 1)
+        logits = self.joint(encoder_outputs=enc_t_3d, decoder_outputs=pred_t_3d)  # (B, V, 1)
+        logits = logits.squeeze(-1)  # (B, V, 1) -> (B, V)
         return logits, h1, c1
 
 
@@ -130,8 +134,35 @@ def main():
         except Exception as e:
             log.warning(f"Failed to load vocab file {args.vocab}: {e}. Using default blank_id=0")
 
-    log.info(f"Loading model: {args.nemo_model}")
-    model = GestureRNNTModel.restore_from(args.nemo_model, map_location="cpu").eval()
+    # Check if input is .nemo or .ckpt
+    if args.nemo_model.endswith('.ckpt'):
+        log.info(f"Loading checkpoint directly: {args.nemo_model}")
+        # Load checkpoint and create model compatible with it
+        ckpt = torch.load(args.nemo_model, map_location="cpu", weights_only=False)
+
+        # Create model with proper config (load from hyperparameters in checkpoint if available)
+        if 'hyper_parameters' in ckpt:
+            cfg = ckpt['hyper_parameters']['cfg']
+        else:
+            # Use default config but with torch.compile disabled
+            cfg = get_default_config()
+
+        model = GestureRNNTModel(cfg).eval()
+
+        # Clean up torch.compile keys
+        state_dict = ckpt["state_dict"]
+        new_state_dict = {}
+        for key, value in state_dict.items():
+            if key.startswith("encoder._orig_mod."):
+                new_key = key.replace("encoder._orig_mod.", "encoder.")
+                new_state_dict[new_key] = value
+            else:
+                new_state_dict[key] = value
+
+        model.load_state_dict(new_state_dict, strict=False)  # Use strict=False to ignore missing keys
+    else:
+        log.info(f"Loading model: {args.nemo_model}")
+        model = GestureRNNTModel.restore_from(args.nemo_model, map_location="cpu").eval()
 
     step = RNNTStep(model).eval()
     # Override the step's blank_idx with derived value

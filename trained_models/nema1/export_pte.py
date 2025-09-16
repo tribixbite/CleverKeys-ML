@@ -7,10 +7,10 @@ import argparse
 import logging
 import torch
 
-# NeMo + your training class
+# NeMo + our model class
 import nemo
 import nemo.collections.asr as nemo_asr
-from train_final import GestureRNNTModel  # your subclass from training
+from model_class import GestureRNNTModel, get_default_config
 from swipe_data_utils import SwipeDataset, SwipeFeaturizer, KeyboardGrid, collate_fn
 
 # ExecuTorch PT2E
@@ -59,7 +59,13 @@ def calibrate_encoder(prepared_encoder: torch.nn.Module,
     dl = torch.utils.data.DataLoader(
         ds, batch_size=batch_size, collate_fn=collate_fn, shuffle=False, num_workers=0
     )
-    prepared_encoder.eval()
+    # Skip eval() for PT2E models as it's not supported
+    try:
+        prepared_encoder.eval()
+    except NotImplementedError:
+        # PT2E models don't support eval() - use the move function instead
+        from torch.ao.quantization import move_exported_model_to_eval
+        prepared_encoder = move_exported_model_to_eval(prepared_encoder)
     for i, batch in enumerate(dl):
         if i >= num_batches:
             break
@@ -81,15 +87,64 @@ def main():
     args = ap.parse_args()
 
     # 1) Load your trained subclass (ensures same module graph)
-    log.info(f"Loading trained model from {args.nemo_model}")
-    model = GestureRNNTModel.restore_from(args.nemo_model, map_location="cpu").eval()
+    # Check if input is .nemo or .ckpt
+    if args.nemo_model.endswith('.ckpt'):
+        log.info(f"Loading checkpoint directly: {args.nemo_model}")
+        # Load checkpoint and create model compatible with it
+        ckpt = torch.load(args.nemo_model, map_location="cpu", weights_only=False)
+
+        # Create model with proper config (load from hyperparameters in checkpoint if available)
+        if 'hyper_parameters' in ckpt:
+            cfg = ckpt['hyper_parameters']['cfg']
+        else:
+            # Use default config but with torch.compile disabled
+            cfg = get_default_config()
+
+        model = GestureRNNTModel(cfg).eval()
+
+        # Clean up torch.compile keys
+        state_dict = ckpt["state_dict"]
+        new_state_dict = {}
+        for key, value in state_dict.items():
+            if key.startswith("encoder._orig_mod."):
+                new_key = key.replace("encoder._orig_mod.", "encoder.")
+                new_state_dict[new_key] = value
+            else:
+                new_state_dict[key] = value
+
+        model.load_state_dict(new_state_dict, strict=False)  # Use strict=False to ignore missing keys
+    else:
+        log.info(f"Loading trained model from {args.nemo_model}")
+        model = GestureRNNTModel.restore_from(args.nemo_model, map_location="cpu").eval()
+
     encoder = model.encoder  # ConformerEncoder
+
+    # Wrap the encoder for PT2E (needs to be a proper module)
+    class EncoderWrapper(torch.nn.Module):
+        def __init__(self, encoder):
+            super().__init__()
+            self.encoder = encoder
+        def forward(self, feats_bft, lengths):
+            return self.encoder(audio_signal=feats_bft, length=lengths)
+
+    wrapped_encoder = EncoderWrapper(encoder).eval()
+
+    # First export the model with torch.export
+    B, F, T = 1, 37, int(args.max_trace_len)
+    example_feats_bft = torch.randn(B, F, T, dtype=torch.float32)
+    example_lens = torch.tensor([T], dtype=torch.int32)
 
     # 2) Prepare PT2E quant with XNNPACK
     quantizer = XNNPACKQuantizer()
     quantizer.set_global(get_symmetric_quantization_config(is_per_channel=True))
     log.info("Inserting observers (prepare_pt2e)...")
-    prepared_encoder = prepare_pt2e(encoder, quantizer)
+
+    # Need to export first, then prepare PT2E
+    log.info("Exporting model with torch.export...")
+    exported_model = torch.export.export(wrapped_encoder, (example_feats_bft, example_lens))
+
+    # Convert to eager mode for PT2E
+    prepared_encoder = prepare_pt2e(exported_model.module(), quantizer)
 
     # 3) Calibrate with representative data (tuple-aware)
     calibrate_encoder(prepared_encoder, args.val_manifest, args.vocab,

@@ -359,7 +359,7 @@ def main():
         # RNN-T Loss configuration
         'loss': {
             '_target_': 'nemo.collections.asr.losses.rnnt.RNNTLoss',
-            'loss_name': 'warprnnt',  # Try warprnnt (GPU) first for faster computation
+            'loss_name': 'warprnnt_numba',  # Try warprnnt (GPU) first for faster computation
             'blank_idx': 0,
             'fastemit_lambda': 0.001,  # Small FastEmit regularization for faster convergence
             'clamp': -1.0,  # Clamp for logits (-1 = disabled)

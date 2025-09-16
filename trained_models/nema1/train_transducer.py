@@ -366,6 +366,22 @@ def main():
     # Create a custom subclass to handle our feature format
     class GestureRNNTModel(nemo_asr.models.EncDecRNNTModel):
         """Custom RNN-T model that bypasses audio preprocessing."""
+        def _force_disable_decode_graphs(self):
+            for obj in (getattr(self, "decoding", None), getattr(self, "wer", None)):
+                dec = getattr(obj, "decoding", None)
+                if dec is None: continue
+                for attr in ("enable_cuda_graphs", "use_cuda_graph_decoder"):
+                    if hasattr(dec, attr): setattr(dec, attr, False)
+                if hasattr(dec, "decoding_computer") and hasattr(dec.decoding_computer, "use_cuda_graph_decoder"):
+                    dec.decoding_computer.use_cuda_graph_decoder = False
+
+        def on_train_epoch_start(self):
+            super().on_train_epoch_start(); self._force_disable_decode_graphs()
+
+        def on_validation_epoch_start(self):
+            super().on_validation_epoch_start(); self._force_disable_decode_graphs()
+
+
         def validation_step(self, batch, batch_idx: int, dataloader_idx: int = 0):
         # Temporarily disable autocast so logits/ops are fp32 inside NeMo's decode
             if torch.cuda.is_available():
@@ -457,6 +473,7 @@ def main():
                     cfg.decoding.greedy_batch.use_cuda_graph_decoder = False
             # Call parent implementation
             result = super()._setup_decoding(cfg)
+            self._force_disable_decode_graphs()
 
             # Double-check after setup
             if hasattr(self, 'decoding') and hasattr(self.decoding, 'decoding'):
@@ -473,6 +490,7 @@ def main():
         def setup_optimization(self, optim_config=None):
             """Override to disable CUDA graphs after optimizer setup."""
             result = super().setup_optimization(optim_config)
+            self._force_disable_decode_graphs()
 
             # Disable CUDA graphs for WER metric to avoid bf16 conflicts
             # This must be done after setup_optimization where the decoder is created
@@ -492,6 +510,7 @@ def main():
         def on_validation_epoch_start(self):
             """Ensure CUDA graphs are disabled before validation."""
             super().on_validation_epoch_start()
+            self._force_disable_decode_graphs()
             # Double-check CUDA graphs are disabled for validation
             if hasattr(self, 'wer') and hasattr(self.wer, 'decoding'):
                 if hasattr(self.wer.decoding, 'decoding'):

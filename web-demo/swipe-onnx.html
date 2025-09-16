@@ -416,23 +416,24 @@
                 
                 // Load ONNX models with proper options
                 const sessionOptions = {
-                    executionProviders: ['wasm'],
+                    executionProviders: ['webgpu', 'wasm'],
                     graphOptimizationLevel: 'all'
                 };
                 
-                encoderSession = await ort.InferenceSession.create('swipe_model_character_quant.onnx', sessionOptions);
-                console.log('Encoder model loaded');
-                
+                encoderSession = await ort.InferenceSession.create('encoder_web_ultra_web_final.onnx', sessionOptions);
+                console.log('Ultra-optimized encoder model loaded (25MB INT8)');
+
                 // Log input/output names for debugging
                 console.log('Model inputs:', encoderSession.inputNames);
                 console.log('Model outputs:', encoderSession.outputNames);
-                
+
                 // Load decoder model - required for beam search decoding
-                updateLoadingStatus('Loading decoder model...');
-                decoderSession = await ort.InferenceSession.create('swipe_decoder_character_quant.onnx', sessionOptions);
-                console.log('Decoder model loaded');
-                console.log('Decoder inputs:', decoderSession.inputNames);
-                console.log('Decoder outputs:', decoderSession.outputNames);
+                // TODO: Need to export step model for full RNNT beam search
+                updateLoadingStatus('⚠️ Step model not available - using encoder-only mode');
+                // decoderSession = await ort.InferenceSession.create('rnnt_step_fp32.onnx', sessionOptions);
+                // console.log('Decoder model loaded');
+                // console.log('Decoder inputs:', decoderSession.inputNames);
+                // console.log('Decoder outputs:', decoderSession.outputNames);
                 
                 // Load vocabulary dictionary
                 updateLoadingStatus('Loading vocabulary...');
