@@ -377,6 +377,7 @@
         // RNNT runtime variables
         let runtimeMeta = null;
         let wordList = null;
+        let wordLogPrior = null; // Word frequency priors for beam search
         let trieRoot = null;
         
         // Expose for debugging
@@ -509,6 +510,16 @@
                 const wordsText = await fetchText('words.txt');
                 wordList = wordsText.split(/\r?\n/).filter(s => s.length > 0);
                 console.log(`Vocabulary wordlist loaded: ${wordList.length} words`);
+
+                // Calculate word frequency priors (assuming words.txt is frequency-sorted)
+                const totalWords = wordList.length;
+                wordLogPrior = new Float32Array(totalWords);
+                for (let i = 0; i < totalWords; i++) {
+                    // Simple inverse rank priority for frequency-sorted list
+                    const pseudo_freq = totalWords - i;
+                    wordLogPrior[i] = Math.log(pseudo_freq / totalWords);
+                }
+                console.log(`Word frequency priors calculated: ${wordLogPrior.length} entries`);
 
                 // Build trie for lexicon-constrained beam search
                 updateLoadingStatus('Building trie...');
@@ -1494,8 +1505,8 @@
                 for (let colIdx = 0; colIdx < row.length; colIdx++) {
                     const char = row[colIdx];
                     if (chars.includes(char)) {
-                        const kx = (colIdx + 0.5) / 10;  // [0,1] range as per KeyboardGrid
-                        const ky = (rowIdx + 0.5) / 3;   // [0,1] range as per KeyboardGrid
+                        const kx = ((colIdx + 0.5) / 10) * 2 - 1;  // Convert [0,1] to [-1,1]
+                        const ky = ((rowIdx + 0.5) / 3) * 2 - 1;   // Convert [0,1] to [-1,1]
                         charToPos[char] = [kx, ky];
                     }
                 }
@@ -1507,9 +1518,9 @@
             for (let idx = 0; idx < T; idx++) {
                 const curr = features.path[idx];
 
-                // Basic position features - EXACT match to training code
-                const x = curr.x || 0;  // Already normalized [0,1] by prepareSwipeFeatures
-                const y = curr.y || 0;  // Already normalized [0,1] by prepareSwipeFeatures
+                // Basic position features - Convert from [0,1] to [-1,1] for training match
+                const x = ((curr.x || 0) * 2) - 1;  // Convert [0,1] to [-1,1]
+                const y = ((curr.y || 0) * 2) - 1;  // Convert [0,1] to [-1,1]
                 const t = ((curr.t || idx * 10) - traceStartTime) / 1000.0;  // RELATIVE time in seconds from start
 
                 // Velocity features - EXACT match to training code
@@ -1654,12 +1665,12 @@
                 runtimeMeta,
                 wordList,
                 trieRoot,
-                null, // no language model priors for now
+                wordLogPrior, // Pass calculated word frequency priors
                 {
                     beamSize: 16,    // Increased for more diversity
                     prunePerBeam: 8, // Increased to explore more candidates
                     maxSymbols: 15,  // Keep reasonable for speed
-                    lmLambda: 0.1,   // Much lower to reduce language model bias
+                    lmLambda: 0.4,   // Increased from 0.1 to give dictionary more weight
                     topK: 5
                 }
             );
