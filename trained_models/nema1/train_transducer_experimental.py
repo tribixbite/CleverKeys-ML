@@ -11,7 +11,7 @@ import glob
 import json
 import torch
 import lightning.pytorch as pl
-from lightning.pytorch.callbacks import ModelCheckpoint
+from lightning.pytorch.callbacks import ModelCheckpoint, StochasticWeightAveraging
 import numpy as np
 from torch.utils.data import Dataset, DataLoader
 from torch.nn.utils.rnn import pad_sequence
@@ -22,6 +22,7 @@ import logging
 # NeMo imports
 import nemo.collections.asr as nemo_asr
 from nemo.utils import logging as nemo_logging
+import torch.nn.functional as F
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -337,6 +338,20 @@ def main():
     )
     logger.info(f"Validation dataloader created with batch_size={cfg.training.batch_size * 2}")
     
+    # Create a word-to-ID mapping for the auxiliary loss
+    logger.info("Creating word-to-ID mapping for auxiliary loss...")
+    word_to_id = {}
+    id_to_word = {}
+    with open(cfg.data.vocab_path, 'r', encoding='utf-8') as f:
+        for i, line in enumerate(f):
+            word = line.strip()
+            if word:  # Skip empty lines
+                word_to_id[word] = i
+                id_to_word[i] = word
+
+    num_words = len(word_to_id)
+    logger.info(f"Created word vocabulary with {num_words} unique words")
+
     # Configure the full EncDecRNNTModel with proper RNN-T components
     model_config = DictConfig({
         # Vocabulary labels and required fields
@@ -428,10 +443,10 @@ def main():
         'decoding': {
             'strategy': 'greedy_batch',  # Much faster batched greedy decoding
             'greedy': {
-                'max_symbols': 15,  # Reduced for faster validation
+                'max_symbols': 30,  # Increased for better spelling fidelity on longer words
             },
             'greedy_batch': {
-                'max_symbols': 13,
+                'max_symbols': 30,  # Increased from 13 to prevent premature truncation
                 'enable_cuda_graphs': False,  # Disable due to bf16 dtype conflict
                 # 'precision': 'bf16-mixed',
             },
@@ -465,8 +480,17 @@ def main():
             '_target_': 'nemo.collections.asr.losses.rnnt.RNNTLoss',
             'loss_name': 'warprnnt_numba',  # Try warprnnt (GPU) first for faster computation
             'blank_idx': 0,
-            'fastemit_lambda': 0.001,  # Small FastEmit regularization for faster convergence
+            'fastemit_lambda': 0.0,  # Set to 0.0 for cleaner spellings (prevents extra insertions)
             'clamp': -1.0,  # Clamp for logits (-1 = disabled)
+        },
+
+        # Auxiliary Word-ID loss configuration (for better discriminability)
+        'auxiliary_loss': {
+            'word_classifier': {
+                'hidden_size': 256,  # Small classifier head
+                'dropout': 0.1,
+                'weight': 0.2,  # λ_word = 0.2 mixing weight
+            }
         },
         
         # Training configuration - set to None to skip NeMo's default data loading
@@ -477,7 +501,7 @@ def main():
         'spec_augment': None,  # Disable spec augmentation for gesture data
     })
     
-    # Create a custom subclass to handle our feature format
+    # Create a custom subclass with auxiliary word classification loss
     class GestureRNNTModel(nemo_asr.models.EncDecRNNTModel):
         """Custom RNN-T model that bypasses audio preprocessing."""
         def validation_step(self, batch, batch_idx: int, dataloader_idx: int = 0):
@@ -497,6 +521,24 @@ def main():
                     cfg.decoding.greedy_batch.use_cuda_graph_decoder = False
 
             super().__init__(cfg=cfg)
+
+            # Add auxiliary word classifier for better discriminability
+            if hasattr(cfg, 'auxiliary_loss') and 'word_classifier' in cfg.auxiliary_loss:
+                aux_cfg = cfg.auxiliary_loss.word_classifier
+                encoder_dim = cfg.encoder.d_model
+                self.word_classifier = torch.nn.Sequential(
+                    torch.nn.Linear(encoder_dim, aux_cfg.hidden_size),
+                    torch.nn.ReLU(),
+                    torch.nn.Dropout(aux_cfg.dropout),
+                    torch.nn.Linear(aux_cfg.hidden_size, num_words)
+                )
+                self.word_loss_weight = aux_cfg.weight
+                self.word_to_id = word_to_id
+                logger.info(f"✓ Added word classifier: {encoder_dim} → {aux_cfg.hidden_size} → {num_words} words")
+            else:
+                self.word_classifier = None
+                self.word_loss_weight = 0.0
+                logger.info("No auxiliary word classifier configured")
 
             # Apply torch.compile if available but disable CUDA graphs to avoid conflicts
             if hasattr(torch, 'compile'):
@@ -572,6 +614,91 @@ def main():
             """Ensure CUDA graphs are disabled at start of each training epoch."""
             super().on_train_epoch_start()
             self._force_disable_decode_graphs()
+
+        def training_step(self, batch, batch_idx):
+            """Override training step to include auxiliary word loss."""
+            # Standard RNNT training step
+            loss_dict = super().training_step(batch, batch_idx)
+
+            # Add auxiliary word classification loss if configured
+            if self.word_classifier is not None and self.word_loss_weight > 0:
+                try:
+                    # Extract features and targets from batch
+                    if isinstance(batch, dict):
+                        features = batch.get('features') or batch.get('input_signal')
+                        lengths = batch.get('feature_lengths') or batch.get('input_signal_length')
+                        transcript = batch.get('transcript') or batch.get('targets')
+                    else:
+                        features, lengths, transcript, _ = batch
+
+                    # Forward pass through encoder to get pooled representation
+                    with torch.cuda.amp.autocast(enabled=False):  # Use fp32 for stability
+                        # Transpose to match encoder input format (B, F, T)
+                        if features.dim() == 3:
+                            encoder_features = features.transpose(1, 2)
+                        else:
+                            encoder_features = features
+
+                        # Get encoder output
+                        encoded, encoded_len = self.encoder(audio_signal=encoder_features, length=lengths)
+
+                        # Pool encoder output (mean over time dimension)
+                        pooled = []
+                        for i, seq_len in enumerate(encoded_len):
+                            # Pool over valid timesteps only
+                            valid_encoded = encoded[i, :seq_len]  # (T, D)
+                            pooled_seq = torch.mean(valid_encoded, dim=0)  # (D,)
+                            pooled.append(pooled_seq)
+                        pooled = torch.stack(pooled)  # (B, D)
+
+                        # Get word predictions
+                        word_logits = self.word_classifier(pooled)
+
+                        # Create word targets
+                        word_targets = []
+                        for trans in transcript:
+                            if isinstance(trans, str):
+                                word = trans.strip()
+                            else:
+                                # Handle tensor/list of tokens - reconstruct word
+                                word = ''.join([self.vocabulary.id_to_token(int(t)) for t in trans if int(t) != 0])
+
+                            if word in self.word_to_id:
+                                word_targets.append(self.word_to_id[word])
+                            else:
+                                # Use a default ID for unknown words (first word in vocab)
+                                word_targets.append(0)
+
+                        word_targets = torch.tensor(word_targets, device=word_logits.device)
+
+                        # Compute auxiliary word loss
+                        word_loss = F.cross_entropy(word_logits, word_targets)
+
+                        # Add to total loss
+                        if isinstance(loss_dict, dict):
+                            rnnt_loss = loss_dict.get('loss', 0)
+                        else:
+                            rnnt_loss = loss_dict
+
+                        total_loss = rnnt_loss + self.word_loss_weight * word_loss
+
+                        # Log auxiliary loss
+                        self.log('train_word_loss', word_loss, prog_bar=False, logger=True)
+                        self.log('train_total_loss', total_loss, prog_bar=True, logger=True)
+
+                        if isinstance(loss_dict, dict):
+                            loss_dict['loss'] = total_loss
+                            loss_dict['word_loss'] = word_loss
+                            return loss_dict
+                        else:
+                            return total_loss
+
+                except Exception as e:
+                    logger.warning(f"Auxiliary word loss computation failed: {e}")
+                    # Return original loss if auxiliary loss fails
+                    pass
+
+            return loss_dict
 
     # If NeMo re-creates metrics later, re-wrap them:
         # def setup_optimization(self, optim_config=None):
@@ -677,6 +804,19 @@ def main():
         save_last=True,
         verbose=True
     )
+
+    # SWA callback for stabilization and better quantization
+    # Apply SWA for last 20% of epochs for better convergence
+    swa_start_epoch = max(1, int(cfg.training.max_epochs * 0.8))  # Start at 80% of training
+    swa_callback = StochasticWeightAveraging(
+        swa_lrs=cfg.training.learning_rate * 0.1,  # Lower LR for SWA
+        swa_epoch_start=swa_start_epoch,
+        annealing_epochs=10,  # Gradual transition
+    )
+
+    callbacks = [prediction_logger, checkpoint_callback, swa_callback]
+    logger.info(f"✓ SWA will start at epoch {swa_start_epoch} (80% of {cfg.training.max_epochs} epochs)")
+    logger.info("✓ SWA helps stabilize training and improves quantization performance")
     
     # Configure PyTorch Lightning trainer with RTX 4090M optimizations
     trainer = pl.Trainer(
@@ -690,7 +830,7 @@ def main():
         check_val_every_n_epoch=5,
         limit_val_batches=64,
         # val_check_interval=1.0,  # Validate every 5 epochs only
-        callbacks=[prediction_logger, checkpoint_callback],
+        callbacks=callbacks,
         enable_checkpointing=True,
         default_root_dir="./rnnt_checkpoints_" + runtime_id, # use the date and time to make it unique
         enable_model_summary=False,  # Disable to reduce overhead
