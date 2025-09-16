@@ -16,10 +16,14 @@ kenlm/
 wikipedia/
 *_logs*/
 __pycache__/
+__pycache__/*.*
 .specstory/
+.specstory/**/*.*
 .specstory/history/
+.specstory/history/*.*
+.specstory/history/2025-09-08_13-41Z-read-uv-docs-and-initialize-project.md
 .specstory/ai_rules_backups/
 .specstory/.project.json
 .specstory/.gitignore
 .specstory/.what-is-this.md
-.specstory/.specstory/
+.specstory/

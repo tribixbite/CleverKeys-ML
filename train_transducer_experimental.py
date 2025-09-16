@@ -62,11 +62,11 @@ CONFIG = {
         "max_trace_len": 200,
     },
     "training": {
-        "batch_size": 256,  # Increased to better utilize GPU and reduce grid size warning
-        "num_workers": 12,  # Increased for better data loading
-        "learning_rate": 4e-4,  # Slightly higher LR with warmup for faster convergence
+        "batch_size": 384,  # Increased to 384 for better GPU utilization
+        "num_workers": 24,  # Increased for better data loading
+        "learning_rate": 4e-4,  # Keep LR the same to maintain quality
         "max_epochs": 100,
-        "gradient_accumulation": 1,  # Reduced since batch size is larger
+        "gradient_accumulation": 1,  # Keep at 1 since batch size is larger
         "accelerator": "gpu",
         "devices": 1,
         "precision": "bf16-mixed",  # Use bf16 instead of fp32 to avoid CUDA graph dtype issues
@@ -163,6 +163,15 @@ def main():
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
         logger.info("✓ Enabled TF32 and cuDNN optimizations for RTX 4090M")
+
+        # Enable SDPA/FlashAttention optimizations for attention kernels
+        try:
+            torch.backends.cuda.enable_flash_sdp(True)
+            torch.backends.cuda.enable_mem_efficient_sdp(True)
+            torch.backends.cuda.enable_math_sdp(False)  # Disable slower math implementation
+            logger.info("✓ Enabled SDPA Flash/Memory-Efficient attention optimizations")
+        except Exception as e:
+            logger.warning(f"Could not enable SDPA optimizations: {e}")
     
     # Load vocabulary
     vocab = {}
@@ -205,20 +214,21 @@ def main():
         shuffle=True,
         pin_memory=True,
         persistent_workers=True,
-        prefetch_factor=4
+        prefetch_factor=8,  # Increased for better prefetching
+        drop_last=True      # Drop last incomplete batch for uniform shapes
     )
     logger.info(f"Training dataloader created with batch_size={cfg.training.batch_size}")
     
     logger.info("Creating validation dataloader...")
     val_loader = DataLoader(
         dataset=val_dataset,
-        batch_size=cfg.training.batch_size * 4,
+        batch_size=cfg.training.batch_size * 2,  # Reasonable validation batch size
         collate_fn=collate_fn,
         num_workers=cfg.training.num_workers,
         shuffle=False,
         pin_memory=True,
         persistent_workers=True,
-        # prefetch_factor=4
+        prefetch_factor=8,  # Increased for better prefetching
         drop_last=True
     )
     logger.info(f"Validation dataloader created with batch_size={cfg.training.batch_size * 2}")
@@ -349,7 +359,7 @@ def main():
         # RNN-T Loss configuration
         'loss': {
             '_target_': 'nemo.collections.asr.losses.rnnt.RNNTLoss',
-            'loss_name': 'warprnnt_numba',  # 5-10x faster GPU-accelerated loss
+            'loss_name': 'warprnnt',  # Try warprnnt (GPU) first for faster computation
             'blank_idx': 0,
             'fastemit_lambda': 0.001,  # Small FastEmit regularization for faster convergence
             'clamp': -1.0,  # Clamp for logits (-1 = disabled)
@@ -394,8 +404,7 @@ def main():
                     dynamo.config.suppress_errors = True  # Continue on compilation errors
 
                     compile_kwargs = {
-                        'mode': 'max-autotune',  # Better for RNN-T models
-                        # 'mode': 'reduce-overhead',  # Better for RNN-T models
+                        'mode': 'max-autotune',  # Better kernel optimization than reduce-overhead
                         'options': {
                             'triton.cudagraphs': False,  # Disable CUDA graphs
                             'shape_padding': True,  # Enable shape padding
@@ -411,9 +420,9 @@ def main():
 
             # Make WER decoding fp32-safe and faster during training
 
-            self._wrap_wer_update_fp32(throttle_every_n=8)  # try 8 or 16; adjust as you like
+            self._wrap_wer_update_fp32(throttle_every_n=64, disable_in_train=False)  # Throttle WER to every 64 steps for monitoring
 
-        def _wrap_wer_update_fp32(self, throttle_every_n: int = 0):
+        def _wrap_wer_update_fp32(self, throttle_every_n: int = 0, disable_in_train: bool = True):
             """
             Ensures NeMo's WER.decode runs with autocast disabled (fp32), avoiding
             dtype mismatch inside label-looping RNNT greedy decode. Optionally
@@ -425,6 +434,9 @@ def main():
             original_update = self.wer.update
 
             def wrapped_update(*args, **kwargs):
+                # Skip entirely during training to eliminate decode overhead
+                if self.training and disable_in_train:
+                    return
                 # Throttle during training to reduce decode cost
                 if self.training and throttle_every_n and getattr(self, "trainer", None):
                     step = getattr(self.trainer, "global_step", 0) or 0
@@ -439,6 +451,23 @@ def main():
                     return original_update(*args, **kwargs)
 
             self.wer.update = wrapped_update
+
+        def _force_disable_decode_graphs(self):
+            """Force disable CUDA graphs in all decoding components to prevent re-enabling."""
+            for obj in (getattr(self, "decoding", None), getattr(self, "wer", None)):
+                dec = getattr(obj, "decoding", None)
+                if dec is not None:
+                    for attr in ("enable_cuda_graphs", "use_cuda_graph_decoder"):
+                        if hasattr(dec, attr):
+                            setattr(dec, attr, False)
+                    if hasattr(dec, "decoding_computer"):
+                        if hasattr(dec.decoding_computer, "use_cuda_graph_decoder"):
+                            dec.decoding_computer.use_cuda_graph_decoder = False
+
+        def on_train_epoch_start(self):
+            """Ensure CUDA graphs are disabled at start of each training epoch."""
+            super().on_train_epoch_start()
+            self._force_disable_decode_graphs()
 
     # If NeMo re-creates metrics later, re-wrap them:
         # def setup_optimization(self, optim_config=None):
@@ -492,13 +521,7 @@ def main():
         def on_validation_epoch_start(self):
             """Ensure CUDA graphs are disabled before validation."""
             super().on_validation_epoch_start()
-            # Double-check CUDA graphs are disabled for validation
-            if hasattr(self, 'wer') and hasattr(self.wer, 'decoding'):
-                if hasattr(self.wer.decoding, 'decoding'):
-                    self.wer.decoding.decoding.enable_cuda_graphs = False
-                    if hasattr(self.wer.decoding.decoding, 'decoding_computer'):
-                        # self.wer.decoding.decoding.decoding_computer.enable_cuda_graphs = False
-                        self.wer.decoding.decoding.decoding_computer.use_cuda_graph_decoder = False
+            self._force_disable_decode_graphs()
 
         def forward(self, input_signal=None, input_signal_length=None, processed_signal=None, processed_signal_length=None):
             """
