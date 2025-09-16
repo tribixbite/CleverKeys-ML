@@ -1295,12 +1295,13 @@
             const normalizedPath = [];
             const originalLength = Math.min(path.length, MAX_SEQUENCE_LENGTH);
             
-            // Take up to MAX_SEQUENCE_LENGTH points and normalize to [-1, 1] range
+            // Take up to MAX_SEQUENCE_LENGTH points and normalize to [0, 1] range
             for (let i = 0; i < Math.min(path.length, MAX_SEQUENCE_LENGTH); i++) {
                 const point = path[i];
                 normalizedPath.push({
-                    x: (point.x / NORMALIZED_WIDTH) * 2 - 1,  // [0,1] -> [-1,1]
-                    y: (point.y / NORMALIZED_HEIGHT) * 2 - 1, // [0,1] -> [-1,1]
+                    x: point.x / NORMALIZED_WIDTH,  // [0,1] range as per training
+                    y: point.y / NORMALIZED_HEIGHT, // [0,1] range as per training
+                    t: point.timestamp, // Keep original timestamp for relative time calc
                     key: point.key || null
                 });
             }
@@ -1493,39 +1494,46 @@
                 for (let colIdx = 0; colIdx < row.length; colIdx++) {
                     const char = row[colIdx];
                     if (chars.includes(char)) {
-                        const kx = ((colIdx + 0.5) / 10) * 2 - 1;  // [0,1] -> [-1,1]
-                        const ky = ((rowIdx + 0.5) / 3) * 2 - 1;   // [0,1] -> [-1,1]
+                        const kx = (colIdx + 0.5) / 10;  // [0,1] range as per KeyboardGrid
+                        const ky = (rowIdx + 0.5) / 3;   // [0,1] range as per KeyboardGrid
                         charToPos[char] = [kx, ky];
                     }
                 }
             }
 
+            // Calculate start time for relative time normalization
+            const startTime = features.path.length > 0 ? (features.path[0].t || 0) : 0;
+
             for (let idx = 0; idx < T; idx++) {
                 const curr = features.path[idx];
-                const baseIdx = idx * F;
 
-                // Basic position features
-                const x = curr.x || 0;
-                const y = curr.y || 0;
-                const t = (curr.timestamp || idx * 10) / 1000.0;  // Normalize time to seconds
+                // Basic position features - EXACT match to training code
+                const x = curr.x || 0;  // Already normalized [0,1] by prepareSwipeFeatures
+                const y = curr.y || 0;  // Already normalized [0,1] by prepareSwipeFeatures
+                const t = ((curr.t || idx * 10) - startTime) / 1000.0;  // RELATIVE time in seconds from start
 
-                // Velocity features
+                // Velocity features - EXACT match to training code
                 let vx = 0, vy = 0, speed = 0;
                 if (idx > 0) {
                     const prev = features.path[idx - 1];
-                    const dt = Math.max(((curr.timestamp || idx * 10) - (prev.timestamp || (idx-1) * 10)) / 1000.0, 0.001);
-                    vx = ((curr.x || 0) - (prev.x || 0)) / dt;
-                    vy = ((curr.y || 0) - (prev.y || 0)) / dt;
+                    const currTime = curr.t || idx * 10;
+                    const prevTime = prev.t || (idx-1) * 10;
+                    const dt = Math.max((currTime - prevTime) / 1000.0, 0.001);
+                    vx = (x - (prev.x || 0)) / dt;
+                    vy = (y - (prev.y || 0)) / dt;
                     speed = Math.sqrt(vx*vx + vy*vy);
                 }
 
-                // Acceleration features
+                // Acceleration features - EXACT match to training code
                 let ax = 0, ay = 0, acc = 0;
                 if (idx > 1) {
                     const prev = features.path[idx - 1];
                     const prev2 = features.path[idx - 2];
-                    const dt1 = Math.max(((curr.timestamp || idx * 10) - (prev.timestamp || (idx-1) * 10)) / 1000.0, 0.001);
-                    const dt2 = Math.max(((prev.timestamp || (idx-1) * 10) - (prev2.timestamp || (idx-2) * 10)) / 1000.0, 0.001);
+                    const currTime = curr.t || idx * 10;
+                    const prevTime = prev.t || (idx-1) * 10;
+                    const prev2Time = prev2.t || (idx-2) * 10;
+                    const dt1 = Math.max((currTime - prevTime) / 1000.0, 0.001);
+                    const dt2 = Math.max((prevTime - prev2Time) / 1000.0, 0.001);
 
                     const vx_prev = ((prev.x || 0) - (prev2.x || 0)) / dt2;
                     const vy_prev = ((prev.y || 0) - (prev2.y || 0)) / dt2;
@@ -1535,7 +1543,7 @@
                     acc = Math.sqrt(ax*ax + ay*ay);
                 }
 
-                // Direction features
+                // Direction features - EXACT match to training code
                 let angle = 0, angle_sin = 0, angle_cos = 0;
                 if (idx > 0) {
                     angle = Math.atan2(vy, vx);
@@ -1543,59 +1551,40 @@
                     angle_cos = Math.cos(angle);
                 }
 
-                // Curvature (change in angle)
+                // Curvature (change in angle) - EXACT match to training code
                 let curvature = 0;
                 if (idx > 1) {
                     const prev = features.path[idx - 1];
                     const prev2 = features.path[idx - 2];
                     const angle_prev = Math.atan2((prev.y || 0) - (prev2.y || 0), (prev.x || 0) - (prev2.x || 0));
                     curvature = angle - angle_prev;
-                    // Normalize to [-pi, pi]
+                    // Normalize to [-pi, pi] - EXACT match to training code
                     while (curvature > Math.PI) curvature -= 2 * Math.PI;
                     while (curvature < -Math.PI) curvature += 2 * Math.PI;
                 }
 
-                // Distance to nearest keys (top 5)
-                const keyDistances = [];
+                // Distance to nearest keys (top 5) - EXACT match to training code
+                const key_distances = [];
                 for (const [char, [kx, ky]] of Object.entries(charToPos)) {
                     const dist = Math.sqrt((x - kx)**2 + (y - ky)**2);
-                    keyDistances.push(dist);
+                    key_distances.push(dist);
                 }
-                keyDistances.sort((a, b) => a - b);
-                const top5Distances = keyDistances.slice(0, 5);
+                key_distances.sort((a, b) => a - b);
+                const top5Distances = key_distances.slice(0, 5);
                 while (top5Distances.length < 5) {
                     top5Distances.push(1.0);  // Max distance as padding
                 }
 
-                // Segment features
-                const totalPoints = T;
-                const progress = idx / Math.max(totalPoints - 1, 1);  // Position in trace [0, 1]
+                // Segment features - EXACT match to training code
+                const total_points = T;
+                const progress = idx / Math.max(total_points - 1, 1);  // Position in trace [0, 1]
 
-                // Start/end indicators
-                const isStart = idx === 0 ? 1.0 : 0.0;
-                const isEnd = idx === totalPoints - 1 ? 1.0 : 0.0;
+                // Start/end indicators - EXACT match to training code
+                const is_start = idx === 0 ? 1.0 : 0.0;
+                const is_end = idx === total_points - 1 ? 1.0 : 0.0;
 
-                // Window statistical features
-                const windowSize = 5;
-                const windowStart = Math.max(0, idx - Math.floor(windowSize / 2));
-                const windowEnd = Math.min(T, idx + Math.floor(windowSize / 2) + 1);
-                const windowPoints = features.path.slice(windowStart, windowEnd);
-
-                let meanX = x, stdX = 0, meanY = y, stdY = 0, rangeX = 0, rangeY = 0;
-                if (windowPoints.length > 1) {
-                    const windowX = windowPoints.map(p => p.x || 0);
-                    const windowY = windowPoints.map(p => p.y || 0);
-
-                    meanX = windowX.reduce((a, b) => a + b, 0) / windowX.length;
-                    meanY = windowY.reduce((a, b) => a + b, 0) / windowY.length;
-                    stdX = Math.sqrt(windowX.map(wx => (wx - meanX)**2).reduce((a, b) => a + b, 0) / windowX.length);
-                    stdY = Math.sqrt(windowY.map(wy => (wy - meanY)**2).reduce((a, b) => a + b, 0) / windowY.length);
-                    rangeX = Math.max(...windowX) - Math.min(...windowX);
-                    rangeY = Math.max(...windowY) - Math.min(...windowY);
-                }
-
-                // Assemble exact 37D feature vector matching SwipeFeaturizer._extract_point_features
-                const featVec = [
+                // Compile features list - EXACT match to training code structure
+                const featList = [
                     x, y, t,                          // Position and time (3)
                     vx, vy, speed,                    // Velocity (3)
                     ax, ay, acc,                      // Acceleration (3)
@@ -1603,18 +1592,42 @@
                     curvature,                        // Curvature (1)
                     ...top5Distances,                 // Nearest keys (5)
                     progress,                         // Progress (1)
-                    isStart, isEnd,                   // Indicators (2)
-                    meanX, stdX, meanY, stdY, rangeX, rangeY  // Window stats (6)
+                    is_start, is_end,                 // Indicators (2)
                 ];
 
-                // Ensure exactly 37 features with padding if needed
-                while (featVec.length < 37) {
-                    featVec.push(0.0);
+                // Add statistical features from window - EXACT match to training code
+                const window_size = 5;
+                const window_start = Math.max(0, idx - Math.floor(window_size / 2));
+                const window_end = Math.min(T, idx + Math.floor(window_size / 2) + 1);
+                const window_points = features.path.slice(window_start, window_end);
+
+                if (window_points.length > 1) {
+                    const window_x = window_points.map(p => p.x || 0);
+                    const window_y = window_points.map(p => p.y || 0);
+
+                    const mean_x = window_x.reduce((a, b) => a + b, 0) / window_x.length;
+                    const mean_y = window_y.reduce((a, b) => a + b, 0) / window_y.length;
+                    const std_x = Math.sqrt(window_x.map(wx => (wx - mean_x)**2).reduce((a, b) => a + b, 0) / window_x.length);
+                    const std_y = Math.sqrt(window_y.map(wy => (wy - mean_y)**2).reduce((a, b) => a + b, 0) / window_y.length);
+                    const range_x = Math.max(...window_x) - Math.min(...window_x);
+                    const range_y = Math.max(...window_y) - Math.min(...window_y);
+
+                    featList.push(mean_x, std_x, mean_y, std_y, range_x, range_y);
+                } else {
+                    featList.push(x, 0, y, 0, 0, 0);  // Use current point with no variance
                 }
 
-                // Copy to features tensor: BFT format [1, 37, T] -> transposed access
-                for (let f = 0; f < Math.min(37, featVec.length); f++) {
-                    featuresBFT[f * T + idx] = featVec[f];
+                // Add padding features to reach target dimension - EXACT match to training code
+                while (featList.length < 37) {
+                    featList.push(0.0);
+                }
+
+                // Ensure exactly 37 features - EXACT match to training code
+                const features37 = featList.slice(0, 37);
+
+                // Copy to BFT tensor [1, F=37, T] - correct indexing
+                for (let f = 0; f < 37; f++) {
+                    featuresBFT[f * T + idx] = features37[f];
                 }
             }
 
