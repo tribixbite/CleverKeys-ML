@@ -212,12 +212,14 @@ def main():
     logger.info("Creating validation dataloader...")
     val_loader = DataLoader(
         dataset=val_dataset,
-        batch_size=cfg.training.batch_size * 2,
+        batch_size=cfg.training.batch_size * 4,
         collate_fn=collate_fn,
         num_workers=cfg.training.num_workers,
         shuffle=False,
         pin_memory=True,
-        persistent_workers=True
+        persistent_workers=True,
+        # prefetch_factor=4
+        drop_last=True
     )
     logger.info(f"Validation dataloader created with batch_size={cfg.training.batch_size * 2}")
     
@@ -315,7 +317,7 @@ def main():
                 'max_symbols': 15,  # Reduced for faster validation
             },
             'greedy_batch': {
-                'max_symbols': 15,
+                'max_symbols': 13,
                 'enable_cuda_graphs': False,  # Disable due to bf16 dtype conflict
                 # 'precision': 'bf16-mixed',
             },
@@ -335,6 +337,7 @@ def main():
             'lr': cfg.training.learning_rate,
             'betas': [0.9, 0.98],
             'weight_decay': 1e-3,
+            # 'fused': True,
             'sched': {
                 'name': 'CosineAnnealing',
                 'warmup_steps': 2000,  # Longer warmup for stability with higher LR
@@ -391,7 +394,8 @@ def main():
                     dynamo.config.suppress_errors = True  # Continue on compilation errors
 
                     compile_kwargs = {
-                        'mode': 'reduce-overhead',  # Better for RNN-T models
+                        'mode': 'max-autotune',  # Better for RNN-T models
+                        # 'mode': 'reduce-overhead',  # Better for RNN-T models
                         'options': {
                             'triton.cudagraphs': False,  # Disable CUDA graphs
                             'shape_padding': True,  # Enable shape padding
@@ -403,6 +407,44 @@ def main():
                     logger.info("Model compilation complete (cache limit increased to 256)")
                 except Exception as e:
                     logger.warning(f"torch.compile failed, continuing without compilation: {e}")
+
+
+            # Make WER decoding fp32-safe and faster during training
+
+            self._wrap_wer_update_fp32(throttle_every_n=8)  # try 8 or 16; adjust as you like
+
+        def _wrap_wer_update_fp32(self, throttle_every_n: int = 0):
+            """
+            Ensures NeMo's WER.decode runs with autocast disabled (fp32), avoiding
+            dtype mismatch inside label-looping RNNT greedy decode. Optionally
+            throttles updates during training to cut walltime.
+            """
+            if not hasattr(self, "wer") or not hasattr(self.wer, "update"):
+                return  # nothing to wrap yet
+
+            original_update = self.wer.update
+
+            def wrapped_update(*args, **kwargs):
+                # Throttle during training to reduce decode cost
+                if self.training and throttle_every_n and getattr(self, "trainer", None):
+                    step = getattr(self.trainer, "global_step", 0) or 0
+                    if step % throttle_every_n != 0:
+                        # Skip most batches; metrics still get periodic updates
+                        return
+
+                if torch.cuda.is_available():
+                    with torch.autocast(device_type="cuda", enabled=False):
+                        return original_update(*args, **kwargs)
+                else:
+                    return original_update(*args, **kwargs)
+
+            self.wer.update = wrapped_update
+
+    # If NeMo re-creates metrics later, re-wrap them:
+        # def setup_optimization(self, optim_config=None):
+        #     result = super().setup_optimization(optim_config)
+        #     self._wrap_wer_update_fp32(throttle_every_n=8)
+        #     return result
 
         def _setup_decoding(self, cfg):
             """Override to force disable CUDA graphs in decoding."""
@@ -518,14 +560,16 @@ def main():
         accumulate_grad_batches=cfg.training.gradient_accumulation,
         gradient_clip_val=1.0,
         log_every_n_steps=50,
-        val_check_interval=1.0,  # Validate every 5 epochs only
+        check_val_every_n_epoch=5,
+        limit_val_batches=64,
+        # val_check_interval=1.0,  # Validate every 5 epochs only
         callbacks=[prediction_logger, checkpoint_callback],
         enable_checkpointing=True,
         default_root_dir="./rnnt_checkpoints_" + runtime_id, # use the date and time to make it unique
         enable_model_summary=False,  # Disable to reduce overhead
         enable_progress_bar=True,
         # Minimal sanity check
-        num_sanity_val_steps=1,  # Just 1 batch for sanity check
+        num_sanity_val_steps=0,  # Just 1 batch for sanity check
         # Performance optimizations
         benchmark=True,  # Enable cuDNN benchmark
         sync_batchnorm=False,  # Not needed for single GPU
