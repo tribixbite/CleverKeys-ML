@@ -76,12 +76,13 @@ CONFIG_SMALL = {
     },
     "model": {
         "encoder": {
-            "feat_in": 37,  # 9 kinematic + 28 keys
+            "feat_in": 74,  # 37 * 2 (frame stacking factor)
             "d_model": 192,  # Reduced from 256 for smaller model size (~44% fewer params)
             "n_heads": 4,    # Keep proportional to d_model
             "num_layers": 6,  # Reduced from 8 for smaller model size (~25% fewer params)
-            "conv_kernel_size": 31,  # 31 is the original kernel size
+            "conv_kernel_size": 15,  # Reduced kernel size for efficiency
             "subsampling_factor": 2,  # Keep at 2 as requested (don't increase)
+            "att_context_size": [64, 64],  # Add attention windowing for efficiency
         },
         "decoder": {
             "pred_hidden": 256,  # Reduced proportionally
@@ -313,11 +314,24 @@ def main():
     logger.info(f"Validation dataset created with {len(val_dataset)} samples")
     
     # Create dataloaders with optimizations
+    # Determine if we should use frame stacking (for small config)
+    model_size = os.environ.get('MODEL_SIZE', 'large').lower()
+    use_frame_stacking = (model_size == 'small')
+
+    if use_frame_stacking:
+        logger.info("Using frame stacking (2x) for small config -> effective 4x sequence reduction")
+        # Create custom collate function with frame stacking
+        def custom_collate_fn(batch):
+            return collate_fn(batch, use_frame_stacking=True, stack_factor=2)
+        collate_function = custom_collate_fn
+    else:
+        collate_function = collate_fn
+
     logger.info("Creating training dataloader...")
     train_loader = DataLoader(
         dataset=train_dataset,
         batch_size=cfg.training.batch_size,
-        collate_fn=collate_fn,
+        collate_fn=collate_function,
         num_workers=cfg.training.num_workers,
         shuffle=True,
         pin_memory=True,
@@ -326,12 +340,12 @@ def main():
         drop_last=True      # Drop last incomplete batch for uniform shapes
     )
     logger.info(f"Training dataloader created with batch_size={cfg.training.batch_size}")
-    
+
     logger.info("Creating validation dataloader...")
     val_loader = DataLoader(
         dataset=val_dataset,
         batch_size=cfg.training.batch_size * 2,  # Reasonable validation batch size
-        collate_fn=collate_fn,
+        collate_fn=collate_function,
         num_workers=cfg.training.num_workers,
         shuffle=False,
         pin_memory=True,
@@ -408,7 +422,7 @@ def main():
             # Multi-head attention
             'self_attention_model': 'rel_pos',  # Relative positional encoding
             'n_heads': cfg.model.encoder.n_heads,
-            'att_context_size': [-1, -1],  # Unlimited context
+            'att_context_size': getattr(cfg.model.encoder, 'att_context_size', [-1, -1]),  # Use config value or unlimited
             'xscaling': True,  # Learnable scaling
             'untie_biases': True,
             'pos_emb_max_len': 5000,

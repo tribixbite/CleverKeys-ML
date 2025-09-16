@@ -199,18 +199,44 @@ class SwipeDataset(Dataset):
         )
 
 
-def collate_fn(batch):
+def _stack_time(x, lengths, factor=2):
+    """Frame stacking for effective sequence length reduction.
+
+    Args:
+        x: (B, T, F) tensor
+        lengths: (B,) tensor of sequence lengths
+        factor: stacking factor (default 2)
+
+    Returns:
+        x_stacked: (B, T//factor, F*factor) tensor
+        lengths_stacked: (B,) tensor with adjusted lengths
+    """
+    B, T, F = x.shape
+    T_trim = (T // factor) * factor
+    x = x[:, :T_trim, :]  # Trim to multiple of factor
+    x = x.view(B, T_trim // factor, F * factor)  # Stack adjacent frames
+    lengths = torch.div(lengths, factor, rounding_mode='floor')
+    return x, lengths
+
+
+def collate_fn(batch, use_frame_stacking=False, stack_factor=2):
     """Pads traces and tokens to create uniform batches."""
     features, feature_lengths, tokens, token_lengths = zip(*batch)
-    
+
     # Pad features to max length in batch
     padded_features = pad_sequence(features, batch_first=True, padding_value=0.0)
-    
+
+    # Apply frame stacking if enabled (for small config)
+    if use_frame_stacking:
+        padded_features, feature_lengths = _stack_time(padded_features, torch.stack(feature_lengths), stack_factor)
+    else:
+        # Stack lengths normally
+        feature_lengths = torch.stack(feature_lengths)
+
     # Pad tokens to max length in batch
     padded_tokens = pad_sequence(tokens, batch_first=True, padding_value=0)
-    
-    # Stack lengths
-    feature_lengths = torch.stack(feature_lengths)
+
+    # Stack token lengths
     token_lengths = torch.stack(token_lengths)
-    
+
     return padded_features, feature_lengths, padded_tokens, token_lengths
