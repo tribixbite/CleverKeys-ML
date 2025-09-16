@@ -1,0 +1,154 @@
+cfg:
+  labels:
+  - <blank>
+  - ''''
+  - a
+  - b
+  - c
+  - d
+  - e
+  - f
+  - g
+  - h
+  - i
+  - j
+  - k
+  - l
+  - m
+  - 'n'
+  - o
+  - p
+  - q
+  - r
+  - s
+  - t
+  - u
+  - v
+  - w
+  - x
+  - 'y'
+  - z
+  - <unk>
+  sample_rate: 16000
+  model_defaults:
+    enc_hidden: 256
+    pred_hidden: 320
+  preprocessor:
+    _target_: nemo.collections.asr.modules.AudioToMelSpectrogramPreprocessor
+    sample_rate: 16000
+    normalize: per_feature
+    window_size: 0.025
+    window_stride: 0.01
+    features: 37
+    n_fft: 512
+    frame_splicing: 1
+    dither: 1.0e-05
+  encoder:
+    _target_: nemo.collections.asr.modules.ConformerEncoder
+    feat_in: 37
+    n_layers: 8
+    d_model: 256
+    feat_out: -1
+    subsampling: striding
+    subsampling_factor: 2
+    subsampling_conv_channels: -1
+    ff_expansion_factor: 4
+    self_attention_model: rel_pos
+    n_heads: 4
+    att_context_size:
+    - -1
+    - -1
+    xscaling: true
+    untie_biases: true
+    pos_emb_max_len: 5000
+    conv_kernel_size: 31
+    conv_norm_type: batch_norm
+    dropout: 0.1
+    dropout_emb: 0.1
+    dropout_att: 0.1
+  decoder:
+    _target_: nemo.collections.asr.modules.rnnt.RNNTDecoder
+    prednet:
+      pred_hidden: 320
+      pred_rnn_layers: 2
+      forget_gate_bias: 1.0
+      t_max: null
+      dropout: 0.1
+    vocab_size: 29
+    blank_as_pad: true
+  joint:
+    _target_: nemo.collections.asr.modules.rnnt.RNNTJoint
+    fuse_loss_wer: false
+    jointnet:
+      joint_hidden: 512
+      activation: relu
+      dropout: 0.1
+    num_classes: 29
+    vocabulary:
+    - <blank>
+    - ''''
+    - a
+    - b
+    - c
+    - d
+    - e
+    - f
+    - g
+    - h
+    - i
+    - j
+    - k
+    - l
+    - m
+    - 'n'
+    - o
+    - p
+    - q
+    - r
+    - s
+    - t
+    - u
+    - v
+    - w
+    - x
+    - 'y'
+    - z
+    - <unk>
+    log_softmax: true
+    preserve_memory: false
+  decoding:
+    strategy: greedy_batch
+    greedy:
+      max_symbols: 15
+    greedy_batch:
+      max_symbols: 13
+      enable_cuda_graphs: false
+      use_cuda_graph_decoder: false
+    use_cuda_graphs: false
+    preserve_frame_confidence: false
+    preserve_alignments: false
+    compute_timestamps: false
+    preserve_word_confidence: false
+    confidence_method_cfg: null
+    use_cuda_graph_decoder: false
+  optim:
+    name: adamw
+    lr: 0.0004
+    betas:
+    - 0.9
+    - 0.98
+    weight_decay: 0.001
+    sched:
+      name: CosineAnnealing
+      warmup_steps: 2000
+      warmup_ratio: null
+      min_lr: 1.0e-06
+  loss:
+    _target_: nemo.collections.asr.losses.rnnt.RNNTLoss
+    loss_name: warprnnt_numba
+    blank_idx: 0
+    fastemit_lambda: 0.001
+    clamp: -1.0
+  train_ds: null
+  validation_ds: null
+  spec_augment: null
