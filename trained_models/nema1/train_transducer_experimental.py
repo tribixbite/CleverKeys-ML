@@ -24,7 +24,7 @@ import nemo.collections.asr as nemo_asr
 from nemo.utils import logging as nemo_logging
 import torch.nn.functional as F
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 # Import feature engineering utilities
@@ -280,9 +280,12 @@ def main():
     
     # Load vocabulary
     vocab = {}
+    id_to_vocab = {}
     with open(cfg.data.vocab_path, 'r', encoding='utf-8') as f:
         for i, line in enumerate(f):
-            vocab[line.strip()] = i
+            token = line.strip()
+            vocab[token] = i
+            id_to_vocab[i] = token
     vocab_size = len(vocab)
     logger.info(f"Vocabulary loaded with {vocab_size} tokens")
     
@@ -536,7 +539,15 @@ def main():
             # Add auxiliary word classifier for better discriminability
             if hasattr(cfg, 'auxiliary_loss') and 'word_classifier' in cfg.auxiliary_loss:
                 aux_cfg = cfg.auxiliary_loss.word_classifier
-                encoder_dim = cfg.encoder.d_model
+
+                # Dynamically determine actual encoder output dimension by running a test forward pass
+                with torch.no_grad():
+                    test_input = torch.randn(1, cfg.encoder.feat_in, 10)  # (B=1, F=feat_in, T=10)
+                    test_lengths = torch.tensor([10])
+                    test_encoded, _ = self.encoder(audio_signal=test_input, length=test_lengths)
+                    encoder_dim = test_encoded.shape[1]  # Get D from (B, D, T)
+
+                logger.info(f"Detected encoder output dimension: {encoder_dim} (config d_model: {cfg.encoder.d_model})")
                 self.word_classifier = torch.nn.Sequential(
                     torch.nn.Linear(encoder_dim, aux_cfg.hidden_size),
                     torch.nn.ReLU(),
@@ -642,23 +653,28 @@ def main():
                     else:
                         features, lengths, transcript, _ = batch
 
-                    # Forward pass through encoder to get pooled representation
+                    # Use cached encoder output from forward() to avoid duplicate computation
                     with torch.cuda.amp.autocast(enabled=False):  # Use fp32 for stability
-                        # Transpose to match encoder input format (B, F, T)
-                        if features.dim() == 3:
-                            encoder_features = features.transpose(1, 2)
+                        # Reuse encoder output from forward() pass instead of running encoder again
+                        if hasattr(self, '_cached_encoder_output') and self._cached_encoder_output is not None:
+                            encoded = self._cached_encoder_output
+                            encoded_len = self._cached_encoder_lengths
                         else:
-                            encoder_features = features
-
-                        # Get encoder output directly (not through joint network)
-                        encoded, encoded_len = self.encoder.encoder(features=encoder_features, length=lengths)
+                            # Fallback: run encoder if cache is not available (shouldn't happen during training)
+                            # Transpose to match encoder input format (B, F, T)
+                            if features.dim() == 3:
+                                encoder_features = features.transpose(1, 2)
+                            else:
+                                encoder_features = features
+                            encoded, encoded_len = self.encoder(audio_signal=encoder_features, length=lengths)
 
                         # Pool encoder output (mean over time dimension)
+                        # NeMo encoder outputs (B, D, T), need to pool over time dimension
                         pooled = []
                         for i, seq_len in enumerate(encoded_len):
-                            # Pool over valid timesteps only
-                            valid_encoded = encoded[i, :seq_len]  # (T, D)
-                            pooled_seq = torch.mean(valid_encoded, dim=0)  # (D,)
+                            # Pool over valid timesteps only: encoder shape is (B, D, T)
+                            valid_encoded = encoded[i, :, :seq_len]  # (D, T_valid)
+                            pooled_seq = torch.mean(valid_encoded, dim=-1)  # Pool over time dimension -> (D,)
                             pooled.append(pooled_seq)
                         pooled = torch.stack(pooled)  # (B, D)
 
@@ -671,19 +687,34 @@ def main():
                             if isinstance(trans, str):
                                 word = trans.strip()
                             else:
-                                # Handle tensor/list of tokens - reconstruct word
-                                word = ''.join([self.vocabulary.id_to_token(int(t)) for t in trans if int(t) != 0])
+                                # Handle tensor/list of tokens - reconstruct word from ground truth tokens
+                                # Filter out padding tokens (0) and create word
+                                if isinstance(trans, torch.Tensor):
+                                    token_ids = trans.cpu().numpy()
+                                else:
+                                    token_ids = trans
 
-                            if word in self.word_to_id:
+                                # Reconstruct word from character tokens, filtering padding
+                                chars = []
+                                for t in token_ids:
+                                    t_int = int(t)
+                                    if t_int != 0:  # Skip padding tokens
+                                        if t_int in self.id_to_vocab:
+                                            char = self.id_to_vocab[t_int]
+                                            if char != '<blank>' and char != '<unk>':  # Skip special tokens
+                                                chars.append(char)
+                                word = ''.join(chars)
+
+                            if word and word in self.word_to_id:
                                 word_targets.append(self.word_to_id[word])
                             else:
-                                # Use a default ID for unknown words (first word in vocab)
-                                word_targets.append(0)
+                                # Mask OOV words with ignore_index=-100 (PyTorch standard)
+                                word_targets.append(-100)
 
                         word_targets = torch.tensor(word_targets, device=word_logits.device)
 
-                        # Compute auxiliary word loss
-                        word_loss = F.cross_entropy(word_logits, word_targets)
+                        # Compute auxiliary word loss with ignore_index=-100 for OOV words
+                        word_loss = F.cross_entropy(word_logits, word_targets, ignore_index=-100)
 
                         # Add to total loss
                         if isinstance(loss_dict, dict):
@@ -708,6 +739,11 @@ def main():
                     logger.warning(f"Auxiliary word loss computation failed: {e}")
                     # Return original loss if auxiliary loss fails
                     pass
+                finally:
+                    # Clear cached encoder output to prevent memory leaks
+                    if hasattr(self, '_cached_encoder_output'):
+                        self._cached_encoder_output = None
+                        self._cached_encoder_lengths = None
 
             return loss_dict
 
@@ -778,11 +814,21 @@ def main():
 
             # Pass to encoder
             encoded, encoded_len = self.encoder(audio_signal=processed_signal, length=processed_signal_length)
+
+            # Cache encoder output during training for auxiliary loss to avoid duplicate forward pass
+            if self.training and self.word_classifier is not None:
+                self._cached_encoder_output = encoded
+                self._cached_encoder_lengths = encoded_len
+
             return encoded, encoded_len
 
     # Instantiate our custom NeMo model
     logger.info("Creating GestureRNNTModel...")
     model = GestureRNNTModel(cfg=model_config)
+
+    # Add vocabulary mapping to the model for auxiliary loss
+    model.id_to_vocab = id_to_vocab
+    model.word_to_id = word_to_id
 
     # Assign our custom dataloaders directly to the NeMo model
     model._train_dl = train_loader

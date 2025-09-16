@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>RNNT Debug Test</title>
+    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@latest/dist/ort.min.js"></script>
+</head>
+<body>
+    <h1>RNNT Model Debug Test</h1>
+    <div id="log"></div>
+
+    <script>
+        const log = (msg) => {
+            console.log(msg);
+            document.getElementById('log').innerHTML += '<div>' + msg + '</div>';
+        };
+
+        async function testModels() {
+            try {
+                log('Testing model loading...');
+
+                // Test encoder loading
+                log('Loading encoder...');
+                const encoder = await ort.InferenceSession.create('encoder_web_ultra_web_final.onnx');
+                log('✅ Encoder loaded successfully');
+                log('Encoder inputs: ' + JSON.stringify(encoder.inputNames));
+                log('Encoder outputs: ' + JSON.stringify(encoder.outputNames));
+
+                // Test step model loading
+                log('Loading step model...');
+                const stepModel = await ort.InferenceSession.create('rnnt_step_fp32.onnx');
+                log('✅ Step model loaded successfully');
+                log('Step inputs: ' + JSON.stringify(stepModel.inputNames));
+                log('Step outputs: ' + JSON.stringify(stepModel.outputNames));
+
+                // Test metadata loading
+                log('Loading runtime metadata...');
+                const response = await fetch('runtime_meta.json');
+                const metadata = await response.json();
+                log('✅ Metadata loaded: ' + JSON.stringify(metadata));
+
+                // Test vocabulary loading
+                log('Loading vocabulary...');
+                const vocabResponse = await fetch('words.txt');
+                const vocabText = await vocabResponse.text();
+                const words = vocabText.split('\n').filter(w => w.length > 0);
+                log('✅ Vocabulary loaded: ' + words.length + ' words');
+                log('First 10 words: ' + words.slice(0, 10).join(', '));
+
+                // Test simple encoder inference
+                log('Testing encoder inference...');
+                const dummyFeatures = new Float32Array(37 * 10); // 37 features, 10 timesteps
+                const dummyLengths = new Int32Array([10]);
+
+                const encResult = await encoder.run({
+                    features_bft: new ort.Tensor("float32", dummyFeatures, [1, 37, 10]),
+                    lengths: new ort.Tensor("int32", dummyLengths, [1])
+                });
+
+                log('✅ Encoder inference successful');
+                log('Encoder output shape: ' + JSON.stringify(encResult.encoded_btf.dims));
+
+                log('🎉 All tests passed! Models are working correctly.');
+
+            } catch (error) {
+                log('❌ Error: ' + error.message);
+                log('Stack: ' + error.stack);
+            }
+        }
+
+        // Run tests when page loads
+        testModels();
+    </script>
+</body>
+</html>
