@@ -1,0 +1,73 @@
+name: Deploy Web Demo to GitHub Pages
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'web-demo/**'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'web-demo/**'
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+
+      - name: Prepare demo files
+        run: |
+          # Copy web-demo to root for GitHub Pages
+          cp -r web-demo/* .
+
+          # Verify all required files are present
+          echo "🔍 Checking required files..."
+          ls -la *.html *.onnx *.json *.txt *.js
+
+          # Check file sizes
+          echo "📊 Model file sizes:"
+          du -h *.onnx || echo "No ONNX files found"
+          du -h runtime_meta.json words.txt || echo "Missing metadata files"
+
+          echo "✅ Demo files prepared successfully"
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: '.'
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+      - name: Post-deployment verification
+        run: |
+          echo "🚀 Deployment complete!"
+          echo "🌐 Demo URL: ${{ steps.deployment.outputs.page_url }}"
+          echo "🎯 Main demo: ${{ steps.deployment.outputs.page_url }}swipe-onnx.html"
+
+          # Check if this was triggered by a main branch push
+          if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+            echo "✅ Production deployment from main branch"
+          else
+            echo "🧪 Preview deployment from ${{ github.ref }}"
+          fi

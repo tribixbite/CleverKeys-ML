@@ -184,13 +184,13 @@ def main():
             # Safer: run encoder once:
             D = None
             try:
-                # Use model.encoder with (B,F,T) and length
+                # Use model.encoder with correct keyword arguments
                 F = model.cfg.encoder.get("feat_in", 37)
                 T = 10
                 feats_bft = torch.randn(B, F, T)
                 lens = torch.tensor([T], dtype=torch.int32)
-                enc_btf, _ = model.encoder(feats_bft, lens)   # (B,T',D)
-                D = enc_btf.shape[-1]
+                enc_bdt, _ = model.encoder(audio_signal=feats_bft, length=lens)   # (B,D,T')
+                D = enc_bdt.shape[1]  # Encoder outputs [B, D, T], so D is at index 1
             except Exception:
                 # Last resort, guess 512
                 D = 512
