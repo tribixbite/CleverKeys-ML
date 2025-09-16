@@ -1,0 +1,270 @@
+python export_executorch.py \
+  --nemo_model conformer_rnnt_gesture_*.nemo \
+  --val_manifest data/train_final_val.jsonl \
+  --vocab data/vocab.txt \
+  --output encoder_quant_xnnpack.pte \
+  --calib_batches 64 --calib_bs 16 --max_trace_len 200
+
+
+python export_onnx_quantized.py \
+  --nemo_model conformer_rnnt_gesture_*.nemo \
+  --val_manifest data/train_final_val.jsonl \
+  --vocab data/vocab.txt \
+  --fp32_onnx encoder_fp32.onnx \
+  --output encoder_int8_qdq.onnx \
+  --calib_batches 64 --calib_bs 8 --max_trace_len 200
+
+
+Integration tips (so you stay ultra-low-latency)
+
+Android (ExecuTorch): Run the .pte encoder with XNNPACK. Keep RNNT decode (prediction net + joint + greedy) in float via PyTorch Lite or your existing NeMo-equivalent logic; it’s lightweight and won’t dominate latency.
+
+Web (ONNX): Use onnxruntime-web:
+
+Prefer WebGPU or WASM-SIMD backends.
+
+Feed (B,F,T) as features_bft and int32 lengths. Decoder/joint/greedy can run in JS/TS — small, branchy code that’s fine on CPU.
+
+For both: start with encoder INT8, keep the rest float. If you need more speed, try per-tensor activations (already set) and per-channel weights (enabled). If accuracy dips, consider excluding very first/last encoder blocks from INT8 (we can add nodes_to_exclude once you identify sensitivities via ORT’s quant logs).
+
+If you want me to add a tiny JS/Android greedy RNNT reference for the float decoder+joint, say the word and I’ll drop it in.
+
+
+Awesome—let’s lock in a real-time RNNT pipeline that (1) runs the encoder quantized (INT8) for maximum speed, and (2) runs a single-step decoder+joint in float for clean accuracy and tiny per-step latency. You’ll get:
+
+A script that exports a single-step RNNT decoder+joint in ONNX (fp32) and ExecuTorch .pte (fp32).
+
+A browser (JS/TS) greedy decoder that calls onnxruntime-web for the encoder (INT8 QDQ) + the step model (fp32).
+
+An Android (Kotlin) greedy decoder that calls ExecuTorch encoder (INT8 .pte) + step model (fp32 .pte).
+
+“Ultra-optimized” switches and an Android-optimized ONNX emitter (QDQ INT8 + ORT graph optimizations saved to a separate file).
+
+Design choice recap: We quantize the encoder (heavy compute) for big speed wins; keep decoder+joint float to preserve accuracy and keep step-time stable and tiny. If later you want to quantize the joint/linear bits too, I include toggles with safe defaults.
+
+A) Export: RNNT single-step decoder+joint → ONNX (fp32) & ExecuTorch (fp32)
+
+File: export_rnnt_step.py
+
+Builds a tiny wrapper around your trained model’s decoder prediction net (LSTM) and joint.
+
+One step takes: previous token id, previous (h,c) state, and one encoder frame → returns logits and next (h,c).
+
+Exports ONNX (for web/ORT) and ExecuTorch .pte (for Android).
+
+
+
+B) Browser greedy decode (onnxruntime-web)
+
+Assumes you already exported
+
+encoder_int8_qdq.onnx (from export_onnx_quantized.py)
+
+rnnt_step_fp32.onnx (from export_rnnt_step.py)
+
+File: greedy_decode_web.ts (works with bundlers or <script type="module">)
+
+
+
+C) Android greedy decode (ExecuTorch)
+
+Assumes you already exported
+
+encoder_quant_xnnpack.pte (INT8 encoder)
+
+rnnt_step_fp32.pte (float step model)
+
+Kotlin snippet: GreedyDecode.kt
+
+
+
+
+D) Ultra-optimized variants & Android-optimized ONNX
+
+You already have encoder INT8 QDQ for ONNX and encoder INT8 PT2E/XNNPACK for .pte. Two extra toggles:
+
+D1) “Ultra” ONNX quant (try quantizing joint linears only)
+
+Add to your ONNX quant script after exporting the encoder-only model, if you later export a joint-only or step model:
+
+# If quantizing the step ONNX (rnnt_step_fp32.onnx) to int8:
+import onnx
+from onnxruntime.quantization import quantize_static, QuantFormat, QuantType
+from onnxruntime.quantization.calibrate import CalibrationDataReader
+
+# (1) Load the step ONNX & find LSTM nodes to exclude
+m = onnx.load("rnnt_step_fp32.onnx")
+exclude = [n.name for n in m.graph.node if n.op_type in ("LSTM", "RNN", "GRU", "LayerNormalization")]
+# (2) Provide a tiny calibration reader that feeds random or a few real (y_prev,h0,c0,enc_t) samples
+# ... (similar to earlier data reader; skip here for brevity)
+# (3) Quantize: linears & matmuls become int8; LSTM kept float
+quantize_static(
+    "rnnt_step_fp32.onnx",
+    "rnnt_step_int8_qdq.onnx",
+    calibration_data_reader=cal_reader,
+    quant_format=QuantFormat.QDQ,
+    activation_type=QuantType.QInt8,
+    weight_type=QuantType.QInt8,
+    per_channel=True,
+    nodes_to_exclude=exclude,
+)
+
+
+When to use: If you need even lower step latency and are willing to test any tiny accuracy impact. Start with encoder-only quant first (usually enough).
+
+D2) “Ultra” PT2E quant (encoder + joint linears)
+
+For ExecuTorch, keep step model fp32. If you insist on quantizing joint linears inside step .pte, PT2E can quantize nn.Linear but not LSTM. You’d wrap the joint submodule and run prepare_pt2e/convert_pt2e on that wrapper. I’d leave the step model fp32 initially (cleanest accuracy).
+
+D3) Android-optimized ONNX file (graph-optimized copy)
+
+Produce an extra Android-friendly optimized ONNX (or ORT-optimized ONNX) beside your quant file:
+
+import onnxruntime as ort
+
+def save_optimized_onnx(input_onnx: str, output_onnx: str):
+    so = ort.SessionOptions()
+    so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+    so.optimized_model_filepath = output_onnx
+    # Build session once to trigger optimization and save
+    sess = ort.InferenceSession(input_onnx, sess_options=so, providers=["CPUExecutionProvider"])
+    print(f"Saved optimized model to {output_onnx}")
+
+# Example:
+# save_optimized_onnx("encoder_int8_qdq.onnx", "encoder_int8_qdq.android.onnx")
+
+
+Use this .android.onnx in your Android app (ONNX Runtime Mobile + XNNPACK/NNAPI EP). It’s still a standard ONNX, just fully optimized and node-fused for Android.
+
+What to ship where
+
+Web:
+
+encoder_int8_qdq.onnx (INT8, QDQ)
+
+rnnt_step_fp32.onnx (float)
+
+greedy_decode_web.ts (above)
+
+Android:
+
+encoder_quant_xnnpack.pte (INT8 PT2E)
+
+rnnt_step_fp32.pte (float)
+
+RNNTRealtime Kotlin wrapper (above)
+
+(Optional) encoder_int8_qdq.android.onnx if you want to A/B ORT vs ExecuTorch
+
+This layout hits ultra-low latency in practice: the encoder dominates compute and is fully INT8; the per-step logic is tiny and stays exact in float.
+
+If you want, I can add tiny token-to-string helpers and EOS/BOS handling to the decoders, or wire the step-model quant path once you confirm it’s worth it on your target devices.
+
+
+
+
+since magical experience via unprecedented (feels intuitive) accuracy is the goal, dont we want to do a full beam search? and the usage is: 1. capture full word trace -> 2. feed full word trace to prediction pipeline -> 3. get ranked array of predicted words, it would be helpful to have an exported model that can support this instead of character-level
+ChatGPT said:
+Thought for 50s
+
+Absolutely—we can (and should) do beam search for a single-word swipe to maximize “it-just-knows” accuracy. The cleanest way—without retraining—is:
+
+Keep the INT8 encoder export (ExecuTorch .pte + ONNX QDQ) from earlier.
+
+Keep the single-step decoder+joint export (fp32 .pte + .onnx).
+
+Implement a prefix-constrained RNNT beam search on device (JS for web, Kotlin for Android) using a word trie (lexicon) + optional word frequency prior.
+This ensures every expansion is a valid word prefix, so the final ranked list are actual words, not raw character strings.
+
+Below I’m giving you production-ready beam decoders for both web (TypeScript) and Android (Kotlin), with batched step calls across beams for speed. You’ll get ranked top-K words for each full-trace input.
+
+
+0) What the exported models already support (no retrain needed)
+
+Encoder INT8 (heavy compute):
+
+Web: encoder_int8_qdq.onnx
+
+Android: encoder_quant_xnnpack.pte
+
+RNNT step (fp32) (tiny compute):
+
+Web: rnnt_step_fp32.onnx
+
+Android: rnnt_step_fp32.pte
+
+The step model takes (y_prev, h0, c0, enc_t) and returns (logits, h1, c1). Because the step model’s batch dimension is dynamic, we can batch all beams into a single call per inner iteration → big speed with beam sizes like 8–32.
+
+1) Web: Prefix-constrained RNNT Beam Search (TypeScript)
+
+What it does
+
+Runs the encoder once on the swipe trace (B=1).
+
+Runs a prefix-constrained, batched beam search over time frames, expanding only characters allowed by the word trie (dictionary).
+
+Optionally adds a small word prior: score += λ * log P(word) (unigram frequency).
+
+Returns a ranked list of words at the end.
+
+Drop-in file: beam_decode_web.ts
+
+
+2) Android: Prefix-constrained RNNT Beam Search (Kotlin, ExecuTorch)
+
+What it does
+
+Mirrors the TS implementation: batch beams into single step calls, constrain expansions by a trie, return ranked top-K words.
+
+Drop-in file: BeamDecode.kt
+
+
+3) “Ultra optimized” variants you asked for
+(a) ONNX “Ultra” (Android-friendly)
+
+Produce a graph-optimized copy of your quantized encoder for Android:
+
+import onnxruntime as ort
+def save_optimized_onnx(input_onnx: str, output_onnx: str):
+    so = ort.SessionOptions()
+    so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+    so.optimized_model_filepath = output_onnx
+    _ = ort.InferenceSession(input_onnx, sess_options=so, providers=["CPUExecutionProvider"])
+    print("Saved:", output_onnx)
+
+# Example:
+# save_optimized_onnx("encoder_int8_qdq.onnx", "encoder_int8_qdq.android.onnx")
+
+
+Use encoder_int8_qdq.android.onnx on Android with ONNX Runtime Mobile + XNNPACK/NNAPI EP.
+
+(b) ONNX “Ultra” (Step model quant—optional)
+
+You can quantize only the step model’s linear layers (keep LSTM float). Usually not necessary; test accuracy on device first.
+
+Export rnnt_step_fp32.onnx (already done).
+
+Quantize with nodes_to_exclude = {LSTM, RNN, GRU, LayerNormalization} so only matmuls/linears get INT8. (If you want, I can hand you the exact quant script; keeping step fp32 is my recommended default for “magic” accuracy.)
+
+(c) ExecuTorch “Ultra”
+
+Encoder is already INT8 PT2E. For step model, I recommend keeping fp32 (tiny compute, accuracy-critical). If you insist on quantizing joint linears, we can PT2E-quant a tiny wrapper around the joint only and keep LSTM float. My take: not worth it until you’ve profiled.
+
+4) Hyperparameters & tips for “feels intuitive” accuracy
+
+Start with: beamSize=16, prunePerBeam=6, maxSymbols=20, lmLambda≈0.3–0.6.
+Tune lmLambda on held-out swipes; it’s a direct knob for “dictionary bias”.
+
+Trie size: 40k–80k words is great on device. Use a frequency-sorted list and compute wordLogPrior = log(freq / sum).
+
+If users allow slang/rare names, maintain a user-personalized suffix trie merged at runtime (last N accepted words) with a small positive prior bonus.
+
+Stability: keep blankId=0, ensure your char mappings match training exactly.
+
+If you want, I can also provide:
+
+A tiny converter to build the trie (.json.gz) from your vocab.txt + frequency CSV.
+
+A micro BPE variant (wordpiece beam search) if you decide to move beyond plain chars.
+
+But you can ship with the above today: you’ll get ranked word predictions from a beam-searched RNNT with INT8 encoder and real-time latency on both web and Android.

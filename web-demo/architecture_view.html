@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CleverKeys RNNT Architecture</title>
+    <style>
+        body {
+            font-family: 'Courier New', monospace;
+            margin: 20px;
+            background: #1a1a1a;
+            color: #00ff00;
+            line-height: 1.4;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .ascii-art {
+            white-space: pre;
+            font-size: 12px;
+            overflow-x: auto;
+            background: #000;
+            padding: 20px;
+            border: 2px solid #00ff00;
+            border-radius: 8px;
+        }
+        .metadata {
+            background: #2a2a2a;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 8px;
+            border-left: 4px solid #00ff00;
+        }
+        .metadata h3 {
+            color: #00ff41;
+            margin-top: 0;
+        }
+        .file-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 10px;
+            font-size: 14px;
+        }
+        .file-item {
+            background: #333;
+            padding: 8px;
+            border-radius: 4px;
+        }
+        .timestamp {
+            color: #ffff00;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎯 CleverKeys RNNT Architecture</h1>
+        <p><strong>Complete End-to-End Pipeline Documentation</strong></p>
+
+        <div id="ascii-diagram" class="ascii-art"></div>
+
+        <div class="metadata">
+            <h3>📁 File Dependencies & Versions</h3>
+            <div id="file-dependencies"></div>
+        </div>
+
+        <div class="metadata">
+            <h3>⚙️ Model Configuration</h3>
+            <div id="model-config"></div>
+        </div>
+
+        <div class="metadata">
+            <h3>📊 Pipeline Structure</h3>
+            <div id="pipeline-structure"></div>
+        </div>
+    </div>
+
+    <script src="architecture_diagram.js"></script>
+    <script>
+        // Load and display the architecture
+        const arch = generateArchitectureDiagram();
+
+        // Display ASCII diagram
+        document.getElementById('ascii-diagram').textContent = arch.ascii;
+
+        // Display file dependencies
+        const filesDiv = document.getElementById('file-dependencies');
+        filesDiv.innerHTML = '<div class="file-list">' +
+            Object.entries(arch.files).map(([phase, files]) =>
+                `<div class="file-item">
+                    <strong>${phase.toUpperCase()}</strong><br>
+                    ${Object.entries(files).map(([file, date]) =>
+                        `${file}<br><span class="timestamp">${date}</span>`
+                    ).join('<br>')}
+                </div>`
+            ).join('') +
+            '</div>';
+
+        // Display model configuration
+        const configDiv = document.getElementById('model-config');
+        configDiv.innerHTML = `
+            <strong>Model:</strong> feat_in=${arch.config.model.feat_in}, encoder=${JSON.stringify(arch.config.model.encoder)}<br>
+            <strong>Features:</strong> ${arch.config.features.kinematic} kinematic + ${arch.config.features.rbf_keys} RBF keys, range=${arch.config.features.coordinate_range}<br>
+            <strong>Vocabulary:</strong> ${arch.config.vocabulary.char_vocab_size} chars, ${arch.config.vocabulary.word_vocab_size} words<br>
+            <strong>Beam Search:</strong> size=${arch.config.beam_search.beam_size}, λ=${arch.config.beam_search.lm_lambda}
+        `;
+
+        // Display pipeline structure
+        const pipelineDiv = document.getElementById('pipeline-structure');
+        pipelineDiv.innerHTML = `
+            <strong>Training:</strong> ${arch.pipeline.training.input} → ${arch.pipeline.training.featurizer} → ${arch.pipeline.training.model} → ${arch.pipeline.training.output}<br>
+            <strong>Export:</strong> Encoder (${arch.pipeline.export.encoder.output}) + Step (${arch.pipeline.export.step.output})<br>
+            <strong>Inference:</strong> Touch → Features → Encoder → Beam Search → Predictions
+        `;
+    </script>
+</body>
+</html>
