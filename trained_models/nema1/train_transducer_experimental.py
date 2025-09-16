@@ -338,19 +338,30 @@ def main():
     )
     logger.info(f"Validation dataloader created with batch_size={cfg.training.batch_size * 2}")
     
-    # Create a word-to-ID mapping for the auxiliary loss
+    # Create a word-to-ID mapping for the auxiliary loss using large wordlist
+    words_path = "words.txt"
     logger.info("Creating word-to-ID mapping for auxiliary loss...")
     word_to_id = {}
     id_to_word = {}
-    with open(cfg.data.vocab_path, 'r', encoding='utf-8') as f:
-        for i, line in enumerate(f):
-            word = line.strip()
-            if word:  # Skip empty lines
-                word_to_id[word] = i
-                id_to_word[i] = word
+
+    if os.path.exists(words_path):
+        with open(words_path, 'r', encoding='utf-8') as f:
+            for i, line in enumerate(f):
+                word = line.strip().lower()  # Normalize to lowercase
+                if word:  # Skip empty lines
+                    word_to_id[word] = i
+                    id_to_word[i] = word
+    else:
+        logger.warning(f"Words file {words_path} not found, using small vocab instead")
+        with open(cfg.data.vocab_path, 'r', encoding='utf-8') as f:
+            for i, line in enumerate(f):
+                word = line.strip()
+                if word:  # Skip empty lines
+                    word_to_id[word] = i
+                    id_to_word[i] = word
 
     num_words = len(word_to_id)
-    logger.info(f"Created word vocabulary with {num_words} unique words")
+    logger.info(f"Created word vocabulary with {num_words} unique words from {'words.txt' if os.path.exists(words_path) else 'vocab.txt'}")
 
     # Configure the full EncDecRNNTModel with proper RNN-T components
     model_config = DictConfig({
@@ -639,8 +650,8 @@ def main():
                         else:
                             encoder_features = features
 
-                        # Get encoder output
-                        encoded, encoded_len = self.encoder(audio_signal=encoder_features, length=lengths)
+                        # Get encoder output directly (not through joint network)
+                        encoded, encoded_len = self.encoder.encoder(features=encoder_features, length=lengths)
 
                         # Pool encoder output (mean over time dimension)
                         pooled = []
