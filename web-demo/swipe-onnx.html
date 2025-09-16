@@ -1502,7 +1502,7 @@
             }
 
             // Calculate start time for relative time normalization
-            const startTime = features.path.length > 0 ? (features.path[0].t || 0) : 0;
+            const traceStartTime = features.path.length > 0 ? (features.path[0].t || 0) : 0;
 
             for (let idx = 0; idx < T; idx++) {
                 const curr = features.path[idx];
@@ -1510,7 +1510,7 @@
                 // Basic position features - EXACT match to training code
                 const x = curr.x || 0;  // Already normalized [0,1] by prepareSwipeFeatures
                 const y = curr.y || 0;  // Already normalized [0,1] by prepareSwipeFeatures
-                const t = ((curr.t || idx * 10) - startTime) / 1000.0;  // RELATIVE time in seconds from start
+                const t = ((curr.t || idx * 10) - traceStartTime) / 1000.0;  // RELATIVE time in seconds from start
 
                 // Velocity features - EXACT match to training code
                 let vx = 0, vy = 0, speed = 0;
