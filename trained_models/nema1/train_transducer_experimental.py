@@ -807,16 +807,18 @@ def main():
 
     # SWA callback for stabilization and better quantization
     # Apply SWA for last 20% of epochs for better convergence
-    swa_start_epoch = max(1, int(cfg.training.max_epochs * 0.8))  # Start at 80% of training
-    swa_callback = StochasticWeightAveraging(
-        swa_lrs=cfg.training.learning_rate * 0.1,  # Lower LR for SWA
-        swa_epoch_start=swa_start_epoch,
-        annealing_epochs=10,  # Gradual transition
-    )
+    # NOTE: SWA temporarily disabled due to NeMo compatibility issues with deepcopy
+    # Alternative: Use EMA via exponential moving average in training loop
+    # swa_start_epoch = max(1, int(cfg.training.max_epochs * 0.8))  # Start at 80% of training
+    # swa_callback = StochasticWeightAveraging(
+    #     swa_lrs=cfg.training.learning_rate * 0.1,  # Lower LR for SWA
+    #     swa_epoch_start=swa_start_epoch,
+    #     annealing_epochs=10,  # Gradual transition
+    # )
 
-    callbacks = [prediction_logger, checkpoint_callback, swa_callback]
-    logger.info(f"✓ SWA will start at epoch {swa_start_epoch} (80% of {cfg.training.max_epochs} epochs)")
-    logger.info("✓ SWA helps stabilize training and improves quantization performance")
+    callbacks = [prediction_logger, checkpoint_callback]
+    logger.info("⚠ SWA temporarily disabled due to NeMo model deepcopy incompatibility")
+    logger.info("Alternative: Manual EMA averaging can be implemented post-training")
     
     # Configure PyTorch Lightning trainer with RTX 4090M optimizations
     trainer = pl.Trainer(
