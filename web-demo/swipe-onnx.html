@@ -1551,16 +1551,25 @@
 
             console.log(`🔥 Starting inference for ${T} time steps`);
 
-            // Load runtime metadata for key centers and configuration
-            const keyOrder = runtimeMeta.key_order || "abcdefghijklmnopqrstuvwxyz'";
-            const keyCenters = runtimeMeta.key_centers;
-            const keyRbfSigma = runtimeMeta.key_rbf_sigma || 0.2;
+            // Create QWERTY keyboard layout - EXACT match to training SwipeFeaturizer
+            const layout = ['qwertyuiop', 'asdfghjkl', 'zxcvbnm'];
+            const chars = 'abcdefghijklmnopqrstuvwxyz';
+            const charToPos = {};
 
-            if (!keyCenters) {
-                throw new Error('key_centers missing from runtime_meta.json');
+            // Build character position map in [0,1] coordinates (training format)
+            for (let rowIdx = 0; rowIdx < layout.length; rowIdx++) {
+                const row = layout[rowIdx];
+                for (let colIdx = 0; colIdx < row.length; colIdx++) {
+                    const char = row[colIdx];
+                    if (chars.includes(char)) {
+                        const x = (colIdx + 0.5) / 10;  // Normalize to [0,1] - 10 chars max width
+                        const y = (rowIdx + 0.5) / 3;   // Normalize to [0,1] - 3 rows
+                        charToPos[char] = [x, y];
+                    }
+                }
             }
 
-            console.log('🎯 Using SwipeFeaturizer: 9 kinematic + 28 RBF key features');
+            console.log('🎯 Using ACTUAL training SwipeFeaturizer: top-5 key distances in [0,1] space');
 
             // Calculate start time for relative time normalization
             const traceStartTime = features.path.length > 0 ? (features.path[0].t || 0) : 0;
@@ -1568,77 +1577,123 @@
             for (let idx = 0; idx < T; idx++) {
                 const curr = features.path[idx];
 
-                // Convert coordinates from [0,1] to [-1,1] to match training
-                const x = ((curr.x || 0) * 2) - 1;
-                const y = ((curr.y || 0) * 2) - 1;
+                // Basic position features - KEEP [0,1] coordinates as in training
+                const x = curr.x || 0;  // Already in [0,1] from canvas
+                const y = curr.y || 0;  // Already in [0,1] from canvas
                 const t = ((curr.t || idx * 10) - traceStartTime) / 1000.0;  // Relative time in seconds
 
-                // Velocity calculation
-                let vx = 0, vy = 0;
+                // Velocity calculation - EXACT match to training
+                let vx = 0, vy = 0, speed = 0;
                 if (idx > 0) {
                     const prev = features.path[idx - 1];
-                    const prev_x = ((prev.x || 0) * 2) - 1;
-                    const prev_y = ((prev.y || 0) * 2) - 1;
                     const currTime = curr.t || idx * 10;
                     const prevTime = prev.t || (idx-1) * 10;
                     const dt = Math.max((currTime - prevTime) / 1000.0, 0.001);
-                    vx = (x - prev_x) / dt;
-                    vy = (y - prev_y) / dt;
+                    vx = (x - (prev.x || 0)) / dt;
+                    vy = (y - (prev.y || 0)) / dt;
+                    speed = Math.sqrt(vx*vx + vy*vy);
                 }
-                const speed = Math.sqrt(vx*vx + vy*vy);
 
-                // Acceleration calculation
-                let ax = 0, ay = 0;
+                // Acceleration calculation - EXACT match to training
+                let ax = 0, ay = 0, acc = 0;
                 if (idx > 1) {
                     const prev = features.path[idx - 1];
                     const prev2 = features.path[idx - 2];
-                    const prev_x = ((prev.x || 0) * 2) - 1;
-                    const prev_y = ((prev.y || 0) * 2) - 1;
-                    const prev2_x = ((prev2.x || 0) * 2) - 1;
-                    const prev2_y = ((prev2.y || 0) * 2) - 1;
-
                     const currTime = curr.t || idx * 10;
                     const prevTime = prev.t || (idx-1) * 10;
                     const prev2Time = prev2.t || (idx-2) * 10;
                     const dt1 = Math.max((currTime - prevTime) / 1000.0, 0.001);
                     const dt2 = Math.max((prevTime - prev2Time) / 1000.0, 0.001);
 
-                    const vx_prev = (prev_x - prev2_x) / dt2;
-                    const vy_prev = (prev_y - prev2_y) / dt2;
+                    const vx_prev = ((prev.x || 0) - (prev2.x || 0)) / dt2;
+                    const vy_prev = ((prev.y || 0) - (prev2.y || 0)) / dt2;
 
                     ax = (vx - vx_prev) / dt1;
                     ay = (vy - vy_prev) / dt1;
-                }
-                const acc = Math.sqrt(ax*ax + ay*ay);
-
-                // 9 kinematic features (matching SwipeFeaturizer exactly)
-                const kinematicFeatures = [x, y, t, vx, vy, speed, ax, ay, acc];
-
-                // 28 RBF key features (matching SwipeFeaturizer exactly)
-                const keyFeatures = [];
-                for (const char of keyOrder) {
-                    if (char in keyCenters) {
-                        const [kx, ky] = keyCenters[char];
-                        const distSq = (x - kx)**2 + (y - ky)**2;
-                        const rbf = Math.exp(-distSq / (2 * keyRbfSigma**2));
-                        keyFeatures.push(rbf);
-                    } else {
-                        keyFeatures.push(0.0);  // Missing key
-                    }
+                    acc = Math.sqrt(ax*ax + ay*ay);
                 }
 
-                // Ensure exactly 28 key features
-                while (keyFeatures.length < 28) {
-                    keyFeatures.push(0.0);
+                // Direction features - EXACT match to training
+                let angle = 0, angle_sin = 0, angle_cos = 0;
+                if (idx > 0) {
+                    angle = Math.atan2(vy, vx);
+                    angle_sin = Math.sin(angle);
+                    angle_cos = Math.cos(angle);
                 }
-                const keyFeatures28 = keyFeatures.slice(0, 28);
 
-                // Combine: 9 kinematic + 28 key = 37 features
-                const features37 = [...kinematicFeatures, ...keyFeatures28];
-
-                if (features37.length !== 37) {
-                    throw new Error(`Expected 37 features, got ${features37.length}`);
+                // Curvature (change in angle) - EXACT match to training
+                let curvature = 0;
+                if (idx > 1) {
+                    const prev = features.path[idx - 1];
+                    const prev2 = features.path[idx - 2];
+                    const angle_prev = Math.atan2((prev.y || 0) - (prev2.y || 0), (prev.x || 0) - (prev2.x || 0));
+                    curvature = angle - angle_prev;
+                    // Normalize to [-pi, pi] - EXACT match to training
+                    while (curvature > Math.PI) curvature -= 2 * Math.PI;
+                    while (curvature < -Math.PI) curvature += 2 * Math.PI;
                 }
+
+                // Distance to nearest keys (top 5) - EXACT match to training
+                const keyDistances = [];
+                for (const [char, [kx, ky]] of Object.entries(charToPos)) {
+                    const dist = Math.sqrt((x - kx)**2 + (y - ky)**2);
+                    keyDistances.push(dist);
+                }
+                keyDistances.sort((a, b) => a - b);  // Sort by distance
+                const top5Distances = keyDistances.slice(0, 5);
+                while (top5Distances.length < 5) {
+                    top5Distances.push(1.0);  // Max distance as padding
+                }
+
+                // Segment features - EXACT match to training
+                const totalPoints = T;
+                const progress = idx / Math.max(totalPoints - 1, 1);  // Position in trace [0, 1]
+
+                // Start/end indicators - EXACT match to training
+                const isStart = idx === 0 ? 1.0 : 0.0;
+                const isEnd = idx === totalPoints - 1 ? 1.0 : 0.0;
+
+                // Compile all features - EXACT match to training order
+                const featList = [
+                    x, y, t,                          // Position and time (3)
+                    vx, vy, speed,                    // Velocity (3)
+                    ax, ay, acc,                      // Acceleration (3)
+                    angle, angle_sin, angle_cos,      // Direction (3)
+                    curvature,                        // Curvature (1)
+                    ...top5Distances,                 // Nearest keys (5)
+                    progress,                         // Progress (1)
+                    isStart, isEnd,                   // Indicators (2)
+                ];
+
+                // Add statistical features from window - EXACT match to training
+                const windowSize = 5;
+                const windowStart = Math.max(0, idx - Math.floor(windowSize / 2));
+                const windowEnd = Math.min(T, idx + Math.floor(windowSize / 2) + 1);
+                const windowPoints = features.path.slice(windowStart, windowEnd);
+
+                if (windowPoints.length > 1) {
+                    const windowX = windowPoints.map(p => p.x || 0);
+                    const windowY = windowPoints.map(p => p.y || 0);
+
+                    const meanX = windowX.reduce((a, b) => a + b, 0) / windowX.length;
+                    const meanY = windowY.reduce((a, b) => a + b, 0) / windowY.length;
+                    const stdX = Math.sqrt(windowX.map(wx => (wx - meanX)**2).reduce((a, b) => a + b, 0) / windowX.length);
+                    const stdY = Math.sqrt(windowY.map(wy => (wy - meanY)**2).reduce((a, b) => a + b, 0) / windowY.length);
+                    const rangeX = Math.max(...windowX) - Math.min(...windowX);
+                    const rangeY = Math.max(...windowY) - Math.min(...windowY);
+
+                    featList.push(meanX, stdX, meanY, stdY, rangeX, rangeY);
+                } else {
+                    featList.push(x, 0, y, 0, 0, 0);  // Use current point with no variance
+                }
+
+                // Add padding features to reach target dimension - EXACT match to training
+                while (featList.length < 37) {
+                    featList.push(0.0);
+                }
+
+                // Ensure exactly 37 features - EXACT match to training
+                const features37 = featList.slice(0, 37);
 
                 // Copy to BFT tensor [1, F=37, T] - correct indexing
                 for (let f = 0; f < 37; f++) {

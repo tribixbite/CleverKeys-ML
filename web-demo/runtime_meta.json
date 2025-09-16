@@ -135,35 +135,8 @@
   "joint": {
     "joint_hidden": 512
   },
-  "key_order": "abcdefghijklmnopqrstuvwxyz'",
-  "key_centers": {
-    "a": [-0.8, 0.33],
-    "b": [-0.2, -0.33],
-    "c": [-0.4, -0.33],
-    "d": [-0.4, 0.33],
-    "e": [-0.4, 1.0],
-    "f": [-0.2, 0.33],
-    "g": [0.0, 0.33],
-    "h": [0.2, 0.33],
-    "i": [0.6, 1.0],
-    "j": [0.4, 0.33],
-    "k": [0.6, 0.33],
-    "l": [0.8, 0.33],
-    "m": [0.2, -0.33],
-    "n": [0.0, -0.33],
-    "o": [0.8, 1.0],
-    "p": [1.0, 1.0],
-    "q": [-1.0, 1.0],
-    "r": [-0.2, 1.0],
-    "s": [-0.6, 0.33],
-    "t": [0.0, 1.0],
-    "u": [0.4, 1.0],
-    "v": [-0.4, -0.33],
-    "w": [-0.8, 1.0],
-    "x": [-0.6, -0.33],
-    "y": [0.2, 1.0],
-    "z": [-0.8, -0.33],
-    "'": [1.0, -0.33]
-  },
-  "key_rbf_sigma": 0.2
+  "chars": "abcdefghijklmnopqrstuvwxyz'",
+  "training_coordinate_space": "[0,1]",
+  "feature_structure": "3 position + 3 velocity + 3 acceleration + 3 direction + 1 curvature + 5 top_distances + 1 progress + 2 indicators + 6 window_stats",
+  "note": "Training uses top-5 key distances in [0,1] coordinate space, not RBF features"
 }
