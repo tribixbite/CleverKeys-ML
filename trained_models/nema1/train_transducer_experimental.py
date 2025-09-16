@@ -139,9 +139,9 @@ CONFIG_MEDIUM = {
 # Large config (current baseline) - balanced performance
 CONFIG_LARGE = {
     "data": {
-        "train_manifest": "data/train_final_train.jsonl",
-        "val_manifest": "data/train_final_val.jsonl",
-        "vocab_path": "data/vocab.txt",
+        "train_manifest": "../../data/train_final_train.jsonl",
+        "val_manifest": "../../data/train_final_val.jsonl",
+        "vocab_path": "../../data/vocab.txt",
         "chars": "abcdefghijklmnopqrstuvwxyz'",
         "max_trace_len": 200,
     },
