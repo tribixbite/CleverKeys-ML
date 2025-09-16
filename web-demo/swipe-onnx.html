@@ -977,35 +977,39 @@
                 }
             }
             
-            // Track key changes
+            // Track significant key changes only (ignore rapid flickering)
             const keyChar = key ? key.dataset.key : null;
-            if (keyChar !== currentKey) {
-                // Remove highlight from previous key
-                if (currentKey) {
-                    document.querySelector(`.key[data-key="${currentKey}"]`)?.classList.remove('key-active');
-                }
-                
-                // Add highlight to new key
-                if (key) {
-                    key.classList.add('key-active');
-                    keySequence.push({ 
-                        key: keyChar, 
-                        timestamp: Date.now(), 
-                        index: swipePath.length 
-                    });
-                }
-                
-                currentKey = keyChar;
-                
-                // Multiple keys = definitely a swipe
-                if (!isPotentialSwipe) {
-                    isPotentialSwipe = true;
-                    if (tapTimeout) {
-                        clearTimeout(tapTimeout);
-                        tapTimeout = null;
+            if (keyChar !== currentKey && keyChar) {
+                // Only record key if we haven't been there recently (reduce noise)
+                const recentKeys = keySequence.slice(-5).map(k => k.key);
+                const shouldRecord = !recentKeys.includes(keyChar) || keySequence.length === 0;
+
+                if (shouldRecord) {
+                    // Remove highlight from previous key
+                    if (currentKey) {
+                        document.querySelector(`.key[data-key="${currentKey}"]`)?.classList.remove('key-active');
                     }
-                    console.log('🔄 Converted TAP to SWIPE (multiple keys)');
+
+                    // Add highlight to new key
+                    key.classList.add('key-active');
+                    keySequence.push({
+                        key: keyChar,
+                        timestamp: Date.now(),
+                        index: swipePath.length
+                    });
+
+                    currentKey = keyChar;
                 }
+            }
+
+            // Multiple keys = definitely a swipe
+            if (keySequence.length > 1 && !isPotentialSwipe) {
+                isPotentialSwipe = true;
+                if (tapTimeout) {
+                    clearTimeout(tapTimeout);
+                    tapTimeout = null;
+                }
+                console.log('🔄 Converted TAP to SWIPE (multiple keys)');
             }
             
             swipePath.push({
@@ -1264,8 +1268,24 @@
                 updateStatus('Ready', 'success');
                 
             } catch (error) {
-                console.error('Error processing swipe:', error);
-                updateStatus('Processing error', 'error');
+                console.error('❌ Error processing swipe:', error);
+                console.error('Error details:', {
+                    message: error.message,
+                    stack: error.stack,
+                    name: error.name
+                });
+
+                // Check what failed
+                console.error('Model state check:', {
+                    encoderSession: encoderSession ? 'loaded' : 'missing',
+                    decoderSession: decoderSession ? 'loaded' : 'missing',
+                    runtimeMeta: runtimeMeta ? 'loaded' : 'missing',
+                    wordList: wordList ? `${wordList.length} words` : 'missing',
+                    trieRoot: trieRoot ? 'loaded' : 'missing',
+                    isModelReady: isModelReady
+                });
+
+                updateStatus(`Processing error: ${error.message}`, 'error');
             }
         }
         
@@ -1323,9 +1343,19 @@
                 lengths: new ort.Tensor("int32", new Int32Array([T]), [1]),
             });
 
-            const encBTF = encOut["encoded_btf"]; // (1,T_out,D)
-            const T_out = encBTF.dims[1];
-            const enc = encBTF.data;
+            const encBDT = encOut["encoded_btf"]; // (1,D,T_out) - encoder outputs [B, D, T]
+            const D_actual = encBDT.dims[1]; // D dimension
+            const T_out = encBDT.dims[2]; // T_out dimension
+
+            // Transpose from [B, D, T] to [B, T, D] for beam search
+            const enc = new Float32Array(T_out * D_actual);
+            const srcData = encBDT.data;
+
+            for (let t = 0; t < T_out; t++) {
+                for (let d = 0; d < D_actual; d++) {
+                    enc[t * D_actual + d] = srcData[d * T_out + t];
+                }
+            }
 
             let beams = [{
                 yPrev: BigInt(meta.blank_id),
@@ -1336,7 +1366,7 @@
                 chars: []
             }];
 
-            const enc_t_batch = new Float32Array(opts.beamSize * D);
+            const enc_t_batch = new Float32Array(opts.beamSize * D_actual);
 
             for (let t = 0; t < T_out; t++) {
                 for (let s = 0; s < opts.maxSymbols; s++) {
@@ -1354,16 +1384,19 @@
                         c0.data.set(act[i].c.data, i * L * H);
                     }
 
-                    const base = t * D;
+                    const base = t * D_actual;
                     for (let i = 0; i < N; i++) {
-                        enc_t_batch.set(enc.subarray(base, base + D), i * D);
+                        enc_t_batch.set(enc.subarray(base, base + D_actual), i * D_actual);
                     }
+
+                    // Create properly sized tensor for enc_t (only use the portion we need)
+                    const enc_t_tensor_data = enc_t_batch.slice(0, N * D_actual);
 
                     const out = await step.run({
                         y_prev: new ort.Tensor("int64", yPrev, [N]),
                         h0,
                         c0,
-                        enc_t: new ort.Tensor("float32", enc_t_batch, [N, D]),
+                        enc_t: new ort.Tensor("float32", enc_t_tensor_data, [N, D_actual]),
                     });
 
                     const logits = out["logits"];
@@ -1421,6 +1454,12 @@
             const seen = new Set();
             const out = [];
 
+            console.log('🔍 Beam search candidates:', cands.length);
+            for (let i = 0; i < Math.min(10, cands.length); i++) {
+                const c = cands[i];
+                console.log(`  Candidate ${i}: wid=${c.wid}, word="${words[c.wid]}", score=${c.score.toFixed(3)}`);
+            }
+
             for (const c of cands) {
                 if (seen.has(c.wid)) continue;
                 seen.add(c.wid);
@@ -1428,6 +1467,7 @@
                 if (out.length >= opts.topK) break;
             }
 
+            console.log('🎯 Final beam search output:', out.map(o => o.word));
             return out;
         }
 
@@ -1442,133 +1482,152 @@
 
             console.log(`🔥 Starting inference for ${T} time steps`);
 
-            // Extract comprehensive 37D features matching training format
-            for (let t = 0; t < T; t++) {
-                const point = features.path[t];
-                const baseIdx = t * F;
+            // SwipeFeaturizer: Extract 37D features matching EXACT training format
+            // Create keyboard layout mapping for key distances (QWERTY)
+            const layout = ['qwertyuiop', 'asdfghjkl', 'zxcvbnm'];
+            const charToPos = {};
+            const chars = 'abcdefghijklmnopqrstuvwxyz';
 
-                // Position features (2D) - normalized to keyboard bounds
-                featuresBFT[baseIdx + 0] = point.x || 0;
-                featuresBFT[baseIdx + 1] = point.y || 0;
-
-                // Velocity features (2D) - first derivatives
-                if (t > 0) {
-                    const prev = features.path[t-1];
-                    const dt = Math.max((point.timestamp - prev.timestamp) / 1000.0, 0.001); // seconds
-                    featuresBFT[baseIdx + 2] = ((point.x || 0) - (prev.x || 0)) / dt; // vx
-                    featuresBFT[baseIdx + 3] = ((point.y || 0) - (prev.y || 0)) / dt; // vy
-                } else {
-                    featuresBFT[baseIdx + 2] = 0;
-                    featuresBFT[baseIdx + 3] = 0;
-                }
-
-                // Acceleration features (2D) - second derivatives
-                if (t > 1) {
-                    const prev = features.path[t-1];
-                    const prevPrev = features.path[t-2];
-                    const dt = Math.max((point.timestamp - prev.timestamp) / 1000.0, 0.001);
-                    const dtPrev = Math.max((prev.timestamp - prevPrev.timestamp) / 1000.0, 0.001);
-
-                    const vxCur = featuresBFT[baseIdx + 2];
-                    const vyCur = featuresBFT[baseIdx + 3];
-                    const vxPrev = ((prev.x || 0) - (prevPrev.x || 0)) / dtPrev;
-                    const vyPrev = ((prev.y || 0) - (prevPrev.y || 0)) / dtPrev;
-
-                    featuresBFT[baseIdx + 4] = (vxCur - vxPrev) / dt; // ax
-                    featuresBFT[baseIdx + 5] = (vyCur - vyPrev) / dt; // ay
-                } else {
-                    featuresBFT[baseIdx + 4] = 0;
-                    featuresBFT[baseIdx + 5] = 0;
-                }
-
-                // Key-based features - nearest key and distance
-                if (point.key) {
-                    const keyPos = getKeyPosition(point.key);
-                    if (keyPos) {
-                        // Nearest key position (2D)
-                        featuresBFT[baseIdx + 6] = keyPos.x;
-                        featuresBFT[baseIdx + 7] = keyPos.y;
-
-                        // Distance to nearest key (2D)
-                        const dx = (point.x || 0) - keyPos.x;
-                        const dy = (point.y || 0) - keyPos.y;
-                        featuresBFT[baseIdx + 8] = dx;
-                        featuresBFT[baseIdx + 9] = dy;
-                        featuresBFT[baseIdx + 10] = Math.sqrt(dx*dx + dy*dy); // Euclidean distance
-
-                        // Key character encoding (one-hot style features)
-                        const keyChar = point.key.toLowerCase();
-                        const keyCode = keyChar.charCodeAt(0) - 97; // a=0, b=1, etc.
-                        if (keyCode >= 0 && keyCode < 26) {
-                            featuresBFT[baseIdx + 11] = keyCode / 25.0; // normalized key index
-                        } else {
-                            featuresBFT[baseIdx + 11] = 0;
-                        }
+            for (let rowIdx = 0; rowIdx < layout.length; rowIdx++) {
+                const row = layout[rowIdx];
+                for (let colIdx = 0; colIdx < row.length; colIdx++) {
+                    const char = row[colIdx];
+                    if (chars.includes(char)) {
+                        const kx = (colIdx + 0.5) / 10;  // 10 chars max width
+                        const ky = (rowIdx + 0.5) / 3;   // 3 rows
+                        charToPos[char] = [kx, ky];
                     }
                 }
+            }
 
-                // Temporal features
-                if (t === 0) {
-                    featuresBFT[baseIdx + 12] = 0; // time since start
-                    featuresBFT[baseIdx + 13] = 1; // is_start
-                } else {
-                    const dt = (point.timestamp - features.path[0].timestamp) / 1000.0;
-                    featuresBFT[baseIdx + 12] = dt; // time since start
-                    featuresBFT[baseIdx + 13] = 0; // is_start
+            for (let idx = 0; idx < T; idx++) {
+                const curr = features.path[idx];
+                const baseIdx = idx * F;
+
+                // Basic position features
+                const x = curr.x || 0;
+                const y = curr.y || 0;
+                const t = (curr.timestamp || idx * 10) / 1000.0;  // Normalize time to seconds
+
+                // Velocity features
+                let vx = 0, vy = 0, speed = 0;
+                if (idx > 0) {
+                    const prev = features.path[idx - 1];
+                    const dt = Math.max(((curr.timestamp || idx * 10) - (prev.timestamp || (idx-1) * 10)) / 1000.0, 0.001);
+                    vx = ((curr.x || 0) - (prev.x || 0)) / dt;
+                    vy = ((curr.y || 0) - (prev.y || 0)) / dt;
+                    speed = Math.sqrt(vx*vx + vy*vy);
                 }
 
-                // Stroke direction and curvature
-                if (t > 1) {
-                    const curr = point;
-                    const prev = features.path[t-1];
-                    const prevPrev = features.path[t-2];
+                // Acceleration features
+                let ax = 0, ay = 0, acc = 0;
+                if (idx > 1) {
+                    const prev = features.path[idx - 1];
+                    const prev2 = features.path[idx - 2];
+                    const dt1 = Math.max(((curr.timestamp || idx * 10) - (prev.timestamp || (idx-1) * 10)) / 1000.0, 0.001);
+                    const dt2 = Math.max(((prev.timestamp || (idx-1) * 10) - (prev2.timestamp || (idx-2) * 10)) / 1000.0, 0.001);
 
-                    // Direction angle
-                    const dx = (curr.x || 0) - (prev.x || 0);
-                    const dy = (curr.y || 0) - (prev.y || 0);
-                    const angle = Math.atan2(dy, dx);
-                    featuresBFT[baseIdx + 14] = Math.sin(angle);
-                    featuresBFT[baseIdx + 15] = Math.cos(angle);
+                    const vx_prev = ((prev.x || 0) - (prev2.x || 0)) / dt2;
+                    const vy_prev = ((prev.y || 0) - (prev2.y || 0)) / dt2;
 
-                    // Curvature (change in direction)
-                    const dxPrev = (prev.x || 0) - (prevPrev.x || 0);
-                    const dyPrev = (prev.y || 0) - (prevPrev.y || 0);
-                    const anglePrev = Math.atan2(dyPrev, dxPrev);
-                    const curvature = angle - anglePrev;
-                    featuresBFT[baseIdx + 16] = Math.sin(curvature);
-                    featuresBFT[baseIdx + 17] = Math.cos(curvature);
-                } else {
-                    featuresBFT[baseIdx + 14] = 0; // sin(direction)
-                    featuresBFT[baseIdx + 15] = 1; // cos(direction)
-                    featuresBFT[baseIdx + 16] = 0; // sin(curvature)
-                    featuresBFT[baseIdx + 17] = 0; // cos(curvature)
+                    ax = (vx - vx_prev) / dt1;
+                    ay = (vy - vy_prev) / dt1;
+                    acc = Math.sqrt(ax*ax + ay*ay);
                 }
 
-                // Stroke statistics and context features (remaining dimensions 18-36)
-                const progress = t / (T - 1); // stroke progress [0,1]
-                featuresBFT[baseIdx + 18] = progress;
-                featuresBFT[baseIdx + 19] = 1 - progress; // remaining progress
+                // Direction features
+                let angle = 0, angle_sin = 0, angle_cos = 0;
+                if (idx > 0) {
+                    angle = Math.atan2(vy, vx);
+                    angle_sin = Math.sin(angle);
+                    angle_cos = Math.cos(angle);
+                }
 
-                // Speed magnitude
-                const vx = featuresBFT[baseIdx + 2];
-                const vy = featuresBFT[baseIdx + 3];
-                const speed = Math.sqrt(vx*vx + vy*vy);
-                featuresBFT[baseIdx + 20] = speed;
+                // Curvature (change in angle)
+                let curvature = 0;
+                if (idx > 1) {
+                    const prev = features.path[idx - 1];
+                    const prev2 = features.path[idx - 2];
+                    const angle_prev = Math.atan2((prev.y || 0) - (prev2.y || 0), (prev.x || 0) - (prev2.x || 0));
+                    curvature = angle - angle_prev;
+                    // Normalize to [-pi, pi]
+                    while (curvature > Math.PI) curvature -= 2 * Math.PI;
+                    while (curvature < -Math.PI) curvature += 2 * Math.PI;
+                }
 
-                // Acceleration magnitude
-                const ax = featuresBFT[baseIdx + 4];
-                const ay = featuresBFT[baseIdx + 5];
-                const accel = Math.sqrt(ax*ax + ay*ay);
-                featuresBFT[baseIdx + 21] = accel;
+                // Distance to nearest keys (top 5)
+                const keyDistances = [];
+                for (const [char, [kx, ky]] of Object.entries(charToPos)) {
+                    const dist = Math.sqrt((x - kx)**2 + (y - ky)**2);
+                    keyDistances.push(dist);
+                }
+                keyDistances.sort((a, b) => a - b);
+                const top5Distances = keyDistances.slice(0, 5);
+                while (top5Distances.length < 5) {
+                    top5Distances.push(1.0);  // Max distance as padding
+                }
 
-                // Fill remaining features with contextual information
-                for (let f = 22; f < F; f++) {
-                    // Simple positional encoding for remaining dimensions
-                    featuresBFT[baseIdx + f] = Math.sin((f - 22) * progress * Math.PI);
+                // Segment features
+                const totalPoints = T;
+                const progress = idx / Math.max(totalPoints - 1, 1);  // Position in trace [0, 1]
+
+                // Start/end indicators
+                const isStart = idx === 0 ? 1.0 : 0.0;
+                const isEnd = idx === totalPoints - 1 ? 1.0 : 0.0;
+
+                // Window statistical features
+                const windowSize = 5;
+                const windowStart = Math.max(0, idx - Math.floor(windowSize / 2));
+                const windowEnd = Math.min(T, idx + Math.floor(windowSize / 2) + 1);
+                const windowPoints = features.path.slice(windowStart, windowEnd);
+
+                let meanX = x, stdX = 0, meanY = y, stdY = 0, rangeX = 0, rangeY = 0;
+                if (windowPoints.length > 1) {
+                    const windowX = windowPoints.map(p => p.x || 0);
+                    const windowY = windowPoints.map(p => p.y || 0);
+
+                    meanX = windowX.reduce((a, b) => a + b, 0) / windowX.length;
+                    meanY = windowY.reduce((a, b) => a + b, 0) / windowY.length;
+                    stdX = Math.sqrt(windowX.map(wx => (wx - meanX)**2).reduce((a, b) => a + b, 0) / windowX.length);
+                    stdY = Math.sqrt(windowY.map(wy => (wy - meanY)**2).reduce((a, b) => a + b, 0) / windowY.length);
+                    rangeX = Math.max(...windowX) - Math.min(...windowX);
+                    rangeY = Math.max(...windowY) - Math.min(...windowY);
+                }
+
+                // Assemble exact 37D feature vector matching SwipeFeaturizer._extract_point_features
+                const featVec = [
+                    x, y, t,                          // Position and time (3)
+                    vx, vy, speed,                    // Velocity (3)
+                    ax, ay, acc,                      // Acceleration (3)
+                    angle, angle_sin, angle_cos,      // Direction (3)
+                    curvature,                        // Curvature (1)
+                    ...top5Distances,                 // Nearest keys (5)
+                    progress,                         // Progress (1)
+                    isStart, isEnd,                   // Indicators (2)
+                    meanX, stdX, meanY, stdY, rangeX, rangeY  // Window stats (6)
+                ];
+
+                // Ensure exactly 37 features with padding if needed
+                while (featVec.length < 37) {
+                    featVec.push(0.0);
+                }
+
+                // Copy to features tensor: BFT format [1, 37, T] -> transposed access
+                for (let f = 0; f < Math.min(37, featVec.length); f++) {
+                    featuresBFT[f * T + idx] = featVec[f];
                 }
             }
 
             console.log(`Running RNNT beam search with features [1, ${F}, ${T}]`);
+
+            // Validate all required components before inference
+            if (!encoderSession) throw new Error('Encoder session not loaded');
+            if (!decoderSession) throw new Error('Decoder/step session not loaded');
+            if (!runtimeMeta) throw new Error('Runtime metadata not loaded');
+            if (!wordList || wordList.length === 0) throw new Error('Word list not loaded');
+            if (!trieRoot) throw new Error('Trie not built');
+
+            console.log('✅ All components validated, starting beam search...');
 
             // Run RNNT word beam search with optimized parameters for speed
             const results = await rnntWordBeam(
@@ -1578,16 +1637,16 @@
                 F, T,
                 2,    // L (LSTM layers)
                 320,  // H (hidden size)
-                256,  // D (encoder dim)
+                null, // D (will be determined from encoder output)
                 runtimeMeta,
                 wordList,
                 trieRoot,
                 null, // no language model priors for now
                 {
-                    beamSize: 8,     // Reduced from 16 for speed
-                    prunePerBeam: 4, // Reduced from 6 for speed
-                    maxSymbols: 15,  // Reduced from 20 for speed
-                    lmLambda: 0.3,   // Slightly reduced language model weight
+                    beamSize: 16,    // Increased for more diversity
+                    prunePerBeam: 8, // Increased to explore more candidates
+                    maxSymbols: 15,  // Keep reasonable for speed
+                    lmLambda: 0.1,   // Much lower to reduce language model bias
                     topK: 5
                 }
             );
