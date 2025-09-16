@@ -27,3 +27,4 @@ __pycache__/*.*
 .specstory/.gitignore
 .specstory/.what-is-this.md
 .specstory/
+*Zone.Identifier
