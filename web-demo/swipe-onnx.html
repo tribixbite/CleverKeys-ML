@@ -1299,15 +1299,15 @@
             for (let i = 0; i < Math.min(path.length, MAX_SEQUENCE_LENGTH); i++) {
                 const point = path[i];
                 normalizedPath.push({
-                    x: point.x / NORMALIZED_WIDTH,  // [0,1] range as per training
-                    y: point.y / NORMALIZED_HEIGHT, // [0,1] range as per training
+                    x: parseFloat(point.normalized.x), // Already normalized [0,1] by getNormalizedCoords
+                    y: parseFloat(point.normalized.y), // Already normalized [0,1] by getNormalizedCoords
                     t: point.timestamp, // Keep original timestamp for relative time calc
                     key: point.key || null
                 });
             }
             
-            // Pad with last point if too short (use center point in [-1,1] range)
-            const lastPoint = normalizedPath[normalizedPath.length - 1] || { x: 0, y: 0, key: null };
+            // Pad with last point if too short (use center point in [0,1] range)
+            const lastPoint = normalizedPath[normalizedPath.length - 1] || { x: 0.5, y: 0.5, t: 0, key: null };
             while (normalizedPath.length < MAX_SEQUENCE_LENGTH) {
                 normalizedPath.push({ ...lastPoint });
             }
