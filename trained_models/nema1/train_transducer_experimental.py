@@ -52,8 +52,90 @@ class PredictionLogger(pl.Callback):
                        f"Features shape: {features.shape}, "
                        f"Tokens shape: {tokens.shape}")
 
-# Configuration optimized for RTX 4090M
-CONFIG = {
+# Model size configurations for different deployment targets
+
+# Small config for ~8-12MB deployment (mobile-optimized)
+CONFIG_SMALL = {
+    "data": {
+        "train_manifest": "../../data/train_final_train.jsonl",
+        "val_manifest": "../../data/train_final_val.jsonl",
+        "vocab_path": "../../data/vocab.txt",
+        "chars": "abcdefghijklmnopqrstuvwxyz'",
+        "max_trace_len": 200,
+    },
+    "training": {
+        "batch_size": 384,  # Increased to 384 for better GPU utilization
+        "num_workers": 24,  # Increased for better data loading
+        "learning_rate": 4e-4,  # Keep LR the same to maintain quality
+        "max_epochs": 100,
+        "gradient_accumulation": 1,  # Keep at 1 since batch size is larger
+        "accelerator": "gpu",
+        "devices": 1,
+        "precision": "bf16-mixed",  # Use bf16 instead of fp32 to avoid CUDA graph dtype issues
+    },
+    "model": {
+        "encoder": {
+            "feat_in": 37,  # 9 kinematic + 28 keys
+            "d_model": 192,  # Reduced from 256 for smaller model size (~44% fewer params)
+            "n_heads": 4,    # Keep proportional to d_model
+            "num_layers": 6,  # Reduced from 8 for smaller model size (~25% fewer params)
+            "conv_kernel_size": 31,  # 31 is the original kernel size
+            "subsampling_factor": 2,  # Keep at 2 as requested (don't increase)
+        },
+        "decoder": {
+            "pred_hidden": 256,  # Reduced proportionally
+            "pred_rnn_layers": 2,  # Multiple layers for better dependency modeling
+        },
+        "joint": {
+            "joint_hidden": 384,  # Reduced proportionally
+            "activation": "relu",
+            "dropout": 0.1,
+        }
+    }
+}
+
+# Medium config for balanced accuracy/size
+CONFIG_MEDIUM = {
+    "data": {
+        "train_manifest": "../../data/train_final_train.jsonl",
+        "val_manifest": "../../data/train_final_val.jsonl",
+        "vocab_path": "../../data/vocab.txt",
+        "chars": "abcdefghijklmnopqrstuvwxyz'",
+        "max_trace_len": 200,
+    },
+    "training": {
+        "batch_size": 384,  # Increased to 384 for better GPU utilization
+        "num_workers": 24,  # Increased for better data loading
+        "learning_rate": 4e-4,  # Keep LR the same to maintain quality
+        "max_epochs": 100,
+        "gradient_accumulation": 1,  # Keep at 1 since batch size is larger
+        "accelerator": "gpu",
+        "devices": 1,
+        "precision": "bf16-mixed",  # Use bf16 instead of fp32 to avoid CUDA graph dtype issues
+    },
+    "model": {
+        "encoder": {
+            "feat_in": 37,  # 9 kinematic + 28 keys
+            "d_model": 320,  # Increased from 256 for better accuracy
+            "n_heads": 4,    # Keep proportional to d_model
+            "num_layers": 10,  # Increased from 8 for better accuracy
+            "conv_kernel_size": 31,  # 31 is the original kernel size
+            "subsampling_factor": 2,  # Keep at 2 as requested (don't increase)
+        },
+        "decoder": {
+            "pred_hidden": 384,  # Increased proportionally
+            "pred_rnn_layers": 2,  # Multiple layers for better dependency modeling
+        },
+        "joint": {
+            "joint_hidden": 640,  # Increased proportionally
+            "activation": "relu",
+            "dropout": 0.1,
+        }
+    }
+}
+
+# Large config (current baseline) - balanced performance
+CONFIG_LARGE = {
     "data": {
         "train_manifest": "data/train_final_train.jsonl",
         "val_manifest": "data/train_final_val.jsonl",
@@ -92,6 +174,28 @@ CONFIG = {
     }
 }
 
+# Default config - can be overridden via environment variable or command line
+CONFIG = CONFIG_LARGE
+
+def get_config():
+    """Get configuration based on MODEL_SIZE environment variable."""
+    model_size = os.environ.get('MODEL_SIZE', 'large').lower()
+
+    if model_size == 'small':
+        config = CONFIG_SMALL
+        logger.info("Using SMALL config (d_model=192, layers=6) -> Target ~8-12MB")
+    elif model_size == 'medium':
+        config = CONFIG_MEDIUM
+        logger.info("Using MEDIUM config (d_model=320, layers=10) -> Target ~15-20MB")
+    elif model_size == 'large':
+        config = CONFIG_LARGE
+        logger.info("Using LARGE config (d_model=256, layers=8) -> Target ~20-25MB")
+    else:
+        logger.warning(f"Unknown MODEL_SIZE '{model_size}', using LARGE config")
+        config = CONFIG_LARGE
+
+    return config
+
 runtime_id = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
 
 def find_latest_checkpoint():
@@ -128,7 +232,7 @@ def find_latest_checkpoint():
 
 def main():
     """Main training function using NeMo's EncDecRNNTModel."""
-    cfg = DictConfig(CONFIG)
+    cfg = DictConfig(get_config())
 
     # Check for existing checkpoint to resume from
     resume_checkpoint, is_old_format = find_latest_checkpoint()
