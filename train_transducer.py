@@ -7,9 +7,11 @@ Optimized for RTX 4090M with all performance enhancements.
 
 import datetime as dt
 import os
+import glob
 import json
 import torch
 import lightning.pytorch as pl
+from lightning.pytorch.callbacks import ModelCheckpoint
 import numpy as np
 from torch.utils.data import Dataset, DataLoader
 from torch.nn.utils.rnn import pad_sequence
@@ -60,11 +62,11 @@ CONFIG = {
         "max_trace_len": 200,
     },
     "training": {
-        "batch_size": 128,  # Reduced for faster iteration with RNN-T, 256 is the original batch size
-        "num_workers": 8,  # 12 is the original number of workers
-        "learning_rate": 3e-4,
+        "batch_size": 256,  # Increased to better utilize GPU and reduce grid size warning
+        "num_workers": 12,  # Increased for better data loading
+        "learning_rate": 4e-4,  # Slightly higher LR with warmup for faster convergence
         "max_epochs": 100,
-        "gradient_accumulation": 2,  # Effective batch = 512, 4 is the original gradient accumulation
+        "gradient_accumulation": 1,  # Reduced since batch size is larger
         "accelerator": "gpu",
         "devices": 1,
         "precision": "bf16-mixed",  # Use bf16 instead of fp32 to avoid CUDA graph dtype issues
@@ -74,7 +76,7 @@ CONFIG = {
             "feat_in": 37,  # 9 kinematic + 28 keys
             "d_model": 256,  # 256 is the original model dimension
             "n_heads": 4,
-            "num_layers": 6,  # Reduced from 8 for faster training, 4 is the original number of layers
+            "num_layers": 8,  # Use 8 layers for better accuracy
             "conv_kernel_size": 31,  # 31 is the original kernel size
             "subsampling_factor": 2,  # 2x subsampling for speed, 4 is the original subsampling factor
         },
@@ -92,10 +94,64 @@ CONFIG = {
 
 runtime_id = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
 
+def find_latest_checkpoint():
+    """Find the most recent checkpoint across all timestamped folders.
+
+    Returns:
+        tuple: (checkpoint_path, is_old_format) where is_old_format
+               indicates if checkpoint is from older training run
+    """
+    # Look for checkpoint files in both timestamped and non-timestamped directories
+    checkpoint_patterns = [
+        './rnnt_logs/conformer_rnnt/*/checkpoints/*.ckpt',
+        './rnnt_logs_*/conformer_rnnt/*/checkpoints/*.ckpt',
+        './rnnt_checkpoints_*/conformer_rnnt/*/checkpoints/*.ckpt',
+    ]
+
+    all_checkpoints = []
+    for pattern in checkpoint_patterns:
+        all_checkpoints.extend(glob.glob(pattern))
+
+    if not all_checkpoints:
+        return None, False
+
+    # Get the most recently modified checkpoint
+    latest_checkpoint = max(all_checkpoints, key=os.path.getmtime)
+
+    # Check if this is an old checkpoint with different settings
+    is_old_format = False
+    if 'rnnt_logs/' in latest_checkpoint and '/version_' in latest_checkpoint:
+        # These are older checkpoints, likely with 'default' loss
+        is_old_format = True
+
+    return latest_checkpoint, is_old_format
+
 def main():
     """Main training function using NeMo's EncDecRNNTModel."""
     cfg = DictConfig(CONFIG)
-    logger.info("="*60)
+
+    # Check for existing checkpoint to resume from
+    resume_checkpoint, is_old_format = find_latest_checkpoint()
+
+    if resume_checkpoint and is_old_format:
+        logger.info("="*60)
+        logger.info("⚠️  Resuming from checkpoint with different settings:")
+        logger.info(f"  Checkpoint: {resume_checkpoint}")
+        logger.info(f"  Modified: {dt.datetime.fromtimestamp(os.path.getmtime(resume_checkpoint))}")
+        logger.info(f"  Note: This checkpoint used 'default' loss, now using 'warprnnt_numba'")
+        logger.info(f"  Note: Model will be recompiled (expect initial slowdown)")
+        logger.info("="*60)
+    elif resume_checkpoint:
+        logger.info("="*60)
+        logger.info(f"Found checkpoint to resume from:")
+        logger.info(f"  {resume_checkpoint}")
+        logger.info(f"  Modified: {dt.datetime.fromtimestamp(os.path.getmtime(resume_checkpoint))}")
+        logger.info("="*60)
+    else:
+        logger.info("="*60)
+        logger.info("Starting fresh training (no checkpoint found)")
+        logger.info("="*60)
+
     logger.info("RNN-Transducer Training with NeMo EncDecRNNTModel")
     logger.info("Models output dependencies: P(y_i | y_1...y_{i-1}, x)")
     logger.info("="*60)
@@ -218,7 +274,7 @@ def main():
             
             # Regularization
             'dropout': 0.1,
-            'dropout_emb': 0.0,
+            'dropout_emb': 0.1,  # Add embedding dropout for better generalization
             'dropout_att': 0.1,
         },
         
@@ -249,19 +305,28 @@ def main():
             'vocabulary': list(vocab.keys()),
             'log_softmax': True,  # Apply log softmax to joint output
             'preserve_memory': False,  # Trade memory for speed
+            # 'fused_batch_size': -1,  # Enable fused batch computation for speed
         },
         
         # Decoding strategy for inference
         'decoding': {
-            'strategy': 'greedy',  # or 'beam' for beam search
+            'strategy': 'greedy_batch',  # Much faster batched greedy decoding
             'greedy': {
-                'max_symbols': 20,
+                'max_symbols': 15,  # Reduced for faster validation
             },
-            'beam': {
-                'beam_size': 10,
-                'score_norm': True,
-                'return_best_hypothesis': True,
-            }
+            'greedy_batch': {
+                'max_symbols': 15,
+                'enable_cuda_graphs': False,  # Disable due to bf16 dtype conflict
+                # 'precision': 'bf16-mixed',
+            },
+            # Disable CUDA graphs globally for bf16 compatibility
+            'use_cuda_graphs': False,
+            'preserve_frame_confidence': False,
+            # 'precision': 'bf16-mixed',
+            'preserve_alignments': False,
+            'compute_timestamps': False,
+            'preserve_word_confidence': False,
+            'confidence_method_cfg': None,
         },
         
         # Optimizer configuration
@@ -272,7 +337,7 @@ def main():
             'weight_decay': 1e-3,
             'sched': {
                 'name': 'CosineAnnealing',
-                'warmup_steps': 1000,
+                'warmup_steps': 2000,  # Longer warmup for stability with higher LR
                 'warmup_ratio': None,
                 'min_lr': 1e-6,
             }
@@ -281,9 +346,9 @@ def main():
         # RNN-T Loss configuration
         'loss': {
             '_target_': 'nemo.collections.asr.losses.rnnt.RNNTLoss',
-            'loss_name': 'default',  # 'default', 'warp_rnnt', 'warprnnt_numba'
+            'loss_name': 'warprnnt_numba',  # 5-10x faster GPU-accelerated loss
             'blank_idx': 0,
-            'fastemit_lambda': 0.0,  # FastEmit regularization (0.0 = disabled)
+            'fastemit_lambda': 0.001,  # Small FastEmit regularization for faster convergence
             'clamp': -1.0,  # Clamp for logits (-1 = disabled)
         },
         
@@ -298,22 +363,100 @@ def main():
     # Create a custom subclass to handle our feature format
     class GestureRNNTModel(nemo_asr.models.EncDecRNNTModel):
         """Custom RNN-T model that bypasses audio preprocessing."""
-
+        def validation_step(self, batch, batch_idx: int, dataloader_idx: int = 0):
+        # Temporarily disable autocast so logits/ops are fp32 inside NeMo's decode
+            if torch.cuda.is_available():
+                # Works regardless of global Trainer precision
+                with torch.autocast(device_type="cuda", enabled=False):
+                    return super().validation_step(batch, batch_idx, dataloader_idx)
+            else:
+                return super().validation_step(batch, batch_idx, dataloader_idx)
         def __init__(self, cfg):
+            # Force disable CUDA graphs in config before initialization
+            if 'decoding' in cfg:
+                cfg.decoding.use_cuda_graph_decoder = False
+                if 'greedy_batch' in cfg.decoding:
+                    cfg.decoding.greedy_batch.enable_cuda_graphs = False
+                    cfg.decoding.greedy_batch.use_cuda_graph_decoder = False
+
             super().__init__(cfg=cfg)
+
             # Apply torch.compile if available but disable CUDA graphs to avoid conflicts
             if hasattr(torch, 'compile'):
-                logger.info("Compiling model components with torch.compile (CUDA graphs disabled)...")
-                # Use default mode without CUDA graphs to avoid NeMo conflicts
-                # Options: 'default' mode without cudagraphs, or 'max-autotune-no-cudagraphs'
-                compile_kwargs = {
-                    # 'mode': 'default',  # or 'max-autotune-no-cudagraphs' for more aggressive optimization
-                    'options': {'triton.cudagraphs': False, # Explicitly disable CUDA graphs
-                    'shape_padding': True}  # Explicitly enable shape padding for tensor core optimization
-                }
-                self.encoder = torch.compile(self.encoder, **compile_kwargs)
-                self.decoder = torch.compile(self.decoder, **compile_kwargs)
-                self.joint = torch.compile(self.joint, **compile_kwargs)
+                try:
+                    logger.info("Compiling model components with torch.compile...")
+                    # Increase recompile limit to handle checkpoint loading
+                    import torch._dynamo as dynamo
+                    dynamo.config.cache_size_limit = 256  # Further increased to prevent recompilation
+                    dynamo.config.suppress_errors = True  # Continue on compilation errors
+
+                    compile_kwargs = {
+                        'mode': 'reduce-overhead',  # Better for RNN-T models
+                        'options': {
+                            'triton.cudagraphs': False,  # Disable CUDA graphs
+                            'shape_padding': True,  # Enable shape padding
+                        }
+                    }
+                    self.encoder = torch.compile(self.encoder, **compile_kwargs)
+                    self.decoder = torch.compile(self.decoder, **compile_kwargs)
+                    self.joint = torch.compile(self.joint, **compile_kwargs)
+                    logger.info("Model compilation complete (cache limit increased to 256)")
+                except Exception as e:
+                    logger.warning(f"torch.compile failed, continuing without compilation: {e}")
+
+        def _setup_decoding(self, cfg):
+            """Override to force disable CUDA graphs in decoding."""
+            # Ensure CUDA graphs are disabled
+            if 'decoding' in cfg:
+                cfg.decoding.use_cuda_graphs = False
+                cfg.decoding.use_cuda_graph_decoder = False
+                if 'greedy_batch' in cfg.decoding:
+                    cfg.decoding.greedy_batch.enable_cuda_graphs = False
+                    cfg.decoding.greedy_batch.use_cuda_graph_decoder = False
+            # Call parent implementation
+            result = super()._setup_decoding(cfg)
+
+            # Double-check after setup
+            if hasattr(self, 'decoding') and hasattr(self.decoding, 'decoding'):
+                self.decoding.decoding.use_cuda_graph_decoder = False
+                logger.info("✓ Forced CUDA graphs disabled in model decoding")
+
+            if hasattr(self, 'wer') and hasattr(self.wer, 'decoding'):
+                if hasattr(self.wer.decoding, 'decoding'):
+                    self.wer.decoding.decoding.use_cuda_graph_decoder = False
+                    logger.info("✓ Forced CUDA graphs disabled in WER decoding")
+
+            return result
+
+        def setup_optimization(self, optim_config=None):
+            """Override to disable CUDA graphs after optimizer setup."""
+            result = super().setup_optimization(optim_config)
+
+            # Disable CUDA graphs for WER metric to avoid bf16 conflicts
+            # This must be done after setup_optimization where the decoder is created
+            if hasattr(self, 'wer') and hasattr(self.wer, 'decoding'):
+                if hasattr(self.wer.decoding, 'decoding'):
+                    # Force disable CUDA graphs in the decoding computer
+                    # self.wer.decoding.decoding.enable_cuda_graphs = False
+                    
+                    self.wer.decoding.decoding.use_cuda_graph_decoder = False
+                    if hasattr(self.wer.decoding.decoding, 'decoding_computer'):
+                        # self.wer.decoding.decoding.decoding_computer.enable_cuda_graphs = False
+                        self.wer.decoding.decoding.decoding_computer.use_cuda_graph_decoder = False
+                    logger.info("✓ Disabled CUDA graphs for WER metric (bf16 compatibility)")
+
+            return result
+
+        def on_validation_epoch_start(self):
+            """Ensure CUDA graphs are disabled before validation."""
+            super().on_validation_epoch_start()
+            # Double-check CUDA graphs are disabled for validation
+            if hasattr(self, 'wer') and hasattr(self.wer, 'decoding'):
+                if hasattr(self.wer.decoding, 'decoding'):
+                    self.wer.decoding.decoding.enable_cuda_graphs = False
+                    if hasattr(self.wer.decoding.decoding, 'decoding_computer'):
+                        # self.wer.decoding.decoding.decoding_computer.enable_cuda_graphs = False
+                        self.wer.decoding.decoding.decoding_computer.use_cuda_graph_decoder = False
 
         def forward(self, input_signal=None, input_signal_length=None, processed_signal=None, processed_signal_length=None):
             """
@@ -343,9 +486,9 @@ def main():
     logger.info(f"  Encoder: Conformer with {cfg.model.encoder.num_layers} layers, {cfg.model.encoder.subsampling_factor}x subsampling")
     logger.info(f"  Decoder: RNN-T Prediction Network with {cfg.model.decoder.pred_rnn_layers} LSTM layer{'s' if cfg.model.decoder.pred_rnn_layers > 1 else ''}")
     logger.info(f"  Joint: RNN-T Joint Network with {cfg.model.joint.joint_hidden} hidden units")
-    logger.info(f"  Total parameters: {sum(p.numel() for p in model.parameters())/1e6:.1f}M")
+    # logger.info(f"  Total parameters: {sum(p.numel() for p in model.parameters())/1e6:.1f}M")
     logger.info(f"Optimizations:")
-    logger.info(f"  • bf16 mixed precision: Enabled")
+    logger.info(f"  • Precision: bf16-mixed (faster training)")
     logger.info(f"  • {cfg.model.encoder.subsampling_factor}x subsampling: 200→{200//cfg.model.encoder.subsampling_factor} timesteps")
     logger.info(f"  • TF32 and cuDNN autotuning: Enabled")
     if hasattr(torch, 'compile'):
@@ -355,6 +498,16 @@ def main():
     
     # Setup callbacks
     prediction_logger = PredictionLogger(val_loader, vocab)
+
+    # Checkpoint callback to track WER (accuracy = 100% - WER)
+    checkpoint_callback = ModelCheckpoint(
+        monitor='val_wer',  # Monitor Word Error Rate
+        mode='min',  # Minimize WER (lower is better)
+        save_top_k=3,
+        filename='epoch={epoch:02d}-wer={val_wer:.2f}',
+        save_last=True,
+        verbose=True
+    )
     
     # Configure PyTorch Lightning trainer with RTX 4090M optimizations
     trainer = pl.Trainer(
@@ -365,17 +518,18 @@ def main():
         accumulate_grad_batches=cfg.training.gradient_accumulation,
         gradient_clip_val=1.0,
         log_every_n_steps=50,
-        val_check_interval=1.0,  # Validate once per epoch for speed
-        callbacks=[prediction_logger],
+        val_check_interval=1.0,  # Validate every 5 epochs only
+        callbacks=[prediction_logger, checkpoint_callback],
         enable_checkpointing=True,
         default_root_dir="./rnnt_checkpoints_" + runtime_id, # use the date and time to make it unique
         enable_model_summary=False,  # Disable to reduce overhead
         enable_progress_bar=True,
-        # Early validation to catch errors quickly
-        num_sanity_val_steps=2,  # Run 2 validation batches before training starts to catch errors
+        # Minimal sanity check
+        num_sanity_val_steps=1,  # Just 1 batch for sanity check
         # Performance optimizations
         benchmark=True,  # Enable cuDNN benchmark
         sync_batchnorm=False,  # Not needed for single GPU
+        deterministic=False,  # Allow non-deterministic ops for speed
         
         # Logging
         logger=pl.loggers.TensorBoardLogger(
@@ -390,13 +544,20 @@ def main():
     # Start training
     logger.info("\n" + "="*60)
     logger.info("Starting RNN-Transducer training...")
+    logger.info("Using warprnnt_numba for 5-10x faster loss computation")
+    logger.info("Tracking WER (Word Error Rate) - Accuracy = 100% - WER%")
     logger.info("This models output dependencies unlike CTC:")
     logger.info("  • P(y_i | y_1...y_{i-1}, x) via Prediction Network")
     logger.info("  • Joint network combines encoder + prediction")
     logger.info("  • Superior disambiguation for similar swipe patterns")
     logger.info("="*60 + "\n")
     
-    trainer.fit(model)
+    # Resume from checkpoint if available
+    if resume_checkpoint:
+        logger.info(f"\n📥 Resuming training from: {os.path.basename(resume_checkpoint)}")
+        trainer.fit(model, ckpt_path=resume_checkpoint)
+    else:
+        trainer.fit(model)
     
     # Save the final model in NeMo format
     save_path = "conformer_rnnt_gesture_" + runtime_id + ".nemo"
