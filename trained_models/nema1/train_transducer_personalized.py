@@ -108,6 +108,21 @@ CONFIG: Dict[str, Any] = {
         "rare_frequency_threshold": 5,
         "rare_word_boost": 2.0,
         "max_weight_factor": 10.0,
+        "min_word_length": 1,
+    },
+    "validation": {
+        "strategy": "inverse_sqrt_freq",
+        "freq_power": 0.5,
+        "length_power": 1.0,
+        "min_word_length": 6,
+        "rare_frequency_threshold": 20,
+        "rare_word_boost": 4.0,
+        "max_weight_factor": 25.0,
+        "batch_size_factor": 0.5,
+        "limit_batches": 0.25,
+        "check_interval": 0.5,
+        "max_samples": 2000,
+        "log_error_batches": 1,
     },
 }
 
@@ -403,12 +418,28 @@ class PersonalizedSwipeDataset(Dataset):
         rare_frequency_threshold = int(sampling_cfg.get("rare_frequency_threshold", 0))
         rare_word_boost = float(sampling_cfg.get("rare_word_boost", 1.0))
         max_weight_factor = float(sampling_cfg.get("max_weight_factor", 10.0))
+        min_word_length = int(sampling_cfg.get("min_word_length", 1))
+        max_word_length = sampling_cfg.get("max_word_length")
+        max_word_length = int(max_word_length) if max_word_length else None
+        max_frequency = sampling_cfg.get("max_frequency")
+        max_frequency = int(max_frequency) if max_frequency else None
 
         weights: List[float] = []
         for sample in self.samples:
             word = sample["word"]
             freq = max(self.word_counts.get(word, 1), 1)
             weight = 1.0
+            word_len = len(word)
+
+            if word_len < min_word_length:
+                weights.append(0.0)
+                continue
+            if max_word_length and word_len > max_word_length:
+                weights.append(0.0)
+                continue
+            if max_frequency and freq > max_frequency:
+                weights.append(0.0)
+                continue
 
             if strategy == "inverse_sqrt_freq":
                 exponent = -abs(freq_power)
@@ -423,6 +454,8 @@ class PersonalizedSwipeDataset(Dataset):
             weights.append(weight)
 
         weights_arr = np.asarray(weights, dtype=np.float64)
+        if weights_arr.sum() == 0:
+            return None
         weights_arr /= weights_arr.mean()
         if max_weight_factor > 0:
             weights_arr = np.clip(weights_arr, 1.0 / max_weight_factor, max_weight_factor)
@@ -461,6 +494,13 @@ class PersonalizedRNNTModel(nemo_asr.models.EncDecRNNTModel):
         self.teacher = None
         if teacher_checkpoint:
             self._init_teacher(teacher_checkpoint)
+
+        # Disable Nemo's random sample logging; we'll log mismatches manually
+        if hasattr(self, 'wer') and self.wer is not None:
+            try:
+                self.wer.log_prediction = False
+            except AttributeError:
+                pass
 
     def _init_teacher(self, checkpoint: str) -> None:
         self.teacher = nemo_asr.models.EncDecRNNTModel.restore_from(checkpoint, map_location="cpu")
@@ -555,9 +595,48 @@ class PersonalizedRNNTModel(nemo_asr.models.EncDecRNNTModel):
             _, scores, words = self.wer.compute()
             self.wer.reset()
             logs['training_batch_wer'] = scores.float() / words
+            self._log_batch_errors(
+                (signal, signal_len, transcript, transcript_len),
+                stage="train",
+            )
 
         self.log_dict(logs)
         return {'loss': loss_value}
+
+    def _decode_targets(self, transcript: torch.Tensor, transcript_len: torch.Tensor) -> List[str]:
+        references: List[str] = []
+        for tokens, length in zip(transcript, transcript_len):
+            length_int = int(length.item())
+            token_list = tokens[:length_int].detach().cpu().numpy().tolist()
+            references.append(self.decoding.decode_tokens_to_str(token_list))
+        return references
+
+    def _log_batch_errors(self, batch, stage: str) -> None:
+        signal, signal_len, transcript, transcript_len = batch
+        try:
+            with torch.no_grad():
+                if isinstance(batch, DALIOutputs) and batch.has_processed_signal:
+                    encoded, encoded_len = self.forward(
+                        processed_signal=signal, processed_signal_length=signal_len
+                    )
+                else:
+                    encoded, encoded_len = self.forward(
+                        input_signal=signal, input_signal_length=signal_len
+                    )
+
+                predictions = self.decoding.rnnt_decoder_predictions_tensor(encoded, encoded_len)
+                references = self._decode_targets(transcript, transcript_len)
+                for ref, pred in zip(references, predictions):
+                    if isinstance(pred, list):
+                        pred = pred[0]
+                    pred_text = pred.text if hasattr(pred, 'text') else str(pred)
+                    if pred_text != ref:
+                        print(
+                            f"\033[1;33m[{stage} mispred]\033[0m ref='{ref}' pred='{pred_text}'"
+                        )
+                        break
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------
     # Validation/Test hooks -------------------------------------------------
@@ -574,6 +653,28 @@ class PersonalizedRNNTModel(nemo_asr.models.EncDecRNNTModel):
 
 # ---------------------------------------------------------------------------
 # Training orchestration -----------------------------------------------------
+
+
+class AnnounceCheckpoint(ModelCheckpoint):
+    def _save_model(self, trainer, filepath: str) -> None:
+        super()._save_model(trainer, filepath)
+        if getattr(trainer, "is_global_zero", True):
+            print(f"\033[1;32m[saved checkpoint]\033[0m {filepath}")
+
+
+class ValidationErrorLogger(pl.Callback):
+    def __init__(self, max_batches: int = 1) -> None:
+        self.max_batches = max_batches
+        self._logged = 0
+
+    def on_validation_epoch_start(self, trainer, pl_module) -> None:  # type: ignore[override]
+        self._logged = 0
+
+    def on_validation_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx) -> None:  # type: ignore[override]
+        if self._logged >= self.max_batches:
+            return
+        pl_module._log_batch_errors(batch, stage="validation")
+        self._logged += 1
 
 
 def load_vocab(vocab_path: str) -> Dict[str, int]:
@@ -636,17 +737,33 @@ def build_dataloaders(cfg: DictConfig, vocab: Dict[str, int]):
         train_loader_kwargs['prefetch_factor'] = 4
     train_loader = DataLoader(**train_loader_kwargs)
 
+    val_weights = val_ds.compute_sampling_weights(cfg.validation)
+    val_sampler: Optional[WeightedRandomSampler] = None
+    if val_weights is not None:
+        num_samples = len(val_weights)
+        max_samples = cfg.validation.get('max_samples')
+        if max_samples:
+            num_samples = min(num_samples, int(max_samples))
+        val_sampler = WeightedRandomSampler(
+            weights=torch.tensor(val_weights, dtype=torch.double),
+            num_samples=num_samples,
+            replacement=False,
+        )
+
     val_workers = max(0, cfg.training.num_workers // 2)
+    val_batch_size = max(1, int(cfg.training.batch_size * cfg.validation.get('batch_size_factor', 0.5)))
     val_loader_kwargs = dict(
         dataset=val_ds,
-        batch_size=cfg.training.batch_size * 2,
-        shuffle=False,
+        batch_size=val_batch_size,
+        shuffle=val_sampler is None,
         num_workers=val_workers,
         collate_fn=collate,
         pin_memory=_has_usable_cuda(),
         drop_last=False,
         persistent_workers=val_workers > 0,
     )
+    if val_sampler is not None:
+        val_loader_kwargs['sampler'] = val_sampler
     if val_workers > 0:
         val_loader_kwargs['prefetch_factor'] = 2
     val_loader = DataLoader(**val_loader_kwargs)
@@ -755,14 +872,18 @@ _EPOCH_REGEX = re.compile(r"epoch=(?:epoch=)?(\d+)")
 
 
 def _collect_checkpoint_paths() -> List[Path]:
+    base_dirs = {SCRIPT_DIR.resolve(), Path.cwd().resolve()}
     patterns = [
-        str(SCRIPT_DIR / 'rnnt_checkpoints_*' / 'lightning_logs' / 'version_*' / 'checkpoints' / '*.ckpt'),
-        str(SCRIPT_DIR / 'rnnt_logs_*' / 'conformer_rnnt' / '*' / 'checkpoints' / '*.ckpt'),
-        str(SCRIPT_DIR / 'rnnt_logs' / 'conformer_rnnt' / '*' / 'checkpoints' / '*.ckpt'),
+        'rnnt_checkpoints_*/*/version_*/*.ckpt',
+        'rnnt_checkpoints_*/*/checkpoints/*.ckpt',
+        'rnnt_logs_*/*/*/checkpoints/*.ckpt',
+        'rnnt_logs/*/*/checkpoints/*.ckpt',
     ]
     paths: List[Path] = []
-    for pattern in patterns:
-        paths.extend(Path(path) for path in glob.glob(pattern))
+    for base in base_dirs:
+        for pattern in patterns:
+            search_glob = str(base / pattern)
+            paths.extend(Path(path) for path in glob.glob(search_glob))
     return paths
 
 
@@ -834,7 +955,7 @@ def main() -> None:
         if cfg.training.teacher_checkpoint else None,
     )
 
-    checkpoint_callback = ModelCheckpoint(
+    checkpoint_callback = AnnounceCheckpoint(
         monitor='val_wer',
         mode='min',
         save_top_k=3,
@@ -846,6 +967,12 @@ def main() -> None:
     if fast_dev:
         print("FAST_DEV_RUN=1 -> running a single batch for smoke test")
 
+    val_check_interval = cfg.validation.get('check_interval', 1.0)
+    limit_val_batches = cfg.validation.get('limit_batches', 1.0)
+    error_logger = ValidationErrorLogger(
+        max_batches=int(cfg.validation.get('log_error_batches', 1))
+    )
+
     trainer = pl.Trainer(
         accelerator=cfg.training.accelerator,
         devices=cfg.training.devices,
@@ -855,12 +982,14 @@ def main() -> None:
         gradient_clip_val=1.0,
         accumulate_grad_batches=cfg.training.gradient_accumulation,
         enable_checkpointing=True,
-        callbacks=[checkpoint_callback],
+        callbacks=[checkpoint_callback, error_logger],
         default_root_dir=f'./rnnt_checkpoints_{runtime_id}',
         enable_progress_bar=True,
         check_val_every_n_epoch=1,
         num_sanity_val_steps=0,
         fast_dev_run=fast_dev,
+        val_check_interval=val_check_interval,
+        limit_val_batches=limit_val_batches,
     )
 
     resume_from = find_latest_checkpoint()
