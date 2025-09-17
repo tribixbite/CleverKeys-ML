@@ -22,12 +22,46 @@ class GestureRNNTModel(nemo_asr.models.EncDecRNNTModel):
             return super().validation_step(batch, batch_idx, dataloader_idx)
 
     def __init__(self, cfg):
-        # Force disable CUDA graphs in config before initialization
+        # Force disable CUDA graphs in config before initialization (when keys exist)
+        try:
+            from omegaconf import OmegaConf, DictConfig
+
+            if isinstance(cfg, DictConfig):
+                OmegaConf.set_struct(cfg, False)
+        except Exception:
+            pass
+
         if 'decoding' in cfg:
-            cfg.decoding.use_cuda_graph_decoder = False
-            if 'greedy_batch' in cfg.decoding:
-                cfg.decoding.greedy_batch.enable_cuda_graphs = False
-                cfg.decoding.greedy_batch.use_cuda_graph_decoder = False
+            dec = cfg.decoding
+            try:
+                from omegaconf import DictConfig, OmegaConf
+
+                if isinstance(dec, DictConfig):
+                    OmegaConf.set_struct(dec, False)
+            except Exception:
+                pass
+
+            if 'use_cuda_graph_decoder' in dec:
+                dec.use_cuda_graph_decoder = False
+            if 'greedy_batch' in dec:
+                gb = dec.greedy_batch
+                try:
+                    from omegaconf import DictConfig, OmegaConf
+
+                    if isinstance(gb, DictConfig):
+                        OmegaConf.set_struct(gb, False)
+                except Exception:
+                    pass
+                if isinstance(gb, dict):
+                    if 'enable_cuda_graphs' in gb:
+                        gb['enable_cuda_graphs'] = False
+                    if 'use_cuda_graph_decoder' in gb:
+                        gb['use_cuda_graph_decoder'] = False
+                else:
+                    if hasattr(gb, 'enable_cuda_graphs'):
+                        gb.enable_cuda_graphs = False
+                    if hasattr(gb, 'use_cuda_graph_decoder'):
+                        gb.use_cuda_graph_decoder = False
 
         super().__init__(cfg=cfg)
 

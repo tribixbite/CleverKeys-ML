@@ -28,11 +28,13 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import lightning.pytorch as pl
 from lightning.pytorch.callbacks import ModelCheckpoint
+from torch.utils.data import WeightedRandomSampler
 from omegaconf import DictConfig, OmegaConf
 import numpy as np
 import torch
 from torch.utils.data import DataLoader, Dataset
 from torch.nn.utils.rnn import pad_sequence
+from collections import Counter
 
 import nemo.collections.asr as nemo_asr
 try:
@@ -96,6 +98,14 @@ CONFIG: Dict[str, Any] = {
         "resample_long_target": 96,
         "resample_short_threshold": 48,
         "resample_long_threshold": 112,
+    },
+    "sampling": {
+        "strategy": "none",  # options: none, inverse_sqrt_freq
+        "freq_power": 0.5,
+        "length_power": 0.0,
+        "rare_frequency_threshold": 5,
+        "rare_word_boost": 2.0,
+        "max_weight_factor": 10.0,
     },
 }
 
@@ -355,6 +365,8 @@ class PersonalizedSwipeDataset(Dataset):
                     continue
                 self.samples.append(payload)
 
+        self.word_counts = Counter(sample["word"] for sample in self.samples)
+
     def __len__(self) -> int:  # pragma: no cover - trivial
         return len(self.samples)
 
@@ -378,6 +390,41 @@ class PersonalizedSwipeDataset(Dataset):
             tokens_tensor,
             torch.tensor(len(tokens), dtype=torch.long),
         )
+
+    def compute_sampling_weights(self, sampling_cfg: Dict[str, Any]) -> Optional[np.ndarray]:
+        strategy = sampling_cfg.get("strategy", "none")
+        if strategy == "none" or not self.samples:
+            return None
+
+        freq_power = float(sampling_cfg.get("freq_power", 0.5))
+        length_power = float(sampling_cfg.get("length_power", 0.0))
+        rare_frequency_threshold = int(sampling_cfg.get("rare_frequency_threshold", 0))
+        rare_word_boost = float(sampling_cfg.get("rare_word_boost", 1.0))
+        max_weight_factor = float(sampling_cfg.get("max_weight_factor", 10.0))
+
+        weights: List[float] = []
+        for sample in self.samples:
+            word = sample["word"]
+            freq = max(self.word_counts.get(word, 1), 1)
+            weight = 1.0
+
+            if strategy == "inverse_sqrt_freq":
+                exponent = -abs(freq_power)
+                weight *= freq ** exponent
+
+            if length_power:
+                weight *= max(len(word), 1) ** length_power
+
+            if rare_frequency_threshold and freq <= rare_frequency_threshold:
+                weight *= rare_word_boost
+
+            weights.append(weight)
+
+        weights_arr = np.asarray(weights, dtype=np.float64)
+        weights_arr /= weights_arr.mean()
+        if max_weight_factor > 0:
+            weights_arr = np.clip(weights_arr, 1.0 / max_weight_factor, max_weight_factor)
+        return weights_arr.astype(np.float64)
 
     @staticmethod
     def _normalize_points(points: List[Dict[str, Any]]) -> List[Dict[str, float]]:
@@ -556,16 +603,33 @@ def build_dataloaders(cfg: DictConfig, vocab: Dict[str, int]):
 
     collate = collate_fn
 
+    train_weights = train_ds.compute_sampling_weights(cfg.sampling)
+    train_sampler: Optional[WeightedRandomSampler] = None
+    if train_weights is not None:
+        train_sampler = WeightedRandomSampler(
+            weights=torch.tensor(train_weights, dtype=torch.double),
+            num_samples=len(train_weights),
+            replacement=True,
+        )
+        rare_thresh = cfg.sampling.get('rare_frequency_threshold', 0)
+        print(
+            f"Sampling strategy '{cfg.sampling.strategy}' enabled: weight range "
+            f"{train_weights.min():.3f}–{train_weights.max():.3f}, "
+            f"rare_threshold={rare_thresh}"
+        )
+
     train_loader_kwargs = dict(
         dataset=train_ds,
         batch_size=cfg.training.batch_size,
-        shuffle=True,
+        shuffle=train_sampler is None,
         num_workers=cfg.training.num_workers,
         collate_fn=collate,
         pin_memory=_has_usable_cuda(),
         drop_last=True,
         persistent_workers=cfg.training.num_workers > 0,
     )
+    if train_sampler is not None:
+        train_loader_kwargs['sampler'] = train_sampler
     if cfg.training.num_workers > 0:
         train_loader_kwargs['prefetch_factor'] = 4
     train_loader = DataLoader(**train_loader_kwargs)
