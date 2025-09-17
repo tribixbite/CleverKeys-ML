@@ -183,14 +183,18 @@ class SwipeDataset(Dataset):
         item = self.data[idx]
         
         # 1. Process the gesture trace using the featurizer
-        features = self.featurizer(item['points'])
+        points = item['points']
+        if self.max_trace_len:
+            points = points[: self.max_trace_len]
+
+        features = self.featurizer(points)
         features_tensor = torch.from_numpy(features).float()
-        
+
         # 2. Process the target word
         word = item['word']
         tokens = [self.vocab.get(char, self.vocab['<unk>']) for char in word]
         tokens_tensor = torch.tensor(tokens, dtype=torch.long)
-        
+
         return (
             features_tensor,
             torch.tensor(features_tensor.shape[0], dtype=torch.long),

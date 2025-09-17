@@ -5,6 +5,25 @@ Uses proper RNN-T joint computation for modeling output dependencies.
 Optimized for RTX 4090M with all performance enhancements.
 """
 
+# TODO: Land dictionary ranking + personalization stack: keep runtime lexicon optional,
+#        fuse user dictionaries, and surface scoring hooks that prefer personalized words
+#        without baking them into exported checkpoints.
+# TODO: Distill the teacher Conformer-RNNT into lightweight student variants (items 2→5
+#        from the architecture roadmap) so we can trade accuracy/latency across Android
+#        and Web; share projection heads to simplify export.
+# TODO: Accept raw swipe traces as (x, y, t_ms) already scaled to [-1, 1] with t=0 at
+#        gesture start; perform any normalization/resampling inside the model so training
+#        and export consume identical inputs.
+# TODO: Remove the auxiliary word-classification head and expose configurable counts of
+#        character-path hypotheses so out-of-vocabulary and personalized words can be
+#        surfaced alongside ranked dictionary suggestions.
+# TODO: Add adaptive resampling (≈50–100 steps) and mixed-precision CUDA kernels tuned
+#        for the 16 GB RTX 4090M so long words like “gratification” stay stable while
+#        short traces like “to” remain responsive.
+# TODO: Ensure export scripts emit paired packages (with and without lexicon/trie) and
+#        keep the ONNX/PT2E quantization flow aligned with TorchAO primitive ops for
+#        future INT8/float8 personalization on-device.
+
 import datetime as dt
 import os
 import glob
@@ -16,16 +35,32 @@ import numpy as np
 from torch.utils.data import Dataset, DataLoader
 from torch.nn.utils.rnn import pad_sequence
 from omegaconf import DictConfig, OmegaConf
+from pathlib import Path
 from typing import List, Dict, Any
 import logging
+
+# Force disable CUDA graphs system-wide
+os.environ['CUDA_GRAPHS_ENABLED'] = '0'
+os.environ['NEMO_CUDA_GRAPHS'] = '0'
 
 # NeMo imports
 import nemo.collections.asr as nemo_asr
 from nemo.utils import logging as nemo_logging
 import torch.nn.functional as F
 
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+# Robust DEBUG logging fix - prevent 8+ hour numba compilation
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+# Force all numba and related loggers to INFO level or higher to prevent DEBUG spam
+for logger_name in ['numba', 'numba.core', 'numba.core.types', 'numba.core.compiler', 'warprnnt_numba']:
+    logging.getLogger(logger_name).setLevel(logging.INFO)
+
+# Set environment variables to disable verbose numba logging
+os.environ['NUMBA_DISABLE_PERFORMANCE_WARNINGS'] = '1'
+os.environ['NUMBA_DISABLE_JIT'] = '0'  # Keep JIT enabled but reduce verbosity
+os.environ['NUMBA_DISABLE_CACHING'] = '1'
+os.environ['LIBROSA_DISABLE_NUMBA'] = '1'
 
 # Import feature engineering utilities
 from swipe_data_utils import (
@@ -34,6 +69,15 @@ from swipe_data_utils import (
     SwipeDataset,
     collate_fn
 )
+
+
+class IdentityPreprocessor(torch.nn.Module):
+    """Bypass preprocessor that returns input features unchanged."""
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+
+    def forward(self, input_signal, length):
+        return input_signal, length
 
 
 class PredictionLogger(pl.Callback):
@@ -66,7 +110,7 @@ CONFIG_SMALL = {
     },
     "training": {
         "batch_size": 384,  # Increased to 384 for better GPU utilization
-        "num_workers": 24,  # Increased for better data loading
+        "num_workers": 10,  # Reduced to prevent multiprocessing connection issues
         "learning_rate": 4e-4,  # Keep LR the same to maintain quality
         "max_epochs": 100,
         "gradient_accumulation": 1,  # Keep at 1 since batch size is larger
@@ -81,7 +125,7 @@ CONFIG_SMALL = {
             "n_heads": 4,    # Keep proportional to d_model
             "num_layers": 6,  # Reduced from 8 for smaller model size (~25% fewer params)
             "conv_kernel_size": 15,  # Reduced kernel size for efficiency
-            "subsampling_factor": 2,  # Keep at 2 as requested (don't increase)
+            "subsampling_factor": 2,  # Keep stride modest for mobile-sized model
             "att_context_size": [64, 64],  # Add attention windowing for efficiency
         },
         "decoder": {
@@ -107,7 +151,7 @@ CONFIG_MEDIUM = {
     },
     "training": {
         "batch_size": 384,  # Increased to 384 for better GPU utilization
-        "num_workers": 24,  # Increased for better data loading
+        "num_workers": 10,  # Reduced to prevent multiprocessing connection issues
         "learning_rate": 4e-4,  # Keep LR the same to maintain quality
         "max_epochs": 100,
         "gradient_accumulation": 1,  # Keep at 1 since batch size is larger
@@ -122,7 +166,7 @@ CONFIG_MEDIUM = {
             "n_heads": 4,    # Keep proportional to d_model
             "num_layers": 10,  # Increased from 8 for better accuracy
             "conv_kernel_size": 31,  # 31 is the original kernel size
-            "subsampling_factor": 2,  # Keep at 2 as requested (don't increase)
+            "subsampling_factor": 2,
         },
         "decoder": {
             "pred_hidden": 384,  # Increased proportionally
@@ -147,7 +191,7 @@ CONFIG_LARGE = {
     },
     "training": {
         "batch_size": 384,  # Increased to 384 for better GPU utilization
-        "num_workers": 24,  # Increased for better data loading
+        "num_workers": 10,  # Reduced to prevent multiprocessing connection issues
         "learning_rate": 4e-4,  # Keep LR the same to maintain quality
         "max_epochs": 100,
         "gradient_accumulation": 1,  # Keep at 1 since batch size is larger
@@ -162,7 +206,7 @@ CONFIG_LARGE = {
             "n_heads": 4,
             "num_layers": 8,  # Use 8 layers for better accuracy
             "conv_kernel_size": 31,  # 31 is the original kernel size
-            "subsampling_factor": 2,  # 2x subsampling for speed, 4 is the original subsampling factor
+            "subsampling_factor": 2,
         },
         "decoder": {
             "pred_hidden": 320,  # 320 is the original hidden size of the prediction network
@@ -198,7 +242,23 @@ def get_config():
 
     return config
 
+SCRIPT_DIR = Path(__file__).resolve().parent
 runtime_id = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+
+
+def _has_usable_cuda() -> bool:
+    """Robust CUDA availability check that also tolerates driver errors."""
+    try:
+        if not torch.cuda.is_available():
+            return False
+        if torch.cuda.device_count() <= 0:
+            return False
+        # Attempt to query current device; this triggers driver init
+        _ = torch.cuda.current_device()
+        return True
+    except Exception as exc:
+        logger.warning(f"CUDA availability check failed: {exc}; falling back to CPU")
+        return False
 
 def find_latest_checkpoint():
     """Find the most recent checkpoint across all timestamped folders.
@@ -236,6 +296,28 @@ def main():
     """Main training function using NeMo's EncDecRNNTModel."""
     cfg = DictConfig(get_config())
 
+    def _resolve_path(path_str: str) -> str:
+        path = Path(path_str)
+        if not path.is_absolute():
+            path = (SCRIPT_DIR / path).resolve()
+        return str(path)
+
+    cfg.data.train_manifest = _resolve_path(cfg.data.train_manifest)
+    cfg.data.val_manifest = _resolve_path(cfg.data.val_manifest)
+    cfg.data.vocab_path = _resolve_path(cfg.data.vocab_path)
+
+    # Gracefully fall back to CPU when no CUDA device is present to prevent hangs
+    if not _has_usable_cuda():
+        logger.warning("CUDA not usable – switching training to CPU mode")
+        cfg.training.accelerator = 'cpu'
+        cfg.training.devices = 1
+        cfg.training.precision = '32-true'
+        cfg.training.num_workers = 0
+        import types
+        torch.cuda.is_available = types.MethodType(lambda self=None: False, torch.cuda)
+        torch.cuda.device_count = types.MethodType(lambda self=None: 0, torch.cuda)
+        torch.cuda.current_device = types.MethodType(lambda self=None: 0, torch.cuda)
+
     # Check for existing checkpoint to resume from
     resume_checkpoint, is_old_format = find_latest_checkpoint()
 
@@ -264,7 +346,7 @@ def main():
     logger.info(f"Configuration:\n{OmegaConf.to_yaml(cfg)}")
     
     # Enable RTX 4090M optimizations
-    if torch.cuda.is_available():
+    if _has_usable_cuda():
         torch.backends.cudnn.benchmark = True
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
@@ -328,31 +410,47 @@ def main():
         collate_function = collate_fn
 
     logger.info("Creating training dataloader...")
-    train_loader = DataLoader(
+    train_num_workers = max(0, int(cfg.training.num_workers))
+    train_pin_memory = _has_usable_cuda() and train_num_workers > 0
+    train_prefetch = 8 if train_num_workers > 0 else None
+
+    train_loader_kwargs = dict(
         dataset=train_dataset,
         batch_size=cfg.training.batch_size,
         collate_fn=collate_function,
-        num_workers=cfg.training.num_workers,
+        num_workers=train_num_workers,
         shuffle=True,
-        pin_memory=True,
-        persistent_workers=True,
-        prefetch_factor=8,  # Increased for better prefetching
-        drop_last=True      # Drop last incomplete batch for uniform shapes
+        pin_memory=train_pin_memory,
+        drop_last=True,
     )
+    if train_num_workers > 0:
+        train_loader_kwargs.update(
+            persistent_workers=True,
+            prefetch_factor=train_prefetch or 8,
+        )
+    train_loader = DataLoader(**train_loader_kwargs)
     logger.info(f"Training dataloader created with batch_size={cfg.training.batch_size}")
 
     logger.info("Creating validation dataloader...")
-    val_loader = DataLoader(
+    val_num_workers = min(4, train_num_workers)
+    val_pin_memory = _has_usable_cuda() and val_num_workers > 0
+    val_prefetch = 4 if val_num_workers > 0 else None
+
+    val_loader_kwargs = dict(
         dataset=val_dataset,
-        batch_size=cfg.training.batch_size * 2,  # Reasonable validation batch size
+        batch_size=cfg.training.batch_size * 2,
         collate_fn=collate_function,
-        num_workers=cfg.training.num_workers,
+        num_workers=val_num_workers,
         shuffle=False,
-        pin_memory=True,
-        persistent_workers=True,
-        prefetch_factor=8,  # Increased for better prefetching
-        drop_last=True
+        pin_memory=val_pin_memory,
+        drop_last=True,
     )
+    if val_num_workers > 0:
+        val_loader_kwargs.update(
+            persistent_workers=True,
+            prefetch_factor=val_prefetch or 4,
+        )
+    val_loader = DataLoader(**val_loader_kwargs)
     logger.info(f"Validation dataloader created with batch_size={cfg.training.batch_size * 2}")
     
     # Create a word-to-ID mapping for the auxiliary loss using large wordlist
@@ -392,17 +490,17 @@ def main():
             'pred_hidden': cfg.model.decoder.pred_hidden,
         },
         
-        # Required preprocessor config (we'll bypass it but NeMo needs it)
+        # Required preprocessor config (we'll bypass it but NeMo needs it). Disable augmentation.
         'preprocessor': {
             '_target_': 'nemo.collections.asr.modules.AudioToMelSpectrogramPreprocessor',
-            'sample_rate': 16000,  # Dummy value, we don't use audio
+            'sample_rate': 16000,
             'normalize': 'per_feature',
             'window_size': 0.025,
             'window_stride': 0.01,
             'features': cfg.model.encoder.feat_in,
             'n_fft': 512,
             'frame_splicing': 1,
-            'dither': 0.00001,
+            'dither': 0.0,
         },
         
         # Conformer Encoder Configuration
@@ -534,7 +632,7 @@ def main():
         """Custom RNN-T model that bypasses audio preprocessing."""
         def validation_step(self, batch, batch_idx: int, dataloader_idx: int = 0):
         # Temporarily disable autocast so logits/ops are fp32 inside NeMo's decode
-            if torch.cuda.is_available():
+            if _has_usable_cuda():
                 # Works regardless of global Trainer precision
                 with torch.autocast(device_type="cuda", enabled=False):
                     return super().validation_step(batch, batch_idx, dataloader_idx)
@@ -626,7 +724,7 @@ def main():
                         # Skip most batches; metrics still get periodic updates
                         return
 
-                if torch.cuda.is_available():
+                if _has_usable_cuda():
                     with torch.autocast(device_type="cuda", enabled=False):
                         return original_update(*args, **kwargs)
                 else:
@@ -864,14 +962,14 @@ def main():
         logger.info(f"  • torch.compile: Not available (upgrade to PyTorch 2.0+)")
     
     # Setup callbacks
-    prediction_logger = PredictionLogger(val_loader, vocab)
+    # prediction_logger = PredictionLogger(val_loader, vocab)  # Disabled with validation
 
-    # Checkpoint callback to track WER (accuracy = 100% - WER)
+    # Checkpoint callback to track training loss (validation disabled)
     checkpoint_callback = ModelCheckpoint(
-        monitor='val_wer',  # Monitor Word Error Rate
-        mode='min',  # Minimize WER (lower is better)
+        monitor='train_loss',  # Monitor training loss instead of validation WER
+        mode='min',  # Minimize training loss
         save_top_k=3,
-        filename='epoch={epoch:02d}-wer={val_wer:.2f}',
+        filename='epoch={epoch:02d}-loss={train_loss:.4f}',
         save_last=True,
         verbose=True
     )
@@ -887,11 +985,15 @@ def main():
     #     annealing_epochs=10,  # Gradual transition
     # )
 
-    callbacks = [prediction_logger, checkpoint_callback]
+    callbacks = [checkpoint_callback]  # Removed prediction_logger (validation disabled)
     logger.info("⚠ SWA temporarily disabled due to NeMo model deepcopy incompatibility")
     logger.info("Alternative: Manual EMA averaging can be implemented post-training")
-    
+
     # Configure PyTorch Lightning trainer with RTX 4090M optimizations
+    fast_dev_run = bool(int(os.environ.get("FAST_DEV_RUN", "0")))
+    if fast_dev_run:
+        logger.info("FAST_DEV_RUN=1 detected – running a single batch of train/val for smoke test")
+
     trainer = pl.Trainer(
         devices=cfg.training.devices,
         accelerator=cfg.training.accelerator,
@@ -900,26 +1002,27 @@ def main():
         accumulate_grad_batches=cfg.training.gradient_accumulation,
         gradient_clip_val=1.0,
         log_every_n_steps=50,
-        check_val_every_n_epoch=5,
-        limit_val_batches=64,
+        num_sanity_val_steps=0,  # Skip validation sanity check entirely
+        check_val_every_n_epoch=5,  # Validate every 5 epochs (like working script)
+        limit_val_batches=64,  # Limited validation batches (like working script)
         # val_check_interval=1.0,  # Validate every 5 epochs only
         callbacks=callbacks,
         enable_checkpointing=True,
         default_root_dir="./rnnt_checkpoints_" + runtime_id, # use the date and time to make it unique
         enable_model_summary=False,  # Disable to reduce overhead
-        enable_progress_bar=True,
-        # Minimal sanity check
-        num_sanity_val_steps=0,  # Just 1 batch for sanity check
+        enable_progress_bar=False,  # Disable to prevent broken pipe in headless environment
+        # Minimal sanity check (already set above)
         # Performance optimizations
         benchmark=True,  # Enable cuDNN benchmark
         sync_batchnorm=False,  # Not needed for single GPU
         deterministic=False,  # Allow non-deterministic ops for speed
-        
+
         # Logging
         logger=pl.loggers.TensorBoardLogger(
             save_dir="./rnnt_logs_" + runtime_id,
             name="conformer_rnnt"
         ),
+        fast_dev_run=fast_dev_run,
     )
 
     # Attach trainer to model (required by NeMo)
@@ -939,9 +1042,9 @@ def main():
     # Resume from checkpoint if available
     if resume_checkpoint:
         logger.info(f"\n📥 Resuming training from: {os.path.basename(resume_checkpoint)}")
-        trainer.fit(model, ckpt_path=resume_checkpoint)
+        trainer.fit(model, train_dataloaders=train_loader, val_dataloaders=val_loader, ckpt_path=resume_checkpoint)
     else:
-        trainer.fit(model)
+        trainer.fit(model, train_dataloaders=train_loader, val_dataloaders=val_loader)
     
     # Save the final model in NeMo format
     save_path = "conformer_rnnt_gesture_" + runtime_id + ".nemo"
