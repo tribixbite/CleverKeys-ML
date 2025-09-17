@@ -380,6 +380,12 @@
         let wordLogPrior = null; // Word frequency priors for beam search
         let trieRoot = null;
         let keyCentersResolved = null; // Key coordinates for feature computation
+        let charToIdMap = null;
+        let idToCharMap = null;
+        let runtimeTokens = [];
+        let padTokenId = null;
+        let wordSet = null;
+        let wordIndexMap = null;
         
         // Expose for debugging
         window.isModelReady = false;
@@ -506,23 +512,47 @@
                 updateLoadingStatus('Loading runtime metadata...');
                 runtimeMeta = await fetchJSON('runtime_meta.json');
                 console.log('Runtime metadata loaded:', runtimeMeta);
+                runtimeTokens = runtimeMeta.tokens || [];
+                charToIdMap = new Map(Object.entries(runtimeMeta.char_to_id || {}));
+                if (runtimeMeta.id_to_char) {
+                    idToCharMap = new Map(Object.entries(runtimeMeta.id_to_char).map(([idx, ch]) => [Number(idx), ch]));
+                } else if (runtimeTokens.length) {
+                    idToCharMap = new Map(runtimeTokens.map((tok, idx) => [idx, tok]));
+                } else {
+                    idToCharMap = new Map();
+                }
+                if (!idToCharMap.size && runtimeTokens.length) {
+                    runtimeTokens.forEach((tok, idx) => idToCharMap.set(idx, tok));
+                }
                 keyCentersResolved = resolveKeyCenters(runtimeMeta);
                 console.log('Key centers resolved for feature extraction:', keyCentersResolved);
 
                 updateLoadingStatus('Loading vocabulary wordlist...');
                 const wordsText = await fetchText('words.txt');
                 wordList = wordsText.split(/\r?\n/).filter(s => s.length > 0);
+                wordSet = new Set(wordList);
+                wordIndexMap = new Map(wordList.map((word, idx) => [word, idx]));
                 console.log(`Vocabulary wordlist loaded: ${wordList.length} words`);
 
-                // Calculate word frequency priors (assuming words.txt is frequency-sorted)
-                const totalWords = wordList.length;
-                wordLogPrior = new Float32Array(totalWords);
-                for (let i = 0; i < totalWords; i++) {
-                    // Simple inverse rank priority for frequency-sorted list
-                    const pseudo_freq = totalWords - i;
-                    wordLogPrior[i] = Math.log(pseudo_freq / totalWords);
+                updateLoadingStatus('Loading aligned word frequencies...');
+                try {
+                    const alignedFreq = await fetchJSON('word_frequencies_aligned.json');
+                    const logFreqs = alignedFreq.log_frequencies || alignedFreq.logFreq || [];
+                    if (Array.isArray(logFreqs) && logFreqs.length === wordList.length) {
+                        wordLogPrior = new Float32Array(logFreqs.map(v => Number.isFinite(v) ? v : Math.log(1e-8)));
+                        console.log(`Aligned word frequencies loaded (${wordLogPrior.length} entries)`);
+                    } else {
+                        console.warn('Aligned frequency file missing or length mismatch; falling back to uniform prior');
+                        wordLogPrior = new Float32Array(wordList.length).fill(Math.log(1 / Math.max(wordList.length, 1)));
+                    }
+                } catch (freqError) {
+                    console.error('Failed to load aligned frequencies:', freqError);
+                    wordLogPrior = new Float32Array(wordList.length);
+                    const fallbackVal = Math.log(1 / Math.max(wordList.length, 1));
+                    for (let i = 0; i < wordLogPrior.length; i++) {
+                        wordLogPrior[i] = fallbackVal;
+                    }
                 }
-                console.log(`Word frequency priors calculated: ${wordLogPrior.length} entries`);
 
                 // Build trie for lexicon-constrained beam search
                 updateLoadingStatus('Building trie...');

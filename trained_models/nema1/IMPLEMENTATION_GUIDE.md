@@ -1,6 +1,6 @@
 # Production Implementation Guide
 
-This guide shows how to run the export pipeline and deploy models in production TypeScript and Kotlin applications, with production-grade optimizations for memory and latency.
+This guide shows how to run the export pipeline and deploy models in production TypeScript and Kotlin applications, with production-grade optimizations for memory and latency. For a deeper dive into the RNNT training stack and the Android feature pipeline, see `RNNT_ARCHITECTURE.md`. The transformer snapshot in `trained_models/architecture_snapshot/` is now considered legacy and should only be used for web/demo experiments.
 
 ## Export Pipeline: From Training to Deployment
 
