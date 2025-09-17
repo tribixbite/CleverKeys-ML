@@ -1,322 +1,296 @@
 #!/usr/bin/env python3
-# export_pte_ultra.py
-# Ultra-optimized quantized ExecuTorch .pte encoder for blazing fast Android performance
+"""Ultra-optimized quantized ExecuTorch encoder for blazing fast Android keyboards."""
 
 import argparse
 import logging
-import torch
+import os
 import zlib
-from model_class import GestureRNNTModel, get_default_config
 
-# ExecuTorch PT2E quantization
-from torch.ao.quantization.quantize_pt2e import prepare_pt2e, convert_pt2e
+import torch
+from executorch.backends.xnnpack.partition.xnnpack_partitioner import XnnpackPartitioner
+from executorch.exir import to_edge
+from torch.ao.quantization.quantize_pt2e import convert_pt2e, prepare_pt2e
 from torch.ao.quantization.quantizer.xnnpack_quantizer import (
     XNNPACKQuantizer,
     get_symmetric_quantization_config,
 )
-from executorch.exir import to_edge
-from executorch.backends.xnnpack.partition.xnnpack_partitioner import XnnpackPartitioner
+
+from export_common import (
+    create_calibration_loader,
+    ensure_default_manifest,
+    iter_calibration_batches,
+    load_trained_model,
+    make_example_inputs,
+    package_artifacts,
+)
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("export_pte_ultra")
 
-def log_model_parameters(model, name="Model"):
-    """Log parameter count and estimated size"""
-    if hasattr(model, 'encoder'):
-        # For full model, focus on encoder
-        params = sum(p.numel() for p in model.encoder.parameters() if p.requires_grad)
-        log.info(f"{name} encoder parameters: {params/1e6:.2f}M (~{params*4/(1024**2):.1f}MB fp32, ~{params/(1024**2):.1f}MB int8)")
-    else:
-        # For encoder only
-        params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-        log.info(f"{name} parameters: {params/1e6:.2f}M (~{params*4/(1024**2):.1f}MB fp32, ~{params/(1024**2):.1f}MB int8)")
 
-def verify_quantization(program, program_name="Program"):
-    """Verify that the program contains quantization ops"""
+def log_model_parameters(model, name: str = "Model") -> None:
+    """Log parameter count and estimated size."""
+    if hasattr(model, "encoder"):
+        params = sum(p.numel() for p in model.encoder.parameters() if p.requires_grad)
+        log.info(
+            "%s encoder parameters: %.2fM (~%.1fMB fp32, ~%.1fMB int8)",
+            name,
+            params / 1e6,
+            params * 4 / (1024 ** 2),
+            params / (1024 ** 2),
+        )
+    else:
+        params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        log.info(
+            "%s parameters: %.2fM (~%.1fMB fp32, ~%.1fMB int8)",
+            name,
+            params / 1e6,
+            params * 4 / (1024 ** 2),
+            params / (1024 ** 2),
+        )
+
+
+def verify_quantization(program, program_name: str = "Program") -> bool:
+    """Verify that quantize/dequantize nodes exist in the exported program."""
     quant_ops_found = 0
     dequant_ops_found = 0
     fp32_linear_ops = 0
 
     try:
-        graph_module = program.graph_module if hasattr(program, 'graph_module') else program
+        graph_module = program.graph_module if hasattr(program, "graph_module") else program
         for node in graph_module.graph.nodes:
-            node_target = str(node.target)
-            if 'quantize' in node_target.lower():
+            lowered = str(node.target).lower()
+            if "quantize" in lowered:
                 quant_ops_found += 1
-            elif 'dequantize' in node_target.lower():
+            elif "dequantize" in lowered:
                 dequant_ops_found += 1
-            elif 'linear' in node_target.lower() and 'quantized' not in node_target.lower():
+            elif "linear" in lowered and "quantized" not in lowered:
                 fp32_linear_ops += 1
-    except Exception as e:
-        log.warning(f"Could not analyze {program_name} graph: {e}")
+    except Exception as exc:  # pragma: no cover - diagnostics only
+        log.warning("Could not analyse %s graph: %s", program_name, exc)
         return False
 
     is_quantized = quant_ops_found > 0 and dequant_ops_found > 0
-    log.info(f"{program_name} quantization analysis:")
-    log.info(f"  Quantize ops: {quant_ops_found}")
-    log.info(f"  Dequantize ops: {dequant_ops_found}")
-    log.info(f"  FP32 linear ops: {fp32_linear_ops}")
-    log.info(f"  Status: {'✓ QUANTIZED' if is_quantized else '⚠ NOT QUANTIZED'}")
-
+    log.info("%s quantization analysis:", program_name)
+    log.info("  Quantize ops: %d", quant_ops_found)
+    log.info("  Dequantize ops: %d", dequant_ops_found)
+    log.info("  FP32 linear ops: %d", fp32_linear_ops)
+    log.info("  Status: %s", "✓ QUANTIZED" if is_quantized else "⚠ NOT QUANTIZED")
     return is_quantized
 
-def validate_xnnpack_partition(edge_program, program_name="Edge program"):
-    """Validate XNNPACK partitioning effectiveness"""
+
+def validate_xnnpack_partition(edge_program, program_name: str = "Edge program") -> bool:
+    """Measure XNNPACK partition coverage for the lowered ExecuTorch program."""
     try:
         graph_module = edge_program.exported_program().graph_module
         total_nodes = len(list(graph_module.graph.nodes))
-
-        # Count nodes by type
         xnnpack_nodes = 0
         fallback_nodes = 0
 
         for node in graph_module.graph.nodes:
-            if hasattr(node, 'target') and 'xnnpack' in str(node.target).lower():
+            lowered = str(node.target).lower()
+            if "xnnpack" in lowered:
                 xnnpack_nodes += 1
-            elif node.op in ['call_function', 'call_method'] and 'aten' in str(node.target):
+            elif node.op in ("call_function", "call_method") and "aten" in lowered:
                 fallback_nodes += 1
 
         partition_ratio = xnnpack_nodes / max(total_nodes, 1) * 100
-
-        log.info(f"{program_name} XNNPACK partition analysis:")
-        log.info(f"  Total nodes: {total_nodes}")
-        log.info(f"  XNNPACK nodes: {xnnpack_nodes}")
-        log.info(f"  Fallback nodes: {fallback_nodes}")
-        log.info(f"  Partition ratio: {partition_ratio:.1f}%")
+        log.info("%s XNNPACK partition analysis:", program_name)
+        log.info("  Total nodes: %d", total_nodes)
+        log.info("  XNNPACK nodes: %d", xnnpack_nodes)
+        log.info("  Fallback nodes: %d", fallback_nodes)
+        log.info("  Partition ratio: %.1f%%", partition_ratio)
 
         if partition_ratio < 50:
-            log.warning(f"⚠ Low XNNPACK partition ratio ({partition_ratio:.1f}%), expect larger .pte size")
+            log.warning("⚠ Low XNNPACK partition ratio (%.1f%%)", partition_ratio)
         else:
-            log.info(f"✓ Good XNNPACK partition ratio ({partition_ratio:.1f}%)")
-
+            log.info("✓ Good XNNPACK partition ratio (%.1f%%)", partition_ratio)
         return partition_ratio >= 50
-
-    except Exception as e:
-        log.warning(f"Could not analyze {program_name} partitioning: {e}")
+    except Exception as exc:  # pragma: no cover - diagnostics only
+        log.warning("Could not analyse %s partitioning: %s", program_name, exc)
         return False
 
-def estimate_compressed_size(file_path, compression_level=6):
-    """Estimate APK compressed size using zlib"""
+
+def estimate_compressed_size(file_path: str, compression_level: int = 6):
+    """Estimate APK compressed size using zlib."""
     try:
-        with open(file_path, 'rb') as f:
-            original_data = f.read()
-
+        with open(file_path, "rb") as handle:
+            original_data = handle.read()
         compressed_data = zlib.compress(original_data, compression_level)
-        original_mb = len(original_data) / (1024**2)
-        compressed_mb = len(compressed_data) / (1024**2)
+        original_mb = len(original_data) / (1024 ** 2)
+        compressed_mb = len(compressed_data) / (1024 ** 2)
         compression_ratio = len(compressed_data) / len(original_data) * 100
-
-        log.info(f"Size analysis for {file_path}:")
-        log.info(f"  Raw size: {original_mb:.1f} MB")
-        log.info(f"  Compressed (APK): {compressed_mb:.1f} MB ({compression_ratio:.1f}% of original)")
-
+        log.info("Size analysis for %s:", file_path)
+        log.info("  Raw size: %.1f MB", original_mb)
+        log.info("  Compressed (APK): %.1f MB (%.1f%% of original)", compressed_mb, compression_ratio)
         return compressed_mb
-    except Exception as e:
-        log.warning(f"Could not estimate compressed size: {e}")
+    except Exception as exc:  # pragma: no cover - diagnostics only
+        log.warning("Could not estimate compressed size: %s", exc)
         return None
 
+
+def create_synthetic_calibration_data(num_samples: int) -> list:
+    """Fallback synthetic calibration samples used when no dataset is available."""
+    samples = []
+    log.info("Generating %d synthetic calibration samples", num_samples)
+    for idx in range(num_samples):
+        T = torch.randint(30, 200, (1,)).item()
+        audio_signal = torch.randn(1, 37, T) * 0.4
+        lengths = torch.tensor([T], dtype=torch.int32)
+        samples.append((audio_signal, lengths))
+        if (idx + 1) % 8 == 0:
+            log.info("  Created %d/%d synthetic samples", idx + 1, num_samples)
+    return samples
+
+
 class OptimizedEncoderWrapper(torch.nn.Module):
-    """Ultra-optimized encoder wrapper for maximum Android performance"""
-    def __init__(self, encoder):
+    def __init__(self, encoder: torch.nn.Module):
         super().__init__()
         self.encoder = encoder
 
-    def forward(self, audio_signal, length):
-        # Direct forward without extra processing for maximum speed
+    def forward(self, audio_signal: torch.Tensor, length: torch.Tensor):
         return self.encoder(audio_signal=audio_signal, length=length)
 
-def create_calibration_data(model, num_samples=32, use_realistic_patterns=True):
-    """Create diverse calibration data for robust quantization"""
-    calibration_data = []
 
-    log.info(f"Creating {num_samples} calibration samples with realistic patterns...")
-
-    for i in range(num_samples):
-        # Vary sequence lengths for robustness (cover typical gesture range)
-        T = torch.randint(30, 200, (1,)).item()
-        B, F = 1, 37
-
-        if use_realistic_patterns:
-            # Create more realistic gesture-like patterns
-            audio_signal = torch.zeros(B, F, T)
-
-            # Simulate kinematic features (first 9 channels)
-            # Position features (smoother, gesture-like movement)
-            for dim in range(2):  # x, y positions
-                base_signal = torch.sin(torch.linspace(0, 2*torch.pi, T)) * 0.3
-                noise = torch.randn(T) * 0.05
-                audio_signal[0, dim, :] = base_signal + noise + torch.rand(1).item() * 0.4
-
-            # Velocity/acceleration (derived from positions with noise)
-            for dim in range(2, 9):
-                audio_signal[0, dim, :] = torch.randn(T) * 0.2 + torch.sin(torch.linspace(0, torch.pi, T)) * 0.1
-
-            # Key features (binary-ish, some keys activated)
-            num_active_keys = torch.randint(3, 8, (1,)).item()
-            active_keys = torch.randint(9, 37, (num_active_keys,))
-            for key_idx in active_keys:
-                # Create activation patterns for keys
-                activation_start = torch.randint(0, max(1, T-20), (1,)).item()
-                activation_len = torch.randint(5, min(30, T-activation_start), (1,)).item()
-                audio_signal[0, key_idx, activation_start:activation_start+activation_len] = torch.rand(activation_len) * 0.8 + 0.2
-
-        else:
-            # Fallback to simple random patterns
-            audio_signal = torch.randn(B, F, T) * 0.4 + 0.2
-
-        length = torch.tensor([T], dtype=torch.int32)
-        calibration_data.append((audio_signal, length))
-
-        if (i + 1) % 8 == 0:
-            log.info(f"  Created {i+1}/{num_samples} calibration samples")
-
-    log.info(f"✓ Created {len(calibration_data)} diverse calibration samples")
-    return calibration_data
-
-def main():
+def main() -> int:
     parser = argparse.ArgumentParser(description="Export ultra-optimized quantized PTE encoder")
-    parser.add_argument("--checkpoint", required=True, help="Path to .ckpt file")
+    parser.add_argument("--checkpoint", required=True, help="Path to trained .ckpt or .nemo model")
+    parser.add_argument("--vocab", default="vocab/final_vocab.txt", help="Vocabulary file for calibration")
+    parser.add_argument(
+        "--calib-manifest",
+        help="Calibration manifest (.jsonl). Defaults to data/train_final_val.jsonl if absent.",
+    )
     parser.add_argument("--output", default="encoder_ultra_quant.pte", help="Output PTE file")
-    parser.add_argument("--max_length", type=int, default=200, help="Max sequence length for export")
-    parser.add_argument("--calibration_samples", type=int, default=32, help="Number of calibration samples")
+    parser.add_argument("--max-trace-len", type=int, default=200, help="Max gesture length for export inputs")
+    parser.add_argument("--calib-batches", type=int, default=32, help="Calibration batches to run")
+    parser.add_argument("--calib-batch-size", type=int, default=8, help="Calibration batch size")
+    parser.add_argument(
+        "--synthetic-calibration",
+        action="store_true",
+        help="Use synthetic calibration data instead of dataset batches",
+    )
     parser.add_argument("--skip_quantization_check", action="store_true", help="Skip quantization verification (faster)")
     parser.add_argument("--skip_partition_check", action="store_true", help="Skip XNNPACK partition validation")
     parser.add_argument("--fallback_to_fp32", action="store_true", help="Fallback to FP32 if quantization fails")
+    parser.add_argument("--lexicon", help="Optional lexicon to bundle with packaged output")
+    parser.add_argument("--package-dir", help="Copy exported file (and assets) into this directory")
+    parser.add_argument(
+        "--bundle-assets",
+        nargs="*",
+        default=None,
+        help="Additional files (trie, metadata, etc.) to include when packaging",
+    )
     args = parser.parse_args()
 
-    log.info(f"Loading checkpoint: {args.checkpoint}")
-
-    # Load checkpoint
-    ckpt = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
-
-    if 'hyper_parameters' in ckpt:
-        cfg = ckpt['hyper_parameters']['cfg']
-    else:
-        cfg = get_default_config()
-
-    model = GestureRNNTModel(cfg).eval()
-
-    # Clean torch.compile keys
-    state_dict = ckpt["state_dict"]
-    new_state_dict = {}
-    for key, value in state_dict.items():
-        if key.startswith("encoder._orig_mod."):
-            new_key = key.replace("encoder._orig_mod.", "encoder.")
-            new_state_dict[new_key] = value
-        else:
-            new_state_dict[key] = value
-
-    model.load_state_dict(new_state_dict, strict=False)
-
-    # Log model parameters before optimization
+    model = load_trained_model(args.checkpoint)
     log_model_parameters(model, "Original model")
 
-    # Create optimized wrapper
     encoder_wrapper = OptimizedEncoderWrapper(model.encoder).eval()
     log_model_parameters(encoder_wrapper, "Encoder wrapper")
 
-    log.info("Creating calibration data...")
-    calibration_data = create_calibration_data(model, num_samples=args.calibration_samples)
+    example_feats, example_lens = make_example_inputs(args.max_trace_len)
+    log.info("Exporting encoder graph with torch.export ...")
+    exported_program = torch.export.export(encoder_wrapper, (example_feats, example_lens))
 
-    log.info("Exporting to torch.export format...")
-    # Use first calibration sample for export
-    example_input = calibration_data[0]
-    exported_program = torch.export.export(encoder_wrapper, example_input)
-
-    log.info("Setting up XNNPACK quantizer...")
     quantizer = XNNPACKQuantizer()
-    # Ultra-aggressive quantization for maximum performance
     quantizer.set_global(get_symmetric_quantization_config(is_per_channel=True))
-
-    log.info("Preparing quantization...")
+    log.info("Preparing quantization observers")
     prepared_program = prepare_pt2e(exported_program, quantizer)
 
-    log.info("Calibrating with representative data...")
-    # Run calibration
-    with torch.no_grad():
-        for i, (audio_signal, length) in enumerate(calibration_data[:8]):  # Use subset for speed
-            try:
-                _ = prepared_program(audio_signal, length)
-                if (i + 1) % 4 == 0:
-                    log.info(f"  Calibrated {i+1}/8 samples")
-            except Exception as e:
-                log.warning(f"Calibration sample {i} failed: {e}")
-                continue
+    log.info("Calibrating quantized observers ...")
+    if args.synthetic_calibration:
+        calibration_samples = create_synthetic_calibration_data(args.calib_batches)
+        with torch.no_grad():
+            for idx, (audio_signal, length) in enumerate(calibration_samples[: args.calib_batches]):
+                try:
+                    prepared_program(audio_signal, length)
+                except Exception as exc:  # pragma: no cover - diagnostics only
+                    log.warning("Synthetic calibration sample %d failed: %s", idx, exc)
+    else:
+        manifest = ensure_default_manifest(args.calib_manifest, "data/train_final_val.jsonl")
+        dataloader = create_calibration_loader(
+            manifest,
+            args.vocab,
+            args.max_trace_len,
+            batch_size=args.calib_batch_size,
+            shuffle=False,
+            num_workers=0,
+        )
+        with torch.no_grad():
+            for idx, (audio_signal, length) in enumerate(
+                iter_calibration_batches(dataloader, args.calib_batches)
+            ):
+                prepared_program(audio_signal, length)
+                if (idx + 1) % 10 == 0:
+                    log.info("  Calibrated %d batches", idx + 1)
 
-    log.info("Converting to quantized model...")
+    log.info("Converting to quantized model ...")
     try:
         quantized_program = convert_pt2e(prepared_program)
-
-        # Verify quantization worked
         if not args.skip_quantization_check:
             is_quantized = verify_quantization(quantized_program, "Quantized program")
             if not is_quantized and not args.fallback_to_fp32:
-                log.error("❌ Quantization verification failed! Use --fallback_to_fp32 or check model compatibility")
+                log.error("Quantization verification failed; rerun with --fallback_to_fp32 to retain FP32")
                 return 1
-            elif not is_quantized and args.fallback_to_fp32:
-                log.warning("⚠ Quantization failed, falling back to FP32...")
-                quantized_program = exported_program  # Use original FP32 program
+            if not is_quantized and args.fallback_to_fp32:
+                log.warning("Quantization failed, falling back to FP32 export")
+                quantized_program = exported_program
 
-        log.info("Lowering to ExecuTorch...")
+        log.info("Lowering to ExecuTorch Edge IR ...")
         edge = to_edge(quantized_program)
-
-        # Ultra-optimized XNNPACK partitioning
-        log.info("Applying XNNPACK partitioning...")
+        log.info("Partitioning for XNNPACK ...")
         edge = edge.to_backend(XnnpackPartitioner())
-
-        # Validate partitioning effectiveness
         if not args.skip_partition_check:
-            partition_ok = validate_xnnpack_partition(edge, "XNNPACK partitioned program")
-            if not partition_ok:
-                log.warning("⚠ XNNPACK partitioning may be suboptimal - expect larger .pte file")
-
-    except Exception as e:
-        log.error(f"❌ Quantization/partitioning failed: {e}")
+            validate_xnnpack_partition(edge, "XNNPACK partitioned program")
+    except Exception as exc:
+        log.error("Quantization/partitioning failed: %s", exc)
         if args.fallback_to_fp32:
-            log.warning("⚠ Falling back to FP32 export...")
+            log.warning("Falling back to FP32 export path")
             edge = to_edge(exported_program)
             edge = edge.to_backend(XnnpackPartitioner())
         else:
-            log.error("Use --fallback_to_fp32 to continue with FP32 model")
+            log.error("Use --fallback_to_fp32 to continue with FP32")
             return 1
 
-    # Generate final ExecuTorch program
     executorch_program = edge.to_executorch()
-
-    # Save to file
-    with open(args.output, "wb") as f:
-        f.write(executorch_program.buffer)
-
-    log.info(f"✓ Ultra-optimized quantized PTE saved: {args.output}")
-
-    # Print comprehensive size and optimization summary
-    import os
-    if os.path.exists(args.output):
-        size_mb = os.path.getsize(args.output) / (1024 * 1024)
-        log.info(f"Final model size: {size_mb:.1f} MB")
-
-        # Estimate compressed size for APK deployment
-        compressed_mb = estimate_compressed_size(args.output)
-
-        log.info("Optimizations applied:")
-        if not args.skip_quantization_check:
-            log.info("  ✓ INT8 symmetric per-channel quantization (verified)")
-        else:
-            log.info("  - INT8 quantization (not verified)")
-        if not args.skip_partition_check:
-            log.info("  ✓ XNNPACK backend partitioning (validated)")
-        else:
-            log.info("  - XNNPACK backend partitioning")
-        log.info("  ✓ Optimized for Android ARM/NEON")
-        log.info(f"  ✓ Realistic calibration with {args.calibration_samples} samples")
-
-        if compressed_mb:
-            log.info(f"\n📱 Deployment estimate: {compressed_mb:.1f} MB in APK")
-    else:
-        log.error(f"❌ Output file not created: {args.output}")
+    buffer = getattr(executorch_program, "buffer", None)
+    if buffer is None and hasattr(executorch_program, "to_buffer"):
+        buffer = executorch_program.to_buffer()
+    if buffer is None:
+        log.error("ExecuTorch buffer missing; aborting export")
         return 1
+
+    with open(args.output, "wb") as handle:
+        handle.write(buffer)
+    log.info("✓ Ultra-optimized quantized PTE saved: %s", args.output)
+
+    if os.path.exists(args.output):
+        size_mb = os.path.getsize(args.output) / (1024 ** 2)
+        log.info("Final model size: %.1f MB", size_mb)
+        compressed = estimate_compressed_size(args.output)
+        log.info("Optimizations applied:")
+        if not args.synthetic_calibration:
+            log.info("  ✓ Dataset calibration (%d batches)", args.calib_batches)
+        else:
+            log.info("  ✓ Synthetic calibration (%d samples)", args.calib_batches)
+        if not args.skip_quantization_check:
+            log.info("  ✓ Quantization graph verified")
+        if not args.skip_partition_check:
+            log.info("  ✓ XNNPACK partition validated")
+        if compressed:
+            log.info("  ✓ Estimated APK footprint: %.1f MB", compressed)
+    else:
+        log.error("Output file missing after export: %s", args.output)
+        return 1
+
+    if args.package_dir:
+        extras = list(args.bundle_assets or [])
+        if args.lexicon:
+            extras.append(args.lexicon)
+        package_artifacts([args.output], args.package_dir, extra_files=extras)
 
     return 0
 
+
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

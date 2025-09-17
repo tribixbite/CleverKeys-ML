@@ -1,182 +1,141 @@
 #!/usr/bin/env python3
-# export_executorch.py
-# Quantize the RNNT encoder to ExecuTorch .pte with PT2E + XNNPACK for Android.
+"""Quantize RNNT encoder to ExecuTorch (.pte) with PT2E + XNNPACK."""
 
-import os
 import argparse
 import logging
+
 import torch
-
-# NeMo + our model class
-import nemo
-import nemo.collections.asr as nemo_asr
-from model_class import GestureRNNTModel, get_default_config
-from swipe_data_utils import SwipeDataset, SwipeFeaturizer, KeyboardGrid, collate_fn
-
-# ExecuTorch PT2E
-from torch.ao.quantization.quantize_pt2e import prepare_pt2e, convert_pt2e
+from executorch.backends.xnnpack.partition.xnnpack_partitioner import XnnpackPartitioner
+from executorch.exir import to_edge
+from torch.ao.quantization.quantize_pt2e import convert_pt2e, prepare_pt2e
 from torch.ao.quantization.quantizer.xnnpack_quantizer import (
     XNNPACKQuantizer,
     get_symmetric_quantization_config,
 )
-from executorch.exir import to_edge
-from executorch.backends.xnnpack.partition.xnnpack_partitioner import XnnpackPartitioner
+from torch.ao.quantization import allow_exported_model_train_eval
 
+from export_common import (
+    create_calibration_loader,
+    ensure_default_manifest,
+    iter_calibration_batches,
+    load_trained_model,
+    make_example_inputs,
+    package_artifacts,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
-log = logging.getLogger("export_executorch")
+LOG = logging.getLogger("export_pte_quant")
 
-def _to_encoder_inputs(batch):
-    """
-    Collate output expected: (features, feature_lengths, tokens, token_lengths)
-    Features: (B, T, F) -> need (B, F, T); lengths int32/long (B,)
-    """
-    if isinstance(batch, dict):
-        feats = batch["features"]
-        lens  = batch.get("feat_lens") or batch.get("lengths")
-        if lens is None:
-            raise ValueError("Calibration batch dict missing 'feat_lens'/'lengths'")
-    else:
-        feats, lens = batch[0], batch[1]
-    feats = feats.transpose(1, 2).contiguous()  # (B, F, T)
-    lens  = lens.to(dtype=torch.int32, copy=False)
-    return feats, lens
+
+class EncoderWrapper(torch.nn.Module):
+    def __init__(self, encoder: torch.nn.Module):
+        super().__init__()
+        self.encoder = encoder.eval()
+
+    def forward(self, feats_bft: torch.Tensor, lengths: torch.Tensor):
+        return self.encoder(audio_signal=feats_bft, length=lengths)
+
 
 @torch.no_grad()
-def calibrate_encoder(prepared_encoder: torch.nn.Module,
-                      val_manifest: str,
-                      vocab_path: str,
-                      num_batches: int = 64,
-                      batch_size: int = 16,
-                      max_trace_len: int = 200):
-    log.info(f"Calibrating encoder with up to {num_batches} batches (bs={batch_size})...")
-    featurizer = SwipeFeaturizer(KeyboardGrid(chars="abcdefghijklmnopqrstuvwxyz'"))
-    vocab = {}
-    with open(vocab_path, "r", encoding="utf-8") as f:
-        for i, line in enumerate(f):
-            vocab[line.strip()] = i
-    ds = SwipeDataset(val_manifest, featurizer, vocab, max_trace_len)
-    dl = torch.utils.data.DataLoader(
-        ds, batch_size=batch_size, collate_fn=collate_fn, shuffle=False, num_workers=0
-    )
-    # Skip eval() for PT2E models as it's not supported
+def calibrate_encoder(
+    prepared_encoder: torch.nn.Module,
+    dataloader: torch.utils.data.DataLoader,
+    max_batches: int,
+) -> None:
+    LOG.info("Calibrating encoder (max %d batches)", max_batches)
     try:
         prepared_encoder.eval()
     except NotImplementedError:
-        # PT2E models don't support eval() - use the move function instead
         from torch.ao.quantization import move_exported_model_to_eval
+
         prepared_encoder = move_exported_model_to_eval(prepared_encoder)
-    for i, batch in enumerate(dl):
-        if i >= num_batches:
-            break
-        feats_bft, lens = _to_encoder_inputs(batch)
-        prepared_encoder(feats_bft, lens)  # signature: (audio_signal(B,F,T), length(B,))
-        if (i + 1) % 10 == 0:
-            log.info(f"  Calibrated {i+1}/{num_batches} batches")
-    log.info("Calibration complete.")
 
-def main():
-    ap = argparse.ArgumentParser(description="Export quantized ExecuTorch (.pte) encoder from a trained NeMo RNNT.")
-    ap.add_argument("--nemo_model", required=True, help="Path to trained .nemo produced by your training script.")
-    ap.add_argument("--val_manifest", required=True, help="Validation manifest for calibration.")
-    ap.add_argument("--vocab", required=True, help="Path to vocab.txt used in training.")
-    ap.add_argument("--output", default="encoder_quant_xnnpack.pte", help="Output .pte path.")
-    ap.add_argument("--calib_batches", type=int, default=64, help="Max calibration batches.")
-    ap.add_argument("--calib_bs", type=int, default=16, help="Calibration batch size.")
-    ap.add_argument("--max_trace_len", type=int, default=200, help="Max trace len (T) used at export/calib.")
-    args = ap.parse_args()
+    for idx, (feats_bft, lens) in enumerate(iter_calibration_batches(dataloader, max_batches)):
+        prepared_encoder(feats_bft, lens)
+        if (idx + 1) % 10 == 0:
+            LOG.info("  Calibrated %d batches", idx + 1)
+    LOG.info("Calibration complete")
 
-    # 1) Load your trained subclass (ensures same module graph)
-    # Check if input is .nemo or .ckpt
-    if args.nemo_model.endswith('.ckpt'):
-        log.info(f"Loading checkpoint directly: {args.nemo_model}")
-        # Load checkpoint and create model compatible with it
-        ckpt = torch.load(args.nemo_model, map_location="cpu", weights_only=False)
 
-        # Create model with proper config (load from hyperparameters in checkpoint if available)
-        if 'hyper_parameters' in ckpt:
-            cfg = ckpt['hyper_parameters']['cfg']
-        else:
-            # Use default config but with torch.compile disabled
-            cfg = get_default_config()
+@torch.no_grad()
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Quantize encoder to ExecuTorch")
+    parser.add_argument("--checkpoint", required=True, help="Path to trained .ckpt or .nemo artifact")
+    parser.add_argument("--vocab", default="vocab/final_vocab.txt", help="Vocabulary file for calibration")
+    parser.add_argument(
+        "--calib-manifest",
+        help="Calibration manifest (.jsonl). Defaults to data/train_final_val.jsonl if present.",
+    )
+    parser.add_argument("--output", default="encoder_quant_xnnpack.pte", help="Output ExecuTorch file")
+    parser.add_argument("--calib-batches", type=int, default=64, help="Calibration batches to run")
+    parser.add_argument("--calib-batch-size", type=int, default=16, help="Calibration batch size")
+    parser.add_argument("--max-trace-len", type=int, default=200, help="Max gesture length for export inputs")
+    parser.add_argument("--lexicon", help="Optional lexicon to bundle with output")
+    parser.add_argument("--package-dir", help="Copy exported file (and assets) into this directory")
+    parser.add_argument(
+        "--bundle-assets",
+        nargs="*",
+        default=None,
+        help="Additional metadata files to include when packaging",
+    )
+    args = parser.parse_args()
 
-        model = GestureRNNTModel(cfg).eval()
+    model = load_trained_model(args.checkpoint)
+    wrapper = EncoderWrapper(model.encoder)
 
-        # Clean up torch.compile keys
-        state_dict = ckpt["state_dict"]
-        new_state_dict = {}
-        for key, value in state_dict.items():
-            if key.startswith("encoder._orig_mod."):
-                new_key = key.replace("encoder._orig_mod.", "encoder.")
-                new_state_dict[new_key] = value
-            else:
-                new_state_dict[key] = value
+    example_feats, example_lens = make_example_inputs(args.max_trace_len)
 
-        model.load_state_dict(new_state_dict, strict=False)  # Use strict=False to ignore missing keys
-    else:
-        log.info(f"Loading trained model from {args.nemo_model}")
-        model = GestureRNNTModel.restore_from(args.nemo_model, map_location="cpu").eval()
+    LOG.info("Exporting model with torch.export")
+    exported = torch.export.export(wrapper, (example_feats, example_lens))
 
-    encoder = model.encoder  # ConformerEncoder
-
-    # Wrap the encoder for PT2E (needs to be a proper module)
-    class EncoderWrapper(torch.nn.Module):
-        def __init__(self, encoder):
-            super().__init__()
-            self.encoder = encoder
-        def forward(self, feats_bft, lengths):
-            return self.encoder(audio_signal=feats_bft, length=lengths)
-
-    wrapped_encoder = EncoderWrapper(encoder).eval()
-
-    # First export the model with torch.export
-    B, F, T = 1, 37, int(args.max_trace_len)
-    example_feats_bft = torch.randn(B, F, T, dtype=torch.float32)
-    example_lens = torch.tensor([T], dtype=torch.int32)
-
-    # 2) Prepare PT2E quant with XNNPACK
     quantizer = XNNPACKQuantizer()
     quantizer.set_global(get_symmetric_quantization_config(is_per_channel=True))
-    log.info("Inserting observers (prepare_pt2e)...")
+    LOG.info("Preparing PT2E module")
+    prepared = prepare_pt2e(exported.module(), quantizer)
 
-    # Need to export first, then prepare PT2E
-    log.info("Exporting model with torch.export...")
-    exported_model = torch.export.export(wrapped_encoder, (example_feats_bft, example_lens))
+    manifest = ensure_default_manifest(args.calib_manifest, "data/train_final_val.jsonl")
+    dataloader = create_calibration_loader(
+        manifest,
+        args.vocab,
+        args.max_trace_len,
+        batch_size=args.calib_batch_size,
+        shuffle=False,
+        num_workers=0,
+    )
 
-    # Convert to eager mode for PT2E
-    prepared_encoder = prepare_pt2e(exported_model.module(), quantizer)
+    calibrate_encoder(prepared, dataloader, args.calib_batches)
 
-    # 3) Calibrate with representative data (tuple-aware)
-    calibrate_encoder(prepared_encoder, args.val_manifest, args.vocab,
-                      num_batches=args.calib_batches, batch_size=args.calib_bs,
-                      max_trace_len=args.max_trace_len)
+    LOG.info("Converting to quantized encoder")
+    quant_encoder = convert_pt2e(prepared)
+    if quant_encoder is None:
+        quant_encoder = prepared
+    LOG.info("Converted encoder type: %s", type(quant_encoder))
+    allow_exported_model_train_eval(quant_encoder)
+    quant_encoder.eval()
 
-    # 4) Convert to quantized
-    log.info("Converting to quantized encoder (convert_pt2e)...")
-    quant_encoder = convert_pt2e(prepared_encoder).eval()
-
-    # 5) Lower to ExecuTorch (Edge IR -> XNNPACK partition -> ExecuTorch program)
-    # Example inputs for export graph (B=1, F=37, T=max_trace_len)
-    B, F, T = 1, 37, int(args.max_trace_len)
-    example_feats_bft = torch.randn(B, F, T, dtype=torch.float32)
-    example_lens = torch.tensor([T], dtype=torch.int32)
-
-    log.info("Lowering to ExecuTorch Edge IR...")
-    exported = torch.export.export(quant_encoder, (example_feats_bft, example_lens))
-    edge = to_edge(exported)
+    LOG.info("Lowering quantized encoder to ExecuTorch")
+    exported_quant = torch.export.export(quant_encoder, (example_feats, example_lens))
+    edge = to_edge(exported_quant)
     edge = edge.to_backend(XnnpackPartitioner())
-    prog = edge.to_executorch()
+    program = edge.to_executorch()
 
-    buf = getattr(prog, "buffer", None)
-    if buf is None and hasattr(prog, "to_buffer"):
-        buf = prog.to_buffer()
-    if buf is None:
-        raise RuntimeError("Unable to obtain ExecuTorch program buffer.")
+    buffer = getattr(program, "buffer", None)
+    if buffer is None and hasattr(program, "to_buffer"):
+        buffer = program.to_buffer()
+    if buffer is None:
+        raise RuntimeError("Unable to obtain ExecuTorch program buffer")
 
-    with open(args.output, "wb") as f:
-        f.write(buf)
-    log.info(f"✓ Saved ExecuTorch encoder to {args.output}")
-    log.info("Note: decoder+joint stay float in app (small; run with PyTorch Lite or ExecuTorch unquantized).")
+    with open(args.output, "wb") as handle:
+        handle.write(buffer)
+    LOG.info("✓ Saved quantized ExecuTorch encoder -> %s", args.output)
+    LOG.info("Decoder + joint remain float for best quality; export separately if needed.")
+
+    if args.package_dir:
+        extras = list(args.bundle_assets or [])
+        if args.lexicon:
+            extras.append(args.lexicon)
+        package_artifacts([args.output], args.package_dir, extra_files=extras)
+
 
 if __name__ == "__main__":
     main()

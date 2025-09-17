@@ -7,11 +7,10 @@ import logging
 import torch
 import types
 
-from model_class import GestureRNNTModel, get_default_config
-
-# ExecuTorch
-from executorch.exir import to_edge
 from executorch.backends.xnnpack.partition.xnnpack_partitioner import XnnpackPartitioner
+from executorch.exir import to_edge
+
+from export_common import load_trained_model, make_example_inputs, package_artifacts
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 log = logging.getLogger("export_rnnt_step")
@@ -113,13 +112,21 @@ def save_pte(module: torch.nn.Module, example_inputs, out_path: str):
 
 def main():
     ap = argparse.ArgumentParser(description="Export single-step RNNT decoder+joint to ONNX and ExecuTorch.")
-    ap.add_argument("--nemo_model", required=True, help="Path to trained .nemo (your subclass).")
+    ap.add_argument("--checkpoint", required=True, help="Path to trained .ckpt or .nemo artifact.")
     ap.add_argument("--onnx_out", default="rnnt_step_fp32.onnx", help="Output ONNX path.")
     ap.add_argument("--pte_out",  default="rnnt_step_fp32.pte",  help="Output ExecuTorch .pte path.")
     ap.add_argument("--layers", type=int, default=None, help="Override L (num_layers) if needed.")
     ap.add_argument("--hidden", type=int, default=None, help="Override H (hidden_size) if needed.")
     ap.add_argument("--enc_dim", type=int, default=None, help="Override encoder D if needed.")
     ap.add_argument("--vocab", type=str, default=None, help="Path to vocabulary file for deriving blank_id.")
+    ap.add_argument("--lexicon", help="Optional lexicon to include when packaging")
+    ap.add_argument("--package-dir", help="Copy exports (and assets) into this directory")
+    ap.add_argument(
+        "--bundle-assets",
+        nargs="*",
+        default=None,
+        help="Additional assets (metadata, trie) to include when packaging",
+    )
     args = ap.parse_args()
 
     # Derive blank_id from vocabulary if provided
@@ -130,39 +137,14 @@ def main():
                 tokens = [line.strip() for line in f if line.strip()]
             token_to_idx = {tok: i for i, tok in enumerate(tokens)}
             blank_id = token_to_idx.get("<blank>", 0)
+            if "<blank>" not in token_to_idx:
+                log.warning("'<blank>' token not found in %s; defaulting blank_id=0", args.vocab)
             log.info(f"Derived blank_id={blank_id} from vocab file: {args.vocab}")
         except Exception as e:
             log.warning(f"Failed to load vocab file {args.vocab}: {e}. Using default blank_id=0")
 
     # Check if input is .nemo or .ckpt
-    if args.nemo_model.endswith('.ckpt'):
-        log.info(f"Loading checkpoint directly: {args.nemo_model}")
-        # Load checkpoint and create model compatible with it
-        ckpt = torch.load(args.nemo_model, map_location="cpu", weights_only=False)
-
-        # Create model with proper config (load from hyperparameters in checkpoint if available)
-        if 'hyper_parameters' in ckpt:
-            cfg = ckpt['hyper_parameters']['cfg']
-        else:
-            # Use default config but with torch.compile disabled
-            cfg = get_default_config()
-
-        model = GestureRNNTModel(cfg).eval()
-
-        # Clean up torch.compile keys
-        state_dict = ckpt["state_dict"]
-        new_state_dict = {}
-        for key, value in state_dict.items():
-            if key.startswith("encoder._orig_mod."):
-                new_key = key.replace("encoder._orig_mod.", "encoder.")
-                new_state_dict[new_key] = value
-            else:
-                new_state_dict[key] = value
-
-        model.load_state_dict(new_state_dict, strict=False)  # Use strict=False to ignore missing keys
-    else:
-        log.info(f"Loading model: {args.nemo_model}")
-        model = GestureRNNTModel.restore_from(args.nemo_model, map_location="cpu").eval()
+    model = load_trained_model(args.checkpoint)
 
     step = RNNTStep(model).eval()
     # Override the step's blank_idx with derived value
@@ -172,30 +154,17 @@ def main():
     B = 1
     L = args.layers or step.num_layers
     H = args.hidden or step.hidden_size
-    # encoder proj dim D: derive from model.joint or from a dummy forward
     if args.enc_dim:
         D = args.enc_dim
     else:
-        # Run one encoder frame through joint to infer expected D
-        # Make a dummy pred vector H
-        with torch.no_grad():
-            pred_dummy = torch.randn(B, H)
-            # Try a guess for D via a small binary search; fallback  step:
-            # Safer: run encoder once:
-            D = None
-            try:
-                # Use model.encoder with correct keyword arguments
-                F = model.cfg.encoder.get("feat_in", 37)
-                T = 10
-                feats_bft = torch.randn(B, F, T)
-                lens = torch.tensor([T], dtype=torch.int32)
-                enc_bdt, _ = model.encoder(audio_signal=feats_bft, length=lens)   # (B,D,T')
-                D = enc_bdt.shape[1]  # Encoder outputs [B, D, T], so D is at index 1
-            except Exception:
-                # Last resort, guess 512
-                D = 512
+        try:
+            feats, lens = make_example_inputs(10, feature_dim=model.cfg.encoder.get("feat_in", 37))
+            enc_bdt, _ = model.encoder(audio_signal=feats, length=lens)
+            D = enc_bdt.shape[1]
+        except Exception:  # pragma: no cover - defensive fallback
+            D = 512
 
-    y_prev = torch.tensor([blank_id], dtype=torch.long)  # Use derived blank_id as start token
+    y_prev = torch.tensor([blank_id], dtype=torch.long)
     h0 = torch.zeros(L, B, H)
     c0 = torch.zeros(L, B, H)
     enc_t = torch.randn(B, D)
@@ -225,6 +194,15 @@ def main():
     log.info(f"Exporting ExecuTorch .pte: {args.pte_out}")
     save_pte(step, (y_prev, h0, c0, enc_t), args.pte_out)
     log.info("ExecuTorch export complete.")
+
+    if args.package_dir:
+        artifacts = [args.onnx_out, args.pte_out]
+        extras = list(args.bundle_assets or [])
+        if args.lexicon:
+            extras.append(args.lexicon)
+        if args.vocab:
+            extras.append(args.vocab)
+        package_artifacts(artifacts, args.package_dir, extra_files=extras)
 
 if __name__ == "__main__":
     main()

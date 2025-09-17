@@ -1,26 +1,33 @@
 #!/usr/bin/env python3
-# export_optimized_onnx.py
-# Create ultra-optimized quantized ONNX models for web and Android
+"""Create optimized ONNX exports for web and Android targets."""
 
 import argparse
 import logging
-import torch
+import os
+import zlib
+
 import onnx
 import onnxruntime as ort
-import zlib
-import os
-from model_class import GestureRNNTModel, get_default_config
-from swipe_data_utils import SwipeDataset, SwipeFeaturizer, KeyboardGrid, collate_fn
+import torch
+from onnxruntime.quantization import QuantFormat, QuantType, quantize_static
 
-from onnxruntime.quantization import (
-    quantize_static,
-    QuantType,
-    QuantFormat,
-    CalibrationDataReader
+try:
+    from onnxruntime.tools import convert_float_to_float16  # type: ignore
+except ImportError:  # pragma: no cover
+    convert_float_to_float16 = None
+
+from export_common import (
+    DatasetBackedCalibrationReader,
+    create_calibration_loader,
+    ensure_default_manifest,
+    load_trained_model,
+    make_example_inputs,
+    package_artifacts,
 )
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("export_optimized")
+
 
 def log_model_parameters(model, name="Model"):
     """Log parameter count and estimated size"""
@@ -121,99 +128,57 @@ def save_ort_optimized_onnx(input_onnx: str, output_onnx: str, target_platform="
         log.warning(f"Could not create ORT-optimized ONNX: {e}")
         return False
 
-class OptimizedEncoderWrapper(torch.nn.Module):
-    """Optimized encoder wrapper for ONNX export"""
-    def __init__(self, encoder):
+class EncoderWrapper(torch.nn.Module):
+    def __init__(self, encoder: torch.nn.Module):
         super().__init__()
         self.encoder = encoder.eval()
 
-    def forward(self, features_bft: torch.Tensor, lengths: torch.Tensor):
-        return self.encoder(audio_signal=features_bft, length=lengths)
-
-class FastCalibrationReader(CalibrationDataReader):
-    """Fast calibration data reader with minimal data"""
-    def __init__(self, data_loader, max_samples=16):
-        self.data_iter = iter(data_loader)
-        self.max_samples = max_samples
-        self.count = 0
-
-    def get_next(self):
-        if self.count >= self.max_samples:
-            return None
-
-        try:
-            batch = next(self.data_iter)
-            self.count += 1
-        except StopIteration:
-            return None
-
-        # Convert batch to encoder inputs
-        if isinstance(batch, dict):
-            feats = batch["features"]
-            lens = batch.get("feat_lens") or batch.get("lengths")
-        else:
-            feats, lens = batch[0], batch[1]
-
-        feats_bft = feats.transpose(1, 2).contiguous()  # (B,F,T)
-        lens = lens.to(dtype=torch.int32, copy=False)
-
-        return {
-            "features_bft": feats_bft.cpu().numpy(),
-            "lengths": lens.cpu().numpy(),
-        }
+    def forward(self, feats_bft: torch.Tensor, lengths: torch.Tensor):
+        return self.encoder(audio_signal=feats_bft, length=lengths)
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Create ultra-optimized quantized ONNX models")
-    parser.add_argument("--checkpoint", required=True, help="Path to .ckpt file")
-    parser.add_argument("--val_manifest", required=True, help="Validation manifest for calibration")
-    parser.add_argument("--vocab", required=True, help="Vocab file")
+    parser = argparse.ArgumentParser(description="Create optimized ONNX encoder exports")
+    parser.add_argument("--checkpoint", required=True, help="Path to .ckpt or .nemo model")
+    parser.add_argument("--vocab", default="vocab/final_vocab.txt", help="Vocabulary file for calibration")
+    parser.add_argument(
+        "--calib-manifest",
+        help="Calibration manifest (.jsonl). Defaults to data/train_final_val.jsonl if present.",
+    )
+    parser.add_argument("--fp32-base", default="encoder_base_fp32.onnx", help="Base FP32 ONNX output")
+    parser.add_argument("--fp16-base", help="Optional FP16 ONNX output path")
     parser.add_argument("--web_onnx", default="encoder_web_quant.onnx", help="Web-optimized quantized ONNX")
     parser.add_argument("--android_onnx", default="encoder_android_quant.onnx", help="Android-optimized quantized ONNX")
-    parser.add_argument("--fp32_base", default="encoder_base_fp32.onnx", help="Base FP32 ONNX")
     parser.add_argument("--external_data", action="store_true", help="Save initializers as external data for smaller files")
     parser.add_argument("--skip_quantization_audit", action="store_true", help="Skip quantization verification (faster)")
-    parser.add_argument("--calibration_samples", type=int, default=16, help="Number of calibration samples")
+    parser.add_argument("--skip_quantization", action="store_true", help="Skip INT8 quantization")
+    parser.add_argument("--calibration_batches", type=int, default=16, help="Number of calibration batches")
+    parser.add_argument("--calibration_batch_size", type=int, default=4, help="Calibration batch size")
     parser.add_argument("--create_ort_optimized", action="store_true", help="Create ORT-optimized versions (10-30% smaller)")
     parser.add_argument("--compression_test", action="store_true", help="Test APK compression estimates")
+    parser.add_argument("--max-trace-len", type=int, default=200, help="Max gesture length for example export inputs")
+    parser.add_argument("--lexicon", help="Optional lexicon to copy alongside exports")
+    parser.add_argument(
+        "--package-dir",
+        help="Copy produced ONNX models (and assets) into this directory",
+    )
+    parser.add_argument(
+        "--bundle-assets",
+        nargs="*",
+        default=None,
+        help="Additional assets to include when packaging (metadata, language models, etc.)",
+    )
     args = parser.parse_args()
 
-    # Load model
-    log.info(f"Loading checkpoint: {args.checkpoint}")
-    ckpt = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
-
-    if 'hyper_parameters' in ckpt:
-        cfg = ckpt['hyper_parameters']['cfg']
-    else:
-        cfg = get_default_config()
-
-    model = GestureRNNTModel(cfg).eval()
-
-    # Clean torch.compile keys
-    state_dict = ckpt["state_dict"]
-    new_state_dict = {}
-    for key, value in state_dict.items():
-        if key.startswith("encoder._orig_mod."):
-            new_key = key.replace("encoder._orig_mod.", "encoder.")
-            new_state_dict[new_key] = value
-        else:
-            new_state_dict[key] = value
-
-    model.load_state_dict(new_state_dict, strict=False)
-
-    # Log model parameters before optimization
+    model = load_trained_model(args.checkpoint)
     log_model_parameters(model, "Original model")
 
-    # Create wrapper
-    wrapper = OptimizedEncoderWrapper(model.encoder).eval()
+    wrapper = EncoderWrapper(model.encoder)
     log_model_parameters(wrapper, "Encoder wrapper")
 
-    # Export base FP32 ONNX
-    log.info(f"Exporting base FP32 ONNX: {args.fp32_base}")
-    B, F, T = 1, 37, 200
-    example_feats = torch.randn(B, F, T, dtype=torch.float32)
-    example_lens = torch.tensor([T], dtype=torch.int32)
+    example_feats, example_lens = make_example_inputs(args.max_trace_len)
 
+    log.info(f"Exporting base FP32 ONNX: {args.fp32_base}")
     torch.onnx.export(
         wrapper,
         (example_feats, example_lens),
@@ -249,48 +214,46 @@ def main():
     if not args.skip_quantization_audit:
         audit_onnx_initializers(args.fp32_base)
 
-    # Prepare calibration data
-    log.info("Preparing minimal calibration data...")
-    featurizer = SwipeFeaturizer(KeyboardGrid(chars="abcdefghijklmnopqrstuvwxyz'"))
-    vocab = {}
-    with open(args.vocab, "r", encoding="utf-8") as f:
-        for i, line in enumerate(f):
-            vocab[line.strip()] = i
+    if args.fp16_base:
+        if convert_float_to_float16 is None:
+            log.warning("onnxruntime.tools not available; skipping FP16 conversion")
+        else:
+            log.info("Converting base ONNX to FP16: %s", args.fp16_base)
+            convert_float_to_float16.convert_float_to_float16(
+                args.fp32_base, args.fp16_base, keep_io_types=True
+            )
 
-    ds = SwipeDataset(args.val_manifest, featurizer, vocab, 150)  # Shorter for speed
-    calib_dl = torch.utils.data.DataLoader(ds, batch_size=2, collate_fn=collate_fn,
-                                         shuffle=False, num_workers=0)
+    if args.skip_quantization:
+        log.info("Skipping quantization per flag")
+        created_quant_files = []
+    else:
+        manifest = ensure_default_manifest(args.calib_manifest, "data/train_final_val.jsonl")
+        calib_loader = create_calibration_loader(
+            manifest,
+            args.vocab,
+            args.max_trace_len,
+            batch_size=args.calibration_batch_size,
+            shuffle=False,
+            num_workers=0,
+        )
 
-    reader = FastCalibrationReader(calib_dl, max_samples=args.calibration_samples)
-
-    # Create web-optimized quantized ONNX
-    log.info(f"Creating web-optimized quantized ONNX: {args.web_onnx}")
-    try:
+        log.info("Creating web-optimized INT8 ONNX: %s", args.web_onnx)
+        reader = DatasetBackedCalibrationReader(calib_loader, max_batches=args.calibration_batches)
         quantize_static(
             model_input=args.fp32_base,
             model_output=args.web_onnx,
             calibration_data_reader=reader,
-            quant_format=QuantFormat.QDQ,  # Best for WebGPU
+            quant_format=QuantFormat.QDQ,
             activation_type=QuantType.QInt8,
             weight_type=QuantType.QInt8,
             per_channel=True,
         )
-        log.info("✓ Web quantization completed")
-
-        # Audit web quantized model
         if not args.skip_quantization_audit:
             audit_onnx_initializers(args.web_onnx)
+        log.info("✓ Web quantization complete")
 
-    except Exception as e:
-        log.error(f"Web quantization failed: {e}")
-        return 1
-
-    # Reset reader for Android quantization
-    reader = FastCalibrationReader(calib_dl, max_samples=args.calibration_samples)
-
-    # Create Android-optimized quantized ONNX
-    log.info(f"Creating Android-optimized quantized ONNX: {args.android_onnx}")
-    try:
+        log.info("Creating Android-optimized INT8 ONNX: %s", args.android_onnx)
+        reader = DatasetBackedCalibrationReader(calib_loader, max_batches=args.calibration_batches)
         quantize_static(
             model_input=args.fp32_base,
             model_output=args.android_onnx,
@@ -300,15 +263,13 @@ def main():
             weight_type=QuantType.QInt8,
             per_channel=True,
         )
-        log.info("✓ Android quantization completed")
-
-        # Audit Android quantized model
         if not args.skip_quantization_audit:
             audit_onnx_initializers(args.android_onnx)
-
-    except Exception as e:
-        log.error(f"Android quantization failed: {e}")
-        return 1
+        log.info("✓ Android quantization complete")
+        created_quant_files = [
+            ("Web Quantized", args.web_onnx),
+            ("Android Quantized", args.android_onnx),
+        ]
 
     # Create ORT-optimized versions if requested
     ort_files = []
@@ -316,19 +277,19 @@ def main():
         log.info("Creating ORT-optimized versions...")
         web_ort = args.web_onnx.replace('.onnx', '_ort.onnx')
         android_ort = args.android_onnx.replace('.onnx', '_ort.onnx')
-
-        if save_ort_optimized_onnx(args.web_onnx, web_ort, "web"):
-            ort_files.append(("Web ORT", web_ort))
-        if save_ort_optimized_onnx(args.android_onnx, android_ort, "android"):
-            ort_files.append(("Android ORT", android_ort))
+        if not args.skip_quantization:
+            if save_ort_optimized_onnx(args.web_onnx, web_ort, "web"):
+                ort_files.append(("Web ORT", web_ort))
+            if save_ort_optimized_onnx(args.android_onnx, android_ort, "android"):
+                ort_files.append(("Android ORT", android_ort))
+        else:
+            log.warning("ORT optimization skipped because quantization was skipped")
 
     log.info("\n🚀 Ultra-optimized models created:")
 
     # Collect all created files for summary
     all_files = [
         ("Base FP32", args.fp32_base),
-        ("Web Quantized", args.web_onnx),
-        ("Android Quantized", args.android_onnx)
     ]
 
     # Add external data version if created
@@ -336,6 +297,12 @@ def main():
         external_base = args.fp32_base.replace('.onnx', '_external.onnx')
         if os.path.exists(external_base):
             all_files.append(("Base FP32 (External)", external_base))
+
+    if args.fp16_base and os.path.exists(args.fp16_base):
+        all_files.append(("Base FP16", args.fp16_base))
+
+    if not args.skip_quantization:
+        all_files.extend(created_quant_files)
 
     # Add ORT-optimized files
     all_files.extend(ort_files)
@@ -351,17 +318,38 @@ def main():
                 compressed_mb = estimate_compressed_size(path)
 
     log.info("\nOptimizations applied:")
-    log.info("  ✓ INT8 symmetric per-channel quantization (verified)" if not args.skip_quantization_audit else "  ✓ INT8 symmetric per-channel quantization")
-    log.info("  ✓ QDQ format for hardware acceleration")
-    log.info("  ✓ Web: Optimized for WebGPU/WASM-SIMD")
-    log.info("  ✓ Android: Optimized for XNNPACK/NNAPI")
-    log.info(f"  ✓ {args.calibration_samples} calibration samples used")
+    if not args.skip_quantization:
+        quant_note = (
+            "  ✓ INT8 symmetric per-channel quantization (verified)"
+            if not args.skip_quantization_audit
+            else "  ✓ INT8 symmetric per-channel quantization"
+        )
+        log.info(quant_note)
+        log.info("  ✓ QDQ format for hardware acceleration")
+        log.info("  ✓ Web: Optimized for WebGPU/WASM-SIMD")
+        log.info("  ✓ Android: Optimized for XNNPACK/NNAPI")
+        log.info(f"  ✓ {args.calibration_batches} calibration batches used")
+    if args.fp16_base:
+        log.info("  ✓ Optional FP16 baseline")
     if args.external_data:
         log.info("  ✓ External data format for smaller files")
     if args.create_ort_optimized:
         log.info("  ✓ ORT graph optimizations applied")
     if args.compression_test:
         log.info("  ✓ APK compression estimates included")
+
+    if args.package_dir:
+        package_targets = [args.fp32_base]
+        if args.fp16_base and os.path.exists(args.fp16_base):
+            package_targets.append(args.fp16_base)
+        if not args.skip_quantization:
+            package_targets.append(args.web_onnx)
+            package_targets.append(args.android_onnx)
+            package_targets.extend([path for _, path in ort_files])
+        extras = list(args.bundle_assets or [])
+        if args.lexicon:
+            extras.append(args.lexicon)
+        package_artifacts(package_targets, args.package_dir, extra_files=extras)
 
     return 0
 

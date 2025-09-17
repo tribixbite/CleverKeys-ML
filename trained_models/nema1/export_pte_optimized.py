@@ -1,99 +1,79 @@
 #!/usr/bin/env python3
-# export_pte_optimized.py
-# Create optimized ExecuTorch .pte for Android (non-quantized but highly optimized)
+"""Create optimized FP32 ExecuTorch encoder for Android."""
 
 import argparse
 import logging
-import torch
-from model_class import GestureRNNTModel, get_default_config
+import os
 
-# ExecuTorch
-from executorch.exir import to_edge
+import torch
 from executorch.backends.xnnpack.partition.xnnpack_partitioner import XnnpackPartitioner
+from executorch.exir import to_edge
+
+from export_common import load_trained_model, make_example_inputs, package_artifacts
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("export_pte_optimized")
 
+
 class AndroidOptimizedEncoderWrapper(torch.nn.Module):
-    """Android-optimized encoder wrapper for maximum mobile performance"""
-    def __init__(self, encoder):
+    def __init__(self, encoder: torch.nn.Module):
         super().__init__()
         self.encoder = encoder.eval()
 
-    def forward(self, audio_signal, length):
-        # Optimized forward pass for mobile
-        encoded, encoded_len = self.encoder(audio_signal=audio_signal, length=length)
-        return encoded, encoded_len
+    def forward(self, audio_signal: torch.Tensor, length: torch.Tensor):
+        return self.encoder(audio_signal=audio_signal, length=length)
 
-def main():
-    parser = argparse.ArgumentParser(description="Export optimized PTE encoder for Android")
-    parser.add_argument("--checkpoint", required=True, help="Path to .ckpt file")
-    parser.add_argument("--output", default="encoder_android_optimized.pte", help="Output PTE file")
-    parser.add_argument("--max_length", type=int, default=200, help="Max sequence length")
+
+@torch.no_grad()
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Export optimized (non-quant) ExecuTorch encoder")
+    parser.add_argument("--checkpoint", required=True, help="Path to .ckpt or .nemo model")
+    parser.add_argument("--output", default="encoder_android_optimized.pte", help="Output ExecuTorch file")
+    parser.add_argument("--max-trace-len", type=int, default=200, help="Max gesture length for export inputs")
+    parser.add_argument("--lexicon", help="Optional lexicon to include when packaging")
+    parser.add_argument("--package-dir", help="Copy exported file (and assets) into this directory")
+    parser.add_argument(
+        "--bundle-assets",
+        nargs="*",
+        default=None,
+        help="Additional assets to include when packaging",
+    )
     args = parser.parse_args()
 
-    log.info(f"Loading checkpoint: {args.checkpoint}")
-
-    # Load checkpoint
-    ckpt = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
-
-    if 'hyper_parameters' in ckpt:
-        cfg = ckpt['hyper_parameters']['cfg']
-    else:
-        cfg = get_default_config()
-
-    model = GestureRNNTModel(cfg).eval()
-
-    # Clean torch.compile keys
-    state_dict = ckpt["state_dict"]
-    new_state_dict = {}
-    for key, value in state_dict.items():
-        if key.startswith("encoder._orig_mod."):
-            new_key = key.replace("encoder._orig_mod.", "encoder.")
-            new_state_dict[new_key] = value
-        else:
-            new_state_dict[key] = value
-
-    model.load_state_dict(new_state_dict, strict=False)
-
-    # Create Android-optimized wrapper
+    model = load_trained_model(args.checkpoint)
     encoder_wrapper = AndroidOptimizedEncoderWrapper(model.encoder)
 
-    log.info("Exporting to ExecuTorch format...")
+    audio_signal, length = make_example_inputs(args.max_trace_len)
 
-    # Example inputs optimized for mobile
-    B, F, T = 1, 37, args.max_length
-    audio_signal = torch.randn(B, F, T, dtype=torch.float32)
-    length = torch.tensor([T], dtype=torch.int32)
-
-    # Export program
+    log.info("Exporting encoder to ExecuTorch")
     exported_program = torch.export.export(encoder_wrapper, (audio_signal, length))
-
-    log.info("Converting to Edge IR with mobile optimizations...")
     edge_program = to_edge(exported_program)
-
-    log.info("Applying XNNPACK optimizations for ARM/Android...")
-    # XNNPACK partitioner optimizes for ARM processors
     edge_program = edge_program.to_backend(XnnpackPartitioner())
-
-    log.info("Generating ExecuTorch program...")
     executorch_program = edge_program.to_executorch()
 
-    # Save to file
-    with open(args.output, "wb") as f:
-        f.write(executorch_program.buffer)
+    buffer = getattr(executorch_program, "buffer", None)
+    if buffer is None and hasattr(executorch_program, "to_buffer"):
+        buffer = executorch_program.to_buffer()
+    if buffer is None:
+        raise RuntimeError("Unable to extract ExecuTorch buffer")
 
-    log.info(f"✓ Android-optimized PTE saved: {args.output}")
+    with open(args.output, "wb") as handle:
+        handle.write(buffer)
 
-    # Print optimization summary
-    import os
     size_mb = os.path.getsize(args.output) / (1024 * 1024)
-    log.info(f"Final model size: {size_mb:.1f} MB")
+    log.info(f"✓ Android-optimized ExecuTorch saved: {args.output} ({size_mb:.1f} MB)")
     log.info("Android optimizations applied:")
     log.info("  ✓ XNNPACK backend for ARM acceleration")
     log.info("  ✓ Graph optimizations for mobile")
     log.info("  ✓ Memory layout optimizations")
     log.info("  ✓ Operator fusion for efficiency")
+
+    if args.package_dir:
+        extras = list(args.bundle_assets or [])
+        if args.lexicon:
+            extras.append(args.lexicon)
+        package_artifacts([args.output], args.package_dir, extra_files=extras)
+
 
 if __name__ == "__main__":
     main()

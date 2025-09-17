@@ -1,88 +1,71 @@
 #!/usr/bin/env python3
-# export_pte_fp32.py
-# Export non-quantized encoder to ExecuTorch .pte format
+"""Export non-quantized ExecuTorch (.pte) encoder."""
 
-import os
 import argparse
 import logging
+
 import torch
-
-# NeMo + our model class
-from model_class import GestureRNNTModel, get_default_config
-from swipe_data_utils import SwipeDataset, SwipeFeaturizer, KeyboardGrid, collate_fn
-
-# ExecuTorch
-from executorch.exir import to_edge
 from executorch.backends.xnnpack.partition.xnnpack_partitioner import XnnpackPartitioner
+from executorch.exir import to_edge
+
+from export_common import load_trained_model, make_example_inputs, package_artifacts
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
-log = logging.getLogger("export_pte_fp32")
+LOG = logging.getLogger("export_pte_fp32")
 
-def main():
-    ap = argparse.ArgumentParser(description="Export non-quantized ExecuTorch (.pte) encoder from a trained checkpoint.")
-    ap.add_argument("--nemo_model", required=True, help="Path to trained .ckpt/.nemo.")
-    ap.add_argument("--output", default="encoder_fp32.pte", help="Output .pte path.")
-    ap.add_argument("--max_trace_len", type=int, default=200, help="Max trace len (T) used at export.")
-    args = ap.parse_args()
 
-    # Check if input is .nemo or .ckpt
-    if args.nemo_model.endswith('.ckpt'):
-        log.info(f"Loading checkpoint directly: {args.nemo_model}")
-        ckpt = torch.load(args.nemo_model, map_location="cpu", weights_only=False)
+class EncoderWrapper(torch.nn.Module):
+    def __init__(self, encoder: torch.nn.Module):
+        super().__init__()
+        self.encoder = encoder.eval()
 
-        if 'hyper_parameters' in ckpt:
-            cfg = ckpt['hyper_parameters']['cfg']
-        else:
-            cfg = get_default_config()
+    def forward(self, feats_bft: torch.Tensor, lengths: torch.Tensor):
+        return self.encoder(audio_signal=feats_bft, length=lengths)
 
-        model = GestureRNNTModel(cfg).eval()
 
-        state_dict = ckpt["state_dict"]
-        new_state_dict = {}
-        for key, value in state_dict.items():
-            if key.startswith("encoder._orig_mod."):
-                new_key = key.replace("encoder._orig_mod.", "encoder.")
-                new_state_dict[new_key] = value
-            else:
-                new_state_dict[key] = value
+@torch.no_grad()
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Export ExecuTorch FP32 encoder")
+    parser.add_argument("--checkpoint", required=True, help="Path to trained .ckpt or .nemo artifact")
+    parser.add_argument("--output", default="encoder_fp32.pte", help="Output ExecuTorch file")
+    parser.add_argument("--max-trace-len", type=int, default=200, help="Max gesture length for export sample")
+    parser.add_argument("--lexicon", help="Optional lexicon to include when packaging outputs")
+    parser.add_argument("--package-dir", help="Copy exported file (and assets) into this directory")
+    parser.add_argument(
+        "--bundle-assets",
+        nargs="*",
+        default=None,
+        help="Additional files (runtime metadata, trie, etc.) to include when packaging",
+    )
+    args = parser.parse_args()
 
-        model.load_state_dict(new_state_dict, strict=False)
-    else:
-        log.info(f"Loading trained model from {args.nemo_model}")
-        model = GestureRNNTModel.restore_from(args.nemo_model, map_location="cpu").eval()
+    model = load_trained_model(args.checkpoint)
+    wrapper = EncoderWrapper(model.encoder)
 
-    encoder = model.encoder
+    example_feats, example_lens = make_example_inputs(args.max_trace_len)
 
-    # Wrap the encoder for export
-    class EncoderWrapper(torch.nn.Module):
-        def __init__(self, encoder):
-            super().__init__()
-            self.encoder = encoder
-        def forward(self, feats_bft, lengths):
-            return self.encoder(audio_signal=feats_bft, length=lengths)
-
-    wrapped_encoder = EncoderWrapper(encoder).eval()
-
-    # Example inputs for export
-    B, F, T = 1, 37, int(args.max_trace_len)
-    example_feats_bft = torch.randn(B, F, T, dtype=torch.float32)
-    example_lens = torch.tensor([T], dtype=torch.int32)
-
-    log.info("Exporting to ExecuTorch Edge IR...")
-    exported = torch.export.export(wrapped_encoder, (example_feats_bft, example_lens))
+    LOG.info("Exporting encoder to ExecuTorch Edge IR")
+    exported = torch.export.export(wrapper, (example_feats, example_lens))
     edge = to_edge(exported)
     edge = edge.to_backend(XnnpackPartitioner())
-    prog = edge.to_executorch()
+    program = edge.to_executorch()
 
-    buf = getattr(prog, "buffer", None)
-    if buf is None and hasattr(prog, "to_buffer"):
-        buf = prog.to_buffer()
-    if buf is None:
-        raise RuntimeError("Unable to obtain ExecuTorch program buffer.")
+    buffer = getattr(program, "buffer", None)
+    if buffer is None and hasattr(program, "to_buffer"):
+        buffer = program.to_buffer()
+    if buffer is None:
+        raise RuntimeError("Unable to extract ExecuTorch buffer")
 
-    with open(args.output, "wb") as f:
-        f.write(buf)
-    log.info(f"✓ Saved ExecuTorch encoder to {args.output}")
+    with open(args.output, "wb") as handle:
+        handle.write(buffer)
+    LOG.info("✓ Saved ExecuTorch encoder -> %s", args.output)
+
+    if args.package_dir:
+        extras = list(args.bundle_assets or [])
+        if args.lexicon:
+            extras.append(args.lexicon)
+        package_artifacts([args.output], args.package_dir, extra_files=extras)
+
 
 if __name__ == "__main__":
     main()
