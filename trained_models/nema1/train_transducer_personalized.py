@@ -60,15 +60,15 @@ CONFIG: Dict[str, Any] = {
     "training": {
         "batch_size": 320,
         "num_workers": 10,
-        "learning_rate": 4e-4,
+        "learning_rate": 2e-4,
         "max_epochs": 120,
         "gradient_accumulation": 1,
         "accelerator": "gpu",
         "devices": 1,
         "precision": "bf16-mixed",
-        "warmup_steps": 2500,
+        "warmup_steps": 1500,
         "teacher_checkpoint": None,
-        "kd_lambda": 0.15,
+        "kd_lambda": 0.05,
         "kd_temperature": 1.5,
     },
     "model": {
