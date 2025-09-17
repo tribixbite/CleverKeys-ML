@@ -1,0 +1,18 @@
+{
+  "source_wordlist": "trained_models/nema1/words.txt",
+  "frequency_file": "web-demo/swipe_vocabulary.json",
+  "max_length": 24,
+  "min_frequency": 1e-08,
+  "small": {
+    "count": 12000,
+    "estimated_frequency_mass": 0.7374109900000075,
+    "max_frequency": 0.0537,
+    "min_frequency": 0.0
+  },
+  "full": {
+    "count": 70000,
+    "estimated_frequency_mass": 0.7813471179996058,
+    "max_frequency": 0.0537,
+    "min_frequency": 0.0
+  }
+}

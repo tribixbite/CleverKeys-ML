@@ -360,7 +360,19 @@
         </div>
     </div>
 
-    <script>        // Configuration
+    <script>
+        // Configuration
+        const RUNTIME_CONFIG = Object.freeze({
+            resample: {
+                enabled: true,
+                shortTarget: 56,
+                longTarget: 96,
+                shortThreshold: 48,
+                longThreshold: 112
+            },
+            charSequenceCount: 4,
+            suggestionCount: 5
+        });
         const NORMALIZED_WIDTH = 360;
         const NORMALIZED_HEIGHT = 215;
         const MAX_SEQUENCE_LENGTH = 150;  // Clamp swipe traces to training limit (no padding applied)
@@ -386,7 +398,8 @@
         let padTokenId = null;
         let wordSet = null;
         let wordIndexMap = null;
-        
+        let latestCharSequences = [];
+
         // Expose for debugging
         window.isModelReady = false;
         
@@ -405,7 +418,11 @@
         let swipeStartPos = null;
         let swipeStartTime = null;
         let tapTimeout = null;
-        
+
+        function clamp(value, min, max) {
+            return Math.max(min, Math.min(max, value));
+        }
+
         // Helper functions for RNNT beam search
         async function fetchText(url) {
             return await (await fetch(url)).text();
@@ -464,6 +481,258 @@
             return out;
         }
 
+        function tokensToString(tokenIds) {
+            if (!tokenIds || tokenIds.length === 0) return '';
+            const chars = [];
+            for (const token of tokenIds) {
+                const ch = idToCharMap?.get(token);
+                if (!ch) continue;
+                if (ch === '<blank>' || ch === '<unk>' || ch === '<pad>') continue;
+                chars.push(ch);
+            }
+            return chars.join('');
+        }
+
+        async function rnntCharBeam(
+            encoder,
+            step,
+            featureMatrix,
+            {
+                beamSize = 48,
+                symbolsPerStep = 8,
+                maxSymbols = 20,
+                topK = 32
+            } = {}
+        ) {
+            if (!featureMatrix || !featureMatrix.length) return [];
+
+            const T = featureMatrix.length;
+            const F = featureMatrix[0].length;
+            const featsBFT = new Float32Array(1 * F * T);
+            for (let t = 0; t < T; t++) {
+                const frame = featureMatrix[t];
+                for (let f = 0; f < F; f++) {
+                    featsBFT[f * T + t] = frame[f];
+                }
+            }
+
+            const encInputs = {};
+            for (const name of encoder.inputNames) {
+                if (name.includes('feature') || name.includes('audio')) {
+                    encInputs[name] = new ort.Tensor('float32', featsBFT, [1, F, T]);
+                } else if (name.includes('length')) {
+                    encInputs[name] = new ort.Tensor('int32', new Int32Array([T]), [1]);
+                }
+            }
+
+            const encOut = await encoder.run(encInputs);
+            const encoderOutputNames = Object.keys(encOut);
+            const encodedOutputName = encoderOutputNames.find(name =>
+                name.includes('encoded') || name.includes('hidden') || name.includes('output')
+            ) || encoderOutputNames[0];
+            const encTensor = encOut[encodedOutputName]; // [1,D,T_out]
+            const D = encTensor.dims[1];
+            const T_out = encTensor.dims[2];
+            const encData = encTensor.data;
+            const enc = new Float32Array(T_out * D);
+            for (let t = 0; t < T_out; t++) {
+                for (let d = 0; d < D; d++) {
+                    enc[t * D + d] = encData[d * T_out + t];
+                }
+            }
+
+            const blankId = runtimeMeta.blank_id;
+            const vocabSize = runtimeTokens.length || encTensor.dims[1];
+            let stepVocab = null;
+            let localPad = padTokenId;
+
+            let beams = [{
+                tokens: [],
+                yPrev: BigInt(blankId),
+                h: zeros([2, 1, 320], 'float32'),
+                c: zeros([2, 1, 320], 'float32'),
+                logp: 0,
+                ended: false
+            }];
+
+            const encTile = new Float32Array(beamSize * D);
+
+            for (let t = 0; t < T_out; t++) {
+                for (let stepCount = 0; stepCount < maxSymbols; stepCount++) {
+                    const survivors = beams.filter(b => b.ended).map(b => ({ ...b }));
+                    const expanders = beams.filter(b => !b.ended);
+                    if (!expanders.length) {
+                        beams = survivors;
+                        break;
+                    }
+
+                    const N = Math.min(beamSize, expanders.length);
+                    const active = expanders.slice(0, N);
+
+                    const yPrev = new BigInt64Array(N);
+                    const h0 = zeros([2, N, 320], 'float32');
+                    const c0 = zeros([2, N, 320], 'float32');
+                    for (let i = 0; i < N; i++) {
+                        yPrev[i] = active[i].yPrev;
+                        h0.data.set(active[i].h.data, i * 2 * 320);
+                        c0.data.set(active[i].c.data, i * 2 * 320);
+                        encTile.set(enc.subarray(t * D, (t + 1) * D), i * D);
+                    }
+
+                    const stepInputs = {
+                        y_prev: new ort.Tensor('int64', yPrev, [N]),
+                        h0,
+                        c0,
+                        enc_t: new ort.Tensor('float32', encTile.slice(0, N * D), [N, D])
+                    };
+
+                    const out = await step.run(stepInputs);
+                    const logitsTensor = out[step.outputNames.find(name => name.includes('logits')) || step.outputNames[0]];
+                    const rawLogits = logitsTensor.data;
+                    const row = rawLogits.length / N;
+
+                    if (stepVocab === null) {
+                        stepVocab = row;
+                        if (localPad === null && stepVocab > vocabSize) {
+                            localPad = stepVocab - 1;
+                            padTokenId = localPad;
+                        }
+                    }
+
+                    const logProbs = new Float32Array(rawLogits.length);
+                    for (let i = 0; i < N; i++) {
+                        const offset = i * row;
+                        let maxVal = -Infinity;
+                        for (let j = 0; j < row; j++) {
+                            const val = rawLogits[offset + j];
+                            if (val > maxVal) maxVal = val;
+                        }
+                        let sum = 0;
+                        for (let j = 0; j < row; j++) {
+                            sum += Math.exp(rawLogits[offset + j] - maxVal);
+                        }
+                        const logZ = maxVal + Math.log(sum);
+                        for (let j = 0; j < row; j++) {
+                            let lp = rawLogits[offset + j] - logZ;
+                            if (localPad !== null && j === localPad) lp = -1e9;
+                            logProbs[offset + j] = lp;
+                        }
+                    }
+
+                    const hTensor = out[step.outputNames.find(name => name.includes('h1')) || step.outputNames[1]];
+                    const cTensor = out[step.outputNames.find(name => name.includes('c1')) || step.outputNames[2]];
+
+                    const nextBeams = survivors.slice();
+                    for (let i = 0; i < N; i++) {
+                        const beam = active[i];
+                        const base = i * row;
+                        const h1 = sliceLC(hTensor, i, 2, 320);
+                        const c1 = sliceLC(cTensor, i, 2, 320);
+
+                        // blank transition
+                        nextBeams.push({
+                            tokens: beam.tokens.slice(),
+                            yPrev: BigInt(blankId),
+                            h: h1,
+                            c: c1,
+                            logp: beam.logp + logProbs[base + blankId],
+                            ended: true
+                        });
+
+                        const candidates = [];
+                        for (let j = 0; j < row; j++) {
+                            if (j === blankId) continue;
+                            if (localPad !== null && j === localPad) continue;
+                            candidates.push({ id: j, score: logProbs[base + j] });
+                        }
+                        candidates.sort((a, b) => b.score - a.score);
+                        for (const { id, score } of candidates.slice(0, symbolsPerStep)) {
+                            nextBeams.push({
+                                tokens: beam.tokens.concat(id),
+                                yPrev: BigInt(id),
+                                h: h1,
+                                c: c1,
+                                logp: beam.logp + score,
+                                ended: false
+                            });
+                        }
+                    }
+
+                    nextBeams.sort((a, b) => b.logp - a.logp);
+                    beams = nextBeams.slice(0, beamSize);
+
+                    if (!beams.some(b => !b.ended)) break;
+                }
+            }
+
+            const seen = new Set();
+            const sequences = [];
+            for (const beam of beams) {
+                const str = tokensToString(beam.tokens);
+                if (!str || seen.has(str)) continue;
+                seen.add(str);
+                sequences.push({ raw: str, logp: beam.logp });
+            }
+            sequences.sort((a, b) => b.logp - a.logp);
+            return sequences.slice(0, topK);
+        }
+
+        function mapCharHypothesesToWords(charHyps, {
+            lmLambda = 0.45,
+            distancePenalty = 1.8,
+            maxWords = 8
+        } = {}) {
+            if (!charHyps || !charHyps.length) return [];
+            const results = new Map();
+
+            for (const hyp of charHyps) {
+                const raw = hyp.raw.toLowerCase();
+                if (!raw) continue;
+
+                const candidates = new Map();
+                if (wordSet && wordSet.has(raw)) {
+                    candidates.set(raw, 0);
+                }
+
+                if (swipeVocabulary && swipeVocabulary.isLoaded) {
+                    const similar = swipeVocabulary.getSimilarWords(raw, 5);
+                    for (const entry of similar) {
+                        const word = entry.word || entry;
+                        const dist = entry.distance ?? 0;
+                        candidates.set(word, Math.min(candidates.get(word) ?? dist, dist));
+                    }
+                }
+
+                if (!candidates.size) {
+                    candidates.set(raw, raw === hyp.raw ? 0 : 1);
+                }
+
+                for (const [word, distance] of candidates.entries()) {
+                    if (!word) continue;
+                    const idx = wordIndexMap?.get(word);
+                    const lm = (idx !== undefined && idx < wordLogPrior.length)
+                        ? wordLogPrior[idx]
+                        : Math.log(1e-8);
+                    const score = hyp.logp + lmLambda * lm - distancePenalty * distance;
+                    const existing = results.get(word);
+                    if (!existing || score > existing.score) {
+                        results.set(word, {
+                            word,
+                            score,
+                            rnnt: hyp.logp,
+                            lm,
+                            raw,
+                            distance
+                        });
+                    }
+                }
+            }
+
+            const ranked = Array.from(results.values());
+            ranked.sort((a, b) => b.score - a.score);
+            return ranked.slice(0, maxWords);
+        }
+
         // Initialize ONNX Runtime and load models
         async function loadModels() {
             try {
@@ -507,6 +776,16 @@
                 console.log('RNNT step model loaded (8MB FP32)');
                 console.log('Step model inputs:', decoderSession.inputNames);
                 console.log('Step model outputs:', decoderSession.outputNames);
+                const logitsOutputName = decoderSession.outputNames.find(name => name.includes('logits')) || decoderSession.outputNames[0];
+                const logitsMeta = decoderSession.outputMetadata?.[logitsOutputName];
+                if (logitsMeta && Array.isArray(logitsMeta.dimensions)) {
+                    const dims = logitsMeta.dimensions;
+                    const vocabDim = dims[dims.length - 1];
+                    if (Number.isFinite(vocabDim) && runtimeTokens.length && vocabDim > runtimeTokens.length) {
+                        padTokenId = vocabDim - 1;
+                        console.log('Detected pad token id from step model:', padTokenId);
+                    }
+                }
 
                 // Load runtime metadata and vocabulary for RNNT beam search
                 updateLoadingStatus('Loading runtime metadata...');
@@ -918,23 +1197,44 @@
         }
         
         function getNormalizedCoords(clientX, clientY) {
-            if (!keyboardBounds) return { x: 0, y: 0, normalized: { x: 0, y: 0 } };
-            
+            if (!keyboardBounds) {
+                return {
+                    x: 0,
+                    y: 0,
+                    normalized: {
+                        x01: 0.5,
+                        y01: 0.5,
+                        xCentered: 0,
+                        yCentered: 0,
+                        x: 0,
+                        y: 0
+                    }
+                };
+            }
+
             const x = clientX - keyboardBounds.minX;
             const y = clientY - keyboardBounds.minY;
-            
-            // Normalize to 360x215 space
-            const normX = (x / keyboardBounds.width) * NORMALIZED_WIDTH;
-            const normY = (y / keyboardBounds.height) * NORMALIZED_HEIGHT;
-            
-            // Also calculate 0-1 range
-            const norm01X = x / keyboardBounds.width;
-            const norm01Y = y / keyboardBounds.height;
-            
+
+            const norm01X = clamp(x / keyboardBounds.width, 0, 1);
+            const norm01Y = clamp(y / keyboardBounds.height, 0, 1);
+
+            const normX = norm01X * NORMALIZED_WIDTH;
+            const normY = norm01Y * NORMALIZED_HEIGHT;
+
+            const centeredX = norm01X * 2 - 1;
+            const centeredY = norm01Y * 2 - 1;
+
             return {
                 x: Math.round(normX),
                 y: Math.round(normY),
-                normalized: { x: norm01X.toFixed(3), y: norm01Y.toFixed(3) }
+                normalized: {
+                    x01: norm01X,
+                    y01: norm01Y,
+                    xCentered: centeredX,
+                    yCentered: centeredY,
+                    x: centeredX,
+                    y: centeredY
+                }
             };
         }
         
@@ -1315,10 +1615,10 @@
                 const features = prepareSwipeFeatures(swipeData);
                 
                 // Run inference
-                const predictions = await runInference(features);
+                const inferenceResult = await runInference(features);
                 
                 // Display predictions
-                displayPredictions(predictions);
+                displayPredictions(inferenceResult);
                 
                 updateStatus('Ready', 'success');
                 
@@ -1344,6 +1644,68 @@
             }
         }
         
+        function determineResampleTarget(length) {
+            if (!RUNTIME_CONFIG.resample.enabled) {
+                return length;
+            }
+            if (length <= 1) {
+                return length;
+            }
+            if (length <= RUNTIME_CONFIG.resample.shortThreshold) {
+                return Math.max(length, RUNTIME_CONFIG.resample.shortTarget);
+            }
+            if (length >= RUNTIME_CONFIG.resample.longThreshold) {
+                return RUNTIME_CONFIG.resample.longTarget;
+            }
+            return length;
+        }
+
+        function resampleSwipePoints(points, targetCount) {
+            if (!Array.isArray(points) || points.length === 0) {
+                return [];
+            }
+            if (targetCount <= 0 || points.length === targetCount) {
+                return points.slice();
+            }
+
+            const resampled = [];
+            const firstTime = points[0].t;
+            const lastTime = points[points.length - 1].t;
+            const duration = Math.max(lastTime - firstTime, 1);
+
+            const step = duration / Math.max(targetCount - 1, 1);
+            let srcIdx = 0;
+
+            for (let i = 0; i < targetCount; i++) {
+                const targetTime = i === targetCount - 1 ? lastTime : firstTime + step * i;
+
+                while (srcIdx < points.length - 2 && points[srcIdx + 1].t < targetTime) {
+                    srcIdx++;
+                }
+
+                const p1 = points[srcIdx];
+                const p2 = points[Math.min(srcIdx + 1, points.length - 1)];
+                const span = Math.max(p2.t - p1.t, 1);
+                const alpha = clamp((targetTime - p1.t) / span, 0, 1);
+
+                const x = p1.x + (p2.x - p1.x) * alpha;
+                const y = p1.y + (p2.y - p1.y) * alpha;
+
+                const normalized = {
+                    x: x,
+                    y: y,
+                    xCentered: x,
+                    yCentered: y,
+                    x01: clamp((x + 1) / 2, 0, 1),
+                    y01: clamp((y + 1) / 2, 0, 1)
+                };
+
+                resampled.push({ x, y, t: targetTime, normalized });
+            }
+
+            return resampled;
+        }
+
         function prepareSwipeFeatures(swipeData) {
             const rawPath = swipeData.path || [];
             const trimmedLength = Math.min(rawPath.length, MAX_SEQUENCE_LENGTH);
@@ -1362,31 +1724,62 @@
 
             for (let i = 0; i < trimmedLength; i++) {
                 const point = rawPath[i];
-                const norm = point.normalized || { x: 0.5, y: 0.5 };
+                const norm = point.normalized || {};
+                const centeredX = typeof norm.xCentered === 'number'
+                    ? norm.xCentered
+                    : (typeof norm.x === 'number' ? norm.x : 0);
+                const centeredY = typeof norm.yCentered === 'number'
+                    ? norm.yCentered
+                    : (typeof norm.y === 'number' ? norm.y : 0);
                 const relativeTime = (point.timestamp ?? startTimestamp) - startTimestamp;
 
+                const normalized = {
+                    x: clamp(centeredX, -1, 1),
+                    y: clamp(centeredY, -1, 1),
+                    xCentered: clamp(centeredX, -1, 1),
+                    yCentered: clamp(centeredY, -1, 1),
+                    x01: clamp((centeredX + 1) / 2, 0, 1),
+                    y01: clamp((centeredY + 1) / 2, 0, 1)
+                };
+
                 points.push({
-                    x: parseFloat(norm.x),
-                    y: parseFloat(norm.y),
+                    x: normalized.x,
+                    y: normalized.y,
                     t: Number.isFinite(relativeTime) ? relativeTime : i * 10,
+                    normalized
                 });
             }
 
+            const targetCount = determineResampleTarget(points.length);
+            const processedPoints = targetCount !== points.length
+                ? resampleSwipePoints(points, targetCount)
+                : points;
+
             return {
-                points,
+                points: processedPoints,
                 originalLength: trimmedLength,
                 keySequence: swipeData.keySequence,
-                duration: swipeData.duration
+                duration: swipeData.duration,
+                resampledLength: processedPoints.length
             };
         }
 
         function resolveKeyCenters(meta) {
             if (meta && meta.key_centers) {
-                return Object.entries(meta.key_centers).map(([char, coords]) => ({
-                    char,
-                    x: typeof coords[0] === 'number' ? coords[0] : parseFloat(coords[0]),
-                    y: typeof coords[1] === 'number' ? coords[1] : parseFloat(coords[1]),
-                }));
+                return Object.entries(meta.key_centers).map(([char, coords]) => {
+                    const rawX = typeof coords[0] === 'number' ? coords[0] : parseFloat(coords[0]);
+                    const rawY = typeof coords[1] === 'number' ? coords[1] : parseFloat(coords[1]);
+                    const looksNormalized = rawX >= 0 && rawX <= 1 && rawY >= 0 && rawY <= 1;
+                    const x = looksNormalized ? rawX * 2 - 1 : clamp(rawX, -1, 1);
+                    const y = looksNormalized ? rawY * 2 - 1 : clamp(rawY, -1, 1);
+                    return {
+                        char,
+                        x,
+                        y,
+                        x01: looksNormalized ? rawX : clamp((x + 1) / 2, 0, 1),
+                        y01: looksNormalized ? rawY : clamp((y + 1) / 2, 0, 1)
+                    };
+                });
             }
             const allowed = Array.isArray(meta?.allowed_chars) ? meta.allowed_chars : null;
             return buildDefaultKeyCenters(allowed);
@@ -1404,10 +1797,14 @@
                 for (let col = 0; col < rowChars.length; col++) {
                     const ch = rowChars[col];
                     if (!allowedSet || allowedSet.has(ch)) {
+                        const x01 = (col + 0.5) / 10;
+                        const y01 = (row + 0.5) / 3;
                         centers.push({
                             char: ch,
-                            x: (col + 0.5) / 10,
-                            y: (row + 0.5) / 3,
+                            x: x01 * 2 - 1,
+                            y: y01 * 2 - 1,
+                            x01,
+                            y01
                         });
                     }
                 }
@@ -1436,8 +1833,8 @@
             const prev = points[idx - 1] || null;
             const prev2 = points[idx - 2] || null;
 
-            const x = Number.isFinite(curr.x) ? curr.x : 0.5;
-            const y = Number.isFinite(curr.y) ? curr.y : 0.5;
+            const x = Number.isFinite(curr.x) ? clamp(curr.x, -1, 1) : 0;
+            const y = Number.isFinite(curr.y) ? clamp(curr.y, -1, 1) : 0;
             const currTime = Number.isFinite(curr.t) ? curr.t : idx * 10;
             const tSeconds = currTime / 1000.0;
 
@@ -1445,8 +1842,8 @@
             if (prev) {
                 const prevTime = Number.isFinite(prev.t) ? prev.t : (idx - 1) * 10;
                 const dt = Math.max((currTime - prevTime) / 1000.0, 0.001);
-                const prevX = Number.isFinite(prev.x) ? prev.x : x;
-                const prevY = Number.isFinite(prev.y) ? prev.y : y;
+                const prevX = Number.isFinite(prev.x) ? clamp(prev.x, -1, 1) : x;
+                const prevY = Number.isFinite(prev.y) ? clamp(prev.y, -1, 1) : y;
                 vx = (x - prevX) / dt;
                 vy = (y - prevY) / dt;
                 speed = Math.sqrt(vx * vx + vy * vy);
@@ -1458,10 +1855,10 @@
                 const prev2Time = Number.isFinite(prev2.t) ? prev2.t : (idx - 2) * 10;
                 const dt1 = Math.max((currTime - prevTime) / 1000.0, 0.001);
                 const dt2 = Math.max((prevTime - prev2Time) / 1000.0, 0.001);
-                const prevX = Number.isFinite(prev.x) ? prev.x : x;
-                const prevY = Number.isFinite(prev.y) ? prev.y : y;
-                const prev2X = Number.isFinite(prev2.x) ? prev2.x : prevX;
-                const prev2Y = Number.isFinite(prev2.y) ? prev2.y : prevY;
+                const prevX = Number.isFinite(prev.x) ? clamp(prev.x, -1, 1) : x;
+                const prevY = Number.isFinite(prev.y) ? clamp(prev.y, -1, 1) : y;
+                const prev2X = Number.isFinite(prev2.x) ? clamp(prev2.x, -1, 1) : prevX;
+                const prev2Y = Number.isFinite(prev2.y) ? clamp(prev2.y, -1, 1) : prevY;
                 const vxPrev = (prevX - prev2X) / dt2;
                 const vyPrev = (prevY - prev2Y) / dt2;
                 ax = (vx - vxPrev) / dt1;
@@ -1480,10 +1877,10 @@
 
             let curvature = 0;
             if (prev && prev2) {
-                const prevX = Number.isFinite(prev.x) ? prev.x : x;
-                const prevY = Number.isFinite(prev.y) ? prev.y : y;
-                const prev2X = Number.isFinite(prev2.x) ? prev2.x : prevX;
-                const prev2Y = Number.isFinite(prev2.y) ? prev2.y : prevY;
+                const prevX = Number.isFinite(prev.x) ? clamp(prev.x, -1, 1) : x;
+                const prevY = Number.isFinite(prev.y) ? clamp(prev.y, -1, 1) : y;
+                const prev2X = Number.isFinite(prev2.x) ? clamp(prev2.x, -1, 1) : prevX;
+                const prev2Y = Number.isFinite(prev2.y) ? clamp(prev2.y, -1, 1) : prevY;
                 let prevAngle = Math.atan2(prevY - prev2Y, prevX - prev2X);
                 curvature = angle - prevAngle;
                 while (curvature > Math.PI) curvature -= 2 * Math.PI;
@@ -1513,8 +1910,8 @@
 
             let meanX = x, stdX = 0, meanY = y, stdY = 0, rangeX = 0, rangeY = 0;
             if (windowPoints.length > 1) {
-                const xs = windowPoints.map(p => Number.isFinite(p.x) ? p.x : x);
-                const ys = windowPoints.map(p => Number.isFinite(p.y) ? p.y : y);
+                const xs = windowPoints.map(p => Number.isFinite(p.x) ? clamp(p.x, -1, 1) : x);
+                const ys = windowPoints.map(p => Number.isFinite(p.y) ? clamp(p.y, -1, 1) : y);
                 const sumX = xs.reduce((acc, val) => acc + val, 0);
                 const sumY = ys.reduce((acc, val) => acc + val, 0);
                 meanX = sumX / xs.length;
@@ -1756,211 +2153,272 @@
             const pointSet = features.points || [];
             const featureVectors = computeFeatureMatrix(pointSet, keyCentersResolved);
             const T = featureVectors.length;
-            const F = 37;
 
-            if (T === 0) {
-                throw new Error('No swipe frames available for inference');
-            }
-
-            const featuresBFT = new Float32Array(F * T);
-            for (let t = 0; t < T; t++) {
-                const frame = featureVectors[t];
-                for (let f = 0; f < F; f++) {
-                    featuresBFT[f * T + t] = frame[f];
-                }
-            }
-
-            console.log(`🔥 Starting inference with ${T} frames (37 features each)`);
-
+            if (T === 0) throw new Error('No swipe frames available for inference');
             if (!encoderSession) throw new Error('Encoder session not loaded');
             if (!decoderSession) throw new Error('Decoder/step session not loaded');
             if (!runtimeMeta) throw new Error('Runtime metadata not loaded');
-            if (!wordList || wordList.length === 0) throw new Error('Word list not loaded');
-            if (!trieRoot) throw new Error('Trie not built');
 
-            console.log('✅ All components validated, starting beam search...');
+            const originalLength = features?.originalLength ?? pointSet.length;
+            const resampledLength = features?.resampledLength ?? T;
+            console.log(`🔥 Starting inference with ${T} frames (37 features each) | original=${originalLength}, resampled=${resampledLength}`);
 
-            const results = await rnntWordBeam(
+            const charHypotheses = await rnntCharBeam(
                 encoderSession,
                 decoderSession,
-                featuresBFT,
-                F, T,
-                2,
-                320,
-                null,
-                runtimeMeta,
-                wordList,
-                trieRoot,
-                wordLogPrior,
+                featureVectors,
                 {
-                    beamSize: 16,
-                    prunePerBeam: 8,
-                    maxSymbols: 15,
-                    lmLambda: 0.4,
-                    topK: 5
+                    beamSize: 64,
+                    symbolsPerStep: 8,
+                    maxSymbols: 20,
+                    topK: 32
                 }
             );
 
+            lastCharHypotheses = charHypotheses;
+
+            const rankedWords = mapCharHypothesesToWords(charHypotheses, {
+                lmLambda: 0.45,
+                distancePenalty: 1.8,
+                maxWords: 8
+            });
+
             const latency = performance.now() - startTime;
             console.log(`🚀 RNNT inference completed in ${latency.toFixed(1)}ms`);
-            console.log('RNNT beam search results:', results);
+            console.log('Character hypotheses:', charHypotheses.slice(0, 5));
+            console.log('Ranked word candidates:', rankedWords.slice(0, 5));
 
-            if (results.length > 0) {
-                const topWord = results[0].word;
-                console.log(`⚡ Top prediction: "${topWord}" (${latency.toFixed(1)}ms latency)`);
-                if (latency < 500) {
-                    console.log('🎯 EXCELLENT: Sub-500ms latency achieved!');
-                } else if (latency < 1000) {
-                    console.log('✅ GOOD: Sub-1s latency achieved!');
-                } else {
-                    console.warn('⚠️ SLOW: >1s latency - optimization needed');
-                }
+            const charSequences = (charHypotheses || [])
+                .slice(0, RUNTIME_CONFIG.charSequenceCount)
+                .map(h => ({
+                    raw: h.raw,
+                    score: h.logp,
+                    characters: Array.from(h.raw || ''),
+                    source: 'char'
+                }));
+
+            const fallbackWords = (!rankedWords || rankedWords.length === 0)
+                ? (charHypotheses || []).map(h => ({
+                    word: h.raw,
+                    score: h.logp,
+                    rnnt: h.logp,
+                    raw: h.raw,
+                    distance: 0,
+                    source: 'char'
+                }))
+                : [];
+
+            const finalRankedWords = rankedWords.length ? rankedWords : fallbackWords;
+
+            if (finalRankedWords.length > 0) {
+                console.log(`⚡ Top prediction: "${finalRankedWords[0].word}" (${latency.toFixed(1)}ms latency)`);
+            } else {
+                console.warn('Character beam returned no usable hypotheses');
             }
 
-            return results.map(r => r.word);
+            return {
+                rankedWords: finalRankedWords,
+                rawRankedWords: rankedWords,
+                charSequences,
+                latencyMs: latency,
+                frameCount: T,
+                featureDim: featureVectors[0]?.length ?? 0,
+                originalLength: features?.originalLength ?? T,
+                resampledLength: features?.resampledLength ?? T
+            };
         }
         
         
-        function displayPredictions(predictions) {
+        function displayPredictions(result) {
             const suggestionsDiv = document.getElementById('suggestions');
+            if (!suggestionsDiv) {
+                return;
+            }
             suggestionsDiv.innerHTML = '';
-            
-            console.log('Raw predictions from model:', predictions);
-            
-            // Apply vocabulary filtering if vocab is loaded
-            let filteredPredictions = [];
-            
-            if (swipeVocabulary && swipeVocabulary.isLoaded) {
-                console.log('Vocabulary loaded, applying intelligent filtering with custom dictionary support...');
-                
-                // First, check for 2-character words if it's a straight line
-                if (swipePath && swipePath.length > 0 && isNearlyStraightLine(swipePath)) {
-                    const twoCharWord = getTwoCharWordFromSwipe(keySequence);
-                    if (twoCharWord) {
-                        // Add valid 2-char word to the beginning of predictions
-                        filteredPredictions.push(twoCharWord);
-                    }
+
+            if (!result) {
+                suggestionsDiv.innerHTML = '<div class="text-gray-500 text-sm">No predictions</div>';
+                currentPredictions = [];
+                hasPendingPredictions = false;
+                return;
+            }
+
+            const rankedWords = Array.isArray(result?.rankedWords) ? result.rankedWords : [];
+            const charSequences = Array.isArray(result?.charSequences) ? result.charSequences : [];
+            latestCharSequences = charSequences;
+            window.latestCharSequences = latestCharSequences;
+            window.lastInferenceResult = result;
+
+            const candidateMap = new Map();
+            const addCandidate = (word, info) => {
+                if (!word) return;
+                const normalizedWord = word.toLowerCase().trim();
+                if (!normalizedWord || !normalizedWord.match(/^[a-z']+$/)) return;
+                const existing = candidateMap.get(normalizedWord);
+                if (existing && existing.score >= (info.score ?? -Infinity)) {
+                    return;
                 }
-                
-                // Convert predictions to format expected by SwipeVocabulary
-                const nnPredictions = predictions.map((word, index) => ({
-                    word: word,
-                    confidence: 1.0 - (index * 0.1) // Assign decreasing confidence based on order
-                }));
-                
-                // Calculate swipe statistics
+                candidateMap.set(normalizedWord, {
+                    word: normalizedWord,
+                    score: info.score ?? -Infinity,
+                    source: info.source ?? 'rnnt',
+                    rank: info.rank ?? 0,
+                    characters: info.characters || null
+                });
+            };
+
+            rankedWords.forEach((candidate, idx) => {
+                const score = candidate?.score ?? candidate?.rnnt ?? -Infinity;
+                const source = candidate?.source ?? 'rnnt';
+                const displayWord = candidate?.word || candidate?.raw;
+                addCandidate(displayWord, { score, source, rank: idx });
+            });
+
+            charSequences.forEach((seq, idx) => {
+                const displayWord = seq?.raw || (Array.isArray(seq?.characters) ? seq.characters.join('') : '');
+                addCandidate(displayWord, {
+                    score: seq?.score ?? -Infinity,
+                    source: 'char_sequence',
+                    rank: rankedWords.length + idx,
+                    characters: seq?.characters || (seq?.raw ? Array.from(seq.raw) : null)
+                });
+            });
+
+            if (candidateMap.size === 0) {
+                suggestionsDiv.innerHTML = '<div class="text-gray-500 text-sm">No predictions</div>';
+                currentPredictions = [];
+                hasPendingPredictions = false;
+                return;
+            }
+
+            const sortedCandidates = Array.from(candidateMap.values()).sort((a, b) => b.score - a.score);
+            const maxScore = sortedCandidates[0]?.score ?? 0;
+            const nnPredictions = sortedCandidates.map((candidate, idx) => ({
+                word: candidate.word,
+                confidence: Math.max(1e-4, Math.exp((candidate.score ?? -Infinity) - maxScore)),
+                source: candidate.source,
+                rank: idx
+            }));
+
+            let filteredResults = [];
+            if (swipeVocabulary && swipeVocabulary.isLoaded) {
+                console.log('Vocabulary loaded, applying intelligent filtering with custom and personal dictionaries.');
                 const swipeStats = {
                     pathLength: swipePath ? swipePath.length : 0,
-                    expectedLength: keySequence ? Math.round(keySequence.length * 0.8) : 0
+                    expectedLength: keySequence ? Math.round((keySequence.length || 0) * 0.85) : 0
                 };
-                
-                // Use SwipeVocabulary's intelligent filtering (which now includes custom dictionary support)
-                const filtered = swipeVocabulary.filterPredictions(nnPredictions, swipeStats);
-                
-                // Extract words from filtered results and mark sources
-                filtered.forEach(result => {
-                    if (!filteredPredictions.includes(result.word)) {
-                        filteredPredictions.push(result.word);
-                        
-                        // Log custom/personal word boost for debugging
-                        if (result.source === 'personal') {
-                            console.log(`🎯 Personal word boosted: ${result.word} (score: ${result.score.toFixed(4)})`);
-                        } else if (dictionaryManager && dictionaryManager.personalWords.has(result.word)) {
-                            console.log(`📚 Custom word found: ${result.word}`);
-                        }
+                filteredResults = swipeVocabulary.filterPredictions(nnPredictions, swipeStats);
+            } else {
+                console.warn('Vocabulary not loaded; falling back to raw candidate ranking.');
+                filteredResults = nnPredictions.map(({ word, confidence }) => ({
+                    word,
+                    score: confidence,
+                    source: 'raw'
+                }));
+            }
+
+            const seen = new Set();
+            const finalWords = [];
+            const pushWord = (word, meta = {}) => {
+                if (!word) return;
+                const normalizedWord = word.toLowerCase().trim();
+                if (!normalizedWord || seen.has(normalizedWord)) return;
+                seen.add(normalizedWord);
+                finalWords.push({
+                    word: normalizedWord,
+                    source: meta.source ?? 'rnnt',
+                    score: meta.score ?? -Infinity,
+                    characters: meta.characters || null
+                });
+            };
+
+            filteredResults.forEach(item => {
+                pushWord(item.word, { source: item.source ?? 'vocabulary', score: item.score ?? item.confidence });
+            });
+
+            if (swipePath && swipePath.length > 0 && isNearlyStraightLine(swipePath)) {
+                const twoCharWord = getTwoCharWordFromSwipe(keySequence);
+                if (twoCharWord) {
+                    pushWord(twoCharWord, { source: 'bigram', score: maxScore + 0.05 });
+                }
+            }
+
+            if (dictionaryManager) {
+                candidateMap.forEach(candidate => {
+                    if (dictionaryManager.personalWords.has(candidate.word)) {
+                        pushWord(candidate.word, { source: 'personal', score: candidate.score });
+                    } else if (dictionaryManager.customWords.has(candidate.word) || dictionaryManager.androidDictionary.has(candidate.word)) {
+                        pushWord(candidate.word, { source: 'custom', score: candidate.score });
                     }
                 });
-                
-                // Limit to top predictions but ensure we have at least 5
-                filteredPredictions = filteredPredictions.slice(0, 10); // Get more initially
-                console.log('Filtered predictions (with custom dictionary):', filteredPredictions);
-            } else {
-                console.warn('Vocabulary not loaded! Filtering with basic validation.');
-                // Fallback: only show predictions that look like valid English words
-                const validPredictions = predictions
-                    .filter(word => word && word.match(/^[a-zA-Z]+$/) && word.length >= 2 && word.length <= 35)
-                    .map(word => word.toLowerCase())
-                    .filter(word => !filteredPredictions.includes(word));
-                filteredPredictions.push(...validPredictions);
             }
-            
-            // Ensure we always have at least 5 suggestions by adding raw predictions if needed
-            if (filteredPredictions.length < 5) {
-                console.log(`Only ${filteredPredictions.length} filtered predictions, adding raw predictions to reach 5`);
-                
-                // Add raw predictions that aren't already included
-                const additionalPredictions = predictions
-                    .map(word => word.toLowerCase().trim())
-                    .filter(word => word && word.match(/^[a-z]+$/) && !filteredPredictions.includes(word))
-                    .slice(0, 5 - filteredPredictions.length);
-                
-                additionalPredictions.forEach(word => console.log(`Added raw prediction: ${word}`));
-                filteredPredictions.push(...additionalPredictions);
-                
-                // If still not enough, add common 2-char words based on keySequence
-                if (filteredPredictions.length < 5 && keySequence && keySequence.length >= 2) {
-                    const startKey = keySequence[0]?.key;
-                    const endKey = keySequence[keySequence.length - 1]?.key;
-                    
-                    if (startKey && endKey && commonTwoCharWords) {
-                        for (const twoCharWord of commonTwoCharWords) {
-                            if (filteredPredictions.length >= 5) break;
-                            
-                            if ((twoCharWord.startsWith(startKey) || twoCharWord.endsWith(endKey)) && 
-                                !filteredPredictions.includes(twoCharWord)) {
-                                filteredPredictions.push(twoCharWord);
-                                console.log(`Added 2-char fallback: ${twoCharWord}`);
-                            }
-                        }
-                    }
-                }
+
+            charSequences.forEach(seq => {
+                const raw = (seq?.raw || (Array.isArray(seq?.characters) ? seq.characters.join('') : '')).toLowerCase();
+                if (!raw || !raw.match(/^[a-z']+$/)) return;
+                pushWord(raw, {
+                    source: 'char_sequence',
+                    score: seq?.score ?? -Infinity,
+                    characters: seq?.characters || (seq?.raw ? Array.from(seq.raw) : null)
+                });
+            });
+
+            sortedCandidates.forEach(candidate => {
+                pushWord(candidate.word, {
+                    source: candidate.source,
+                    score: candidate.score,
+                    characters: candidate.characters
+                });
+            });
+
+            if (finalWords.length === 0) {
+                suggestionsDiv.innerHTML = '<div class="text-gray-500 text-sm">No predictions</div>';
+                currentPredictions = [];
+                hasPendingPredictions = false;
+                return;
             }
-            
-            // Final limit to exactly 5 suggestions
-            filteredPredictions = filteredPredictions.slice(0, 5);
-            console.log(`Final predictions count: ${filteredPredictions.length}`, filteredPredictions);
-            
-            // Update prediction state
-            currentPredictions = [...filteredPredictions];
-            hasPendingPredictions = filteredPredictions.length > 0;
+
+            const targetCount = RUNTIME_CONFIG.suggestionCount;
+            const limited = finalWords.slice(0, targetCount);
+
+            currentPredictions = limited.map(item => item.word);
+            hasPendingPredictions = limited.length > 0;
             userMadeManualSelection = false;
-            
-            filteredPredictions.forEach((word, index) => {
+
+            limited.forEach((item, index) => {
                 const suggestion = document.createElement('div');
-                
-                // Check if this is a custom/personal word for special styling
-                const isPersonalWord = dictionaryManager && dictionaryManager.personalWords.has(word);
-                const isCustomWord = dictionaryManager && (dictionaryManager.customWords.has(word) || dictionaryManager.androidDictionary.has(word));
-                
+                const isPersonalWord = dictionaryManager && dictionaryManager.personalWords.has(item.word);
+                const isCustomWord = dictionaryManager && (dictionaryManager.customWords.has(item.word) || dictionaryManager.androidDictionary.has(item.word));
+                const isCharSequence = item.source === 'char_sequence';
+
                 let className;
                 if (index === 0) {
-                    // Top prediction
                     className = 'px-4 py-1.5 rounded-full bg-gradient-to-r from-neon-blue/20 to-neon-purple/20 border border-neon-blue/50 text-white text-sm cursor-pointer hover:scale-105 transition-transform';
                 } else if (isPersonalWord) {
-                    // Personal dictionary words get a special highlight
                     className = 'px-4 py-1.5 rounded-full bg-gradient-to-r from-neon-pink/15 to-neon-purple/15 border border-neon-pink/40 text-white text-sm cursor-pointer hover:bg-gradient-to-r hover:from-neon-pink/25 hover:to-neon-purple/25 transition-all';
                 } else if (isCustomWord) {
-                    // Custom dictionary words get a different highlight
                     className = 'px-4 py-1.5 rounded-full bg-gradient-to-r from-green-500/15 to-blue-500/15 border border-green-500/40 text-gray-200 text-sm cursor-pointer hover:bg-gradient-to-r hover:from-green-500/25 hover:to-blue-500/25 transition-all';
+                } else if (isCharSequence) {
+                    className = 'px-4 py-1.5 rounded-full bg-yellow-500/10 border border-yellow-500/40 text-yellow-200 text-sm cursor-pointer hover:bg-yellow-500/20 transition-all';
                 } else {
-                    // Regular vocabulary words
                     className = 'px-4 py-1.5 rounded-full bg-white/5 border border-white/20 text-gray-300 text-sm cursor-pointer hover:bg-white/10 transition-all';
                 }
-                
+
                 suggestion.className = className;
-                
-                // Add indicator for custom words
                 if (isPersonalWord) {
-                    suggestion.textContent = `★ ${word}`; // Star for personal words
+                    suggestion.textContent = `★ ${item.word}`;
                 } else if (isCustomWord) {
-                    suggestion.textContent = `+ ${word}`; // Plus for custom words
+                    suggestion.textContent = `+ ${item.word}`;
+                } else if (isCharSequence) {
+                    suggestion.textContent = `[${item.word}]`;
                 } else {
-                    suggestion.textContent = word;
+                    suggestion.textContent = item.word;
                 }
-                
-                suggestion.onclick = () => selectWord(word);
+                suggestion.onclick = () => selectWord(item.word);
                 suggestionsDiv.appendChild(suggestion);
             });
+
+            console.log('Rendered suggestions:', limited.map(item => item.word), 'latencyMs:', result?.latencyMs?.toFixed?.(1));
         }
         
         function selectWord(word) {
@@ -2340,7 +2798,12 @@
         function updateDebugDisplay(coords, key) {
             document.getElementById('xCoord').textContent = coords.x;
             document.getElementById('yCoord').textContent = coords.y;
-            document.getElementById('normCoords').textContent = `${coords.normalized.x}, ${coords.normalized.y}`;
+            const norm = coords.normalized || {};
+            const centeredX = typeof norm.xCentered === 'number' ? norm.xCentered : (typeof norm.x === 'number' ? norm.x : 0);
+            const centeredY = typeof norm.yCentered === 'number' ? norm.yCentered : (typeof norm.y === 'number' ? norm.y : 0);
+            const x01 = typeof norm.x01 === 'number' ? norm.x01 : (centeredX + 1) / 2;
+            const y01 = typeof norm.y01 === 'number' ? norm.y01 : (centeredY + 1) / 2;
+            document.getElementById('normCoords').textContent = `${centeredX.toFixed(2)}, ${centeredY.toFixed(2)} | ${x01.toFixed(2)}, ${y01.toFixed(2)}`;
             document.getElementById('currentKeyDebug').textContent = key || '-';
             document.getElementById('pathLength').textContent = swipePath.length;
             document.getElementById('keysTouched').textContent = keySequence.map(k => k.key).join('');
