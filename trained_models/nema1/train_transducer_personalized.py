@@ -35,6 +35,8 @@ import torch
 from torch.utils.data import DataLoader, Dataset
 from torch.nn.utils.rnn import pad_sequence
 from collections import Counter
+import glob
+import re
 
 import nemo.collections.asr as nemo_asr
 try:
@@ -748,18 +750,60 @@ def build_model_config(cfg: DictConfig, labels: List[str]) -> DictConfig:
     return nemo_cfg
 
 
-def find_latest_checkpoint() -> Optional[str]:
+_CKPT_REGEX = re.compile(r"wer=(?:val_wer=)?([0-9.]+)")
+_EPOCH_REGEX = re.compile(r"epoch=(?:epoch=)?(\d+)")
+
+
+def _collect_checkpoint_paths() -> List[Path]:
     patterns = [
-        './rnnt_checkpoints_*/conformer_rnnt/*/checkpoints/*.ckpt',
-        './rnnt_logs_*/conformer_rnnt/*/checkpoints/*.ckpt',
-        './rnnt_logs/conformer_rnnt/*/checkpoints/*.ckpt',
+        str(SCRIPT_DIR / 'rnnt_checkpoints_*' / 'lightning_logs' / 'version_*' / 'checkpoints' / '*.ckpt'),
+        str(SCRIPT_DIR / 'rnnt_logs_*' / 'conformer_rnnt' / '*' / 'checkpoints' / '*.ckpt'),
+        str(SCRIPT_DIR / 'rnnt_logs' / 'conformer_rnnt' / '*' / 'checkpoints' / '*.ckpt'),
     ]
-    candidates: List[str] = []
+    paths: List[Path] = []
     for pattern in patterns:
-        candidates.extend(Path().glob(pattern))
+        paths.extend(Path(path) for path in glob.glob(pattern))
+    return paths
+
+
+def _extract_metrics(path: Path) -> Tuple[float, int, float]:
+    name = path.name
+    match = _CKPT_REGEX.search(name)
+    if match:
+        wer_str = match.group(1).rstrip('.')
+        try:
+            wer = float(wer_str)
+        except ValueError:
+            wer = float('inf')
+    else:
+        wer = float('inf')
+    match_epoch = _EPOCH_REGEX.search(name)
+    epoch = int(match_epoch.group(1)) if match_epoch else -1
+    mtime = path.stat().st_mtime
+    return wer, epoch, mtime
+
+
+def find_latest_checkpoint() -> Optional[str]:
+    candidates = _collect_checkpoint_paths()
     if not candidates:
         return None
-    return str(max(candidates, key=lambda p: p.stat().st_mtime))
+
+    best_path: Optional[Path] = None
+    best_key: Tuple[float, int, float] = (float('inf'), -1, 0.0)
+
+    for path in candidates:
+        wer, epoch, mtime = _extract_metrics(path)
+        # prefer lower WER, then higher epoch, then latest mtime
+        key = (wer, -epoch, -mtime)
+        if key < best_key:
+            best_key = key
+            best_path = path
+
+    if best_path:
+        print(f"Resuming from best checkpoint: {best_path} (WER={best_key[0]:.3f}, epoch={-best_key[1]})")
+        return str(best_path)
+
+    return None
 
 
 def main() -> None:
