@@ -1,0 +1,2018 @@
+{
+  "summary": {
+    "samples": 100,
+    "accuracy": 0.0,
+    "encode_ms_mean": 16.50596996070817,
+    "encode_ms_median": 15.280834952136502,
+    "decode_ms_mean": 32.051037910277955,
+    "decode_ms_median": 30.148734513204545,
+    "total_ms_mean": 48.5738183016656,
+    "total_ms_median": 47.29723450145684,
+    "frames_mean": 33.33,
+    "frames_median": 28.0,
+    "step_calls_mean": 52.39,
+    "step_calls_median": 51.0
+  },
+  "samples": [
+    {
+      "word": "is",
+      "prediction": "accessibility",
+      "frames": 28,
+      "step_calls": 44,
+      "encode_ms": 13.450352009385824,
+      "decode_ms": 22.02977199340239,
+      "total_ms": 35.49093200126663,
+      "candidates": [
+        [
+          "accessibility",
+          -781.97949051857
+        ],
+        [
+          "assessments",
+          -822.7296648025513
+        ]
+      ]
+    },
+    {
+      "word": "is",
+      "prediction": "theoretically",
+      "frames": 28,
+      "step_calls": 59,
+      "encode_ms": 17.427163023967296,
+      "decode_ms": 38.52347395149991,
+      "total_ms": 55.96845498075709,
+      "candidates": [
+        [
+          "theoretically",
+          -1055.8596878051758
+        ]
+      ]
+    },
+    {
+      "word": "descent",
+      "prediction": "accessibility",
+      "frames": 28,
+      "step_calls": 58,
+      "encode_ms": 13.026924978476018,
+      "decode_ms": 29.338826017919928,
+      "total_ms": 42.37840499263257,
+      "candidates": [
+        [
+          "accessibility",
+          -933.6922175884247
+        ]
+      ]
+    },
+    {
+      "word": "at",
+      "prediction": "terrifically",
+      "frames": 28,
+      "step_calls": 54,
+      "encode_ms": 11.865723005030304,
+      "decode_ms": 32.921243051532656,
+      "total_ms": 44.79866300243884,
+      "candidates": [
+        [
+          "terrifically",
+          -1033.055708900094
+        ],
+        [
+          "territories",
+          -1104.6360082775354
+        ]
+      ]
+    },
+    {
+      "word": "delegate",
+      "prediction": "withstanding",
+      "frames": 54,
+      "step_calls": 73,
+      "encode_ms": 39.01568200672045,
+      "decode_ms": 50.98825297318399,
+      "total_ms": 90.02281801076606,
+      "candidates": [
+        [
+          "withstanding",
+          -1601.5179109871387
+        ],
+        [
+          "westinghouse",
+          -1602.7970165088773
+        ],
+        [
+          "witherspoon",
+          -1627.7146648168564
+        ],
+        [
+          "westernmost",
+          -1760.0267317295074
+        ]
+      ]
+    },
+    {
+      "word": "is",
+      "prediction": "assassinations",
+      "frames": 28,
+      "step_calls": 42,
+      "encode_ms": 17.718639981467277,
+      "decode_ms": 29.903006041422486,
+      "total_ms": 47.637587995268404,
+      "candidates": [
+        [
+          "assassinations",
+          -880.5874409675598
+        ],
+        [
+          "assassinating",
+          -906.9497051239014
+        ],
+        [
+          "assassinated",
+          -928.5797147750854
+        ]
+      ]
+    },
+    {
+      "word": "by",
+      "prediction": "ethnographic",
+      "frames": 28,
+      "step_calls": 42,
+      "encode_ms": 17.665344988927245,
+      "decode_ms": 29.485350009053946,
+      "total_ms": 47.16895101591945,
+      "candidates": [
+        [
+          "ethnographic",
+          -747.8139547109604
+        ],
+        [
+          "etherington",
+          -790.5062918663025
+        ],
+        [
+          "rhythmically",
+          -822.9832904338837
+        ],
+        [
+          "ethnography",
+          -853.6478904485703
+        ]
+      ]
+    },
+    {
+      "word": "some",
+      "prediction": "goldfinger",
+      "frames": 35,
+      "step_calls": 47,
+      "encode_ms": 20.430946024134755,
+      "decode_ms": 33.8432599673979,
+      "total_ms": 54.2901839944534,
+      "candidates": [
+        [
+          "goldfinger",
+          -764.7136011123657
+        ],
+        [
+          "goddaughter",
+          -833.1100463867188
+        ],
+        [
+          "goldfinch",
+          -849.699583530426
+        ],
+        [
+          "godforsaken",
+          -852.0283756256104
+        ],
+        [
+          "godfather",
+          -887.3207578361034
+        ]
+      ]
+    },
+    {
+      "word": "on",
+      "prediction": "toothbrushes",
+      "frames": 28,
+      "step_calls": 51,
+      "encode_ms": 18.47563701448962,
+      "decode_ms": 34.53614003956318,
+      "total_ms": 53.02715697325766,
+      "candidates": [
+        [
+          "toothbrushes",
+          -1106.8052480220795
+        ],
+        [
+          "seasonings",
+          -1166.9905006885529
+        ]
+      ]
+    },
+    {
+      "word": "the",
+      "prediction": "theatricality",
+      "frames": 28,
+      "step_calls": 46,
+      "encode_ms": 12.85822200588882,
+      "decode_ms": 26.22512000380084,
+      "total_ms": 39.09472597297281,
+      "candidates": [
+        [
+          "theatricality",
+          -723.1849043369293
+        ],
+        [
+          "changeable",
+          -774.1186525821686
+        ]
+      ]
+    },
+    {
+      "word": "they",
+      "prediction": "opportunities",
+      "frames": 31,
+      "step_calls": 48,
+      "encode_ms": 14.022416027728468,
+      "decode_ms": 27.734045055694878,
+      "total_ms": 41.772517026402056,
+      "candidates": [
+        [
+          "opportunities",
+          -809.6913156509399
+        ],
+        [
+          "opportunistic",
+          -843.9863181114197
+        ]
+      ]
+    },
+    {
+      "word": "the",
+      "prediction": "noncommittal",
+      "frames": 28,
+      "step_calls": 42,
+      "encode_ms": 12.261171010322869,
+      "decode_ms": 23.730133019853383,
+      "total_ms": 36.004707973916084,
+      "candidates": [
+        [
+          "noncommittal",
+          -641.6923682689667
+        ],
+        [
+          "nonconforming",
+          -657.2388637065887
+        ],
+        [
+          "noncommercial",
+          -677.8401143550873
+        ],
+        [
+          "noncompliance",
+          -682.3966720104218
+        ],
+        [
+          "nonconformist",
+          -690.8307998180389
+        ]
+      ]
+    },
+    {
+      "word": "continued",
+      "prediction": "conscientiousness",
+      "frames": 48,
+      "step_calls": 68,
+      "encode_ms": 16.5720580262132,
+      "decode_ms": 34.61593599058688,
+      "total_ms": 51.21635796967894,
+      "candidates": [
+        [
+          "conscientiousness",
+          -1298.0337834358215
+        ]
+      ]
+    },
+    {
+      "word": "founded",
+      "prediction": "combinatorics",
+      "frames": 38,
+      "step_calls": 57,
+      "encode_ms": 14.429410046432167,
+      "decode_ms": 33.33588904934004,
+      "total_ms": 47.77964897220954,
+      "candidates": [
+        [
+          "combinatorics",
+          -909.7834584712982
+        ],
+        [
+          "concentrating",
+          -935.995363813825
+        ],
+        [
+          "concentrations",
+          -949.2724676132202
+        ]
+      ]
+    },
+    {
+      "word": "play",
+      "prediction": "conceptualization",
+      "frames": 28,
+      "step_calls": 45,
+      "encode_ms": 12.291043007280678,
+      "decode_ms": 28.4314610180445,
+      "total_ms": 40.73510895250365,
+      "candidates": [
+        [
+          "conceptualization",
+          -711.2620117664337
+        ],
+        [
+          "conceptualizing",
+          -725.1707730293274
+        ]
+      ]
+    },
+    {
+      "word": "people",
+      "prediction": "distinguishing",
+      "frames": 48,
+      "step_calls": 64,
+      "encode_ms": 24.790069030132145,
+      "decode_ms": 35.427523020189255,
+      "total_ms": 60.23925502086058,
+      "candidates": [
+        [
+          "distinguishing",
+          -1259.9517171382904
+        ],
+        [
+          "distinguishable",
+          -1274.1802141666412
+        ],
+        [
+          "distinctiveness",
+          -1281.5054978132248
+        ],
+        [
+          "distinguished",
+          -1312.7984883785248
+        ]
+      ]
+    },
+    {
+      "word": "of",
+      "prediction": "witherspoon",
+      "frames": 28,
+      "step_calls": 39,
+      "encode_ms": 11.69272098923102,
+      "decode_ms": 20.765270048286766,
+      "total_ms": 32.469920988660306,
+      "candidates": [
+        [
+          "witherspoon",
+          -624.1092674732208
+        ],
+        [
+          "citizenship",
+          -648.0418453216553
+        ]
+      ]
+    },
+    {
+      "word": "former",
+      "prediction": "competitiveness",
+      "frames": 42,
+      "step_calls": 70,
+      "encode_ms": 14.689698000438511,
+      "decode_ms": 36.3617530092597,
+      "total_ms": 51.06523202266544,
+      "candidates": [
+        [
+          "competitiveness",
+          -1380.2624518871307
+        ]
+      ]
+    },
+    {
+      "word": "he",
+      "prediction": "nationalization",
+      "frames": 28,
+      "step_calls": 45,
+      "encode_ms": 13.167442986741662,
+      "decode_ms": 26.337841991335154,
+      "total_ms": 39.52772804768756,
+      "candidates": [
+        [
+          "nationalization",
+          -975.2455258369446
+        ],
+        [
+          "nationalisation",
+          -986.0420098304749
+        ]
+      ]
+    },
+    {
+      "word": "base",
+      "prediction": "accessibility",
+      "frames": 28,
+      "step_calls": 59,
+      "encode_ms": 12.390507967211306,
+      "decode_ms": 37.407851952593774,
+      "total_ms": 49.81139302253723,
+      "candidates": [
+        [
+          "accessibility",
+          -919.3272793292999
+        ]
+      ]
+    },
+    {
+      "word": "heard",
+      "prediction": "mammograms",
+      "frames": 31,
+      "step_calls": 46,
+      "encode_ms": 19.45659698685631,
+      "decode_ms": 33.243909012526274,
+      "total_ms": 52.720404986757785,
+      "candidates": [
+        [
+          "mammograms",
+          -857.3720915180747
+        ],
+        [
+          "mammography",
+          -883.432763547462
+        ],
+        [
+          "mannerisms",
+          -897.7709314076492
+        ]
+      ]
+    },
+    {
+      "word": "comments",
+      "prediction": "combinatorics",
+      "frames": 48,
+      "step_calls": 73,
+      "encode_ms": 20.541695004794747,
+      "decode_ms": 37.18574100639671,
+      "total_ms": 57.74163000751287,
+      "candidates": [
+        [
+          "combinatorics",
+          -1393.174840927124
+        ],
+        [
+          "commonalities",
+          -1483.2281299233437
+        ]
+      ]
+    },
+    {
+      "word": "one",
+      "prediction": "concentrating",
+      "frames": 28,
+      "step_calls": 43,
+      "encode_ms": 12.133972020819783,
+      "decode_ms": 23.728407977614552,
+      "total_ms": 35.875418048817664,
+      "candidates": [
+        [
+          "concentrating",
+          -623.3053193837404
+        ],
+        [
+          "concentrations",
+          -626.65394115448
+        ],
+        [
+          "concentrates",
+          -626.8787260055542
+        ]
+      ]
+    },
+    {
+      "word": "united",
+      "prediction": "chicagoland",
+      "frames": 55,
+      "step_calls": 74,
+      "encode_ms": 26.506680995225906,
+      "decode_ms": 48.09542297152802,
+      "total_ms": 74.62048396700993,
+      "candidates": [
+        [
+          "chicagoland",
+          -1571.8756022453308
+        ]
+      ]
+    },
+    {
+      "word": "the",
+      "prediction": "concentrating",
+      "frames": 28,
+      "step_calls": 45,
+      "encode_ms": 14.565318007953465,
+      "decode_ms": 23.75761599978432,
+      "total_ms": 38.33577601471916,
+      "candidates": [
+        [
+          "concentrating",
+          -612.2004360854626
+        ],
+        [
+          "necessitating",
+          -648.7841587811708
+        ],
+        [
+          "concentrations",
+          -655.8759245574474
+        ]
+      ]
+    },
+    {
+      "word": "buried",
+      "prediction": "managements",
+      "frames": 30,
+      "step_calls": 53,
+      "encode_ms": 13.907751999795437,
+      "decode_ms": 27.91190700372681,
+      "total_ms": 41.83317004935816,
+      "candidates": [
+        [
+          "managements",
+          -913.9885386824608
+        ]
+      ]
+    },
+    {
+      "word": "the",
+      "prediction": "characteristically",
+      "frames": 28,
+      "step_calls": 52,
+      "encode_ms": 12.215782015118748,
+      "decode_ms": 29.400214029010385,
+      "total_ms": 41.62839404307306,
+      "candidates": [
+        [
+          "characteristically",
+          -805.8340411186218
+        ],
+        [
+          "characterizations",
+          -896.2686474323273
+        ]
+      ]
+    },
+    {
+      "word": "not",
+      "prediction": "changeover",
+      "frames": 28,
+      "step_calls": 40,
+      "encode_ms": 18.21242697769776,
+      "decode_ms": 26.824217988178134,
+      "total_ms": 45.052442990709096,
+      "candidates": [
+        [
+          "changeover",
+          -710.4846305847168
+        ],
+        [
+          "seasonings",
+          -733.8116346225142
+        ],
+        [
+          "changeling",
+          -744.3705637454987
+        ],
+        [
+          "changeable",
+          -750.408481836319
+        ]
+      ]
+    },
+    {
+      "word": "south",
+      "prediction": "counterterrorism",
+      "frames": 30,
+      "step_calls": 55,
+      "encode_ms": 19.2718009930104,
+      "decode_ms": 37.08894900046289,
+      "total_ms": 56.37716397177428,
+      "candidates": [
+        [
+          "counterterrorism",
+          -999.0962104797363
+        ],
+        [
+          "counterproductive",
+          -1053.9553673267365
+        ]
+      ]
+    },
+    {
+      "word": "served",
+      "prediction": "backgrounds",
+      "frames": 30,
+      "step_calls": 53,
+      "encode_ms": 13.29175295541063,
+      "decode_ms": 27.650097967125475,
+      "total_ms": 40.954166965093464,
+      "candidates": [
+        [
+          "backgrounds",
+          -830.4548800885677
+        ]
+      ]
+    },
+    {
+      "word": "not",
+      "prediction": "assassinating",
+      "frames": 48,
+      "step_calls": 64,
+      "encode_ms": 15.423710050527006,
+      "decode_ms": 32.20197797054425,
+      "total_ms": 47.63853398617357,
+      "candidates": [
+        [
+          "assassinating",
+          -1608.315109014511
+        ],
+        [
+          "assassinations",
+          -1615.5695161819458
+        ]
+      ]
+    },
+    {
+      "word": "symbolic",
+      "prediction": "disciplining",
+      "frames": 42,
+      "step_calls": 64,
+      "encode_ms": 22.000613971613348,
+      "decode_ms": 42.97782096546143,
+      "total_ms": 64.9989020312205,
+      "candidates": [
+        [
+          "disciplining",
+          -1488.413403391838
+        ],
+        [
+          "accessibility",
+          -1492.3241922855377
+        ],
+        [
+          "disconcerting",
+          -1570.2585192918777
+        ],
+        [
+          "discipleship",
+          -1598.5606492757797
+        ]
+      ]
+    },
+    {
+      "word": "are",
+      "prediction": "fortifications",
+      "frames": 28,
+      "step_calls": 43,
+      "encode_ms": 17.48392899753526,
+      "decode_ms": 29.837274982128292,
+      "total_ms": 47.359873016830534,
+      "candidates": [
+        [
+          "fortifications",
+          -694.0916368365288
+        ]
+      ]
+    },
+    {
+      "word": "was",
+      "prediction": "accessibility",
+      "frames": 28,
+      "step_calls": 59,
+      "encode_ms": 19.109194981865585,
+      "decode_ms": 39.242248982191086,
+      "total_ms": 58.370554994326085,
+      "candidates": [
+        [
+          "accessibility",
+          -1195.4030636399984
+        ]
+      ]
+    },
+    {
+      "word": "elite",
+      "prediction": "historiography",
+      "frames": 48,
+      "step_calls": 65,
+      "encode_ms": 22.773463977500796,
+      "decode_ms": 43.326600978616625,
+      "total_ms": 66.12065201625228,
+      "candidates": [
+        [
+          "historiography",
+          -1238.196539402008
+        ],
+        [
+          "rhinestones",
+          -1285.2965459823608
+        ]
+      ]
+    },
+    {
+      "word": "and",
+      "prediction": "missionaries",
+      "frames": 25,
+      "step_calls": 42,
+      "encode_ms": 17.583119042683393,
+      "decode_ms": 28.85672595584765,
+      "total_ms": 46.45556694595143,
+      "candidates": [
+        [
+          "missionaries",
+          -684.5915155410767
+        ],
+        [
+          "mississauga",
+          -691.0944356918335
+        ],
+        [
+          "mississippian",
+          -724.0723404884338
+        ]
+      ]
+    },
+    {
+      "word": "won",
+      "prediction": "managements",
+      "frames": 25,
+      "step_calls": 45,
+      "encode_ms": 13.064872997347265,
+      "decode_ms": 30.235183017794043,
+      "total_ms": 43.32229500869289,
+      "candidates": [
+        [
+          "managements",
+          -772.3106138110161
+        ]
+      ]
+    },
+    {
+      "word": "the",
+      "prediction": "nevertheless",
+      "frames": 28,
+      "step_calls": 45,
+      "encode_ms": 12.689950002823025,
+      "decode_ms": 26.81666798889637,
+      "total_ms": 39.521693950518966,
+      "candidates": [
+        [
+          "nevertheless",
+          -682.5072584152222
+        ],
+        [
+          "neverending",
+          -724.635277196765
+        ]
+      ]
+    },
+    {
+      "word": "by",
+      "prediction": "nonconforming",
+      "frames": 28,
+      "step_calls": 51,
+      "encode_ms": 15.713743981905282,
+      "decode_ms": 29.650690965354443,
+      "total_ms": 45.38533400045708,
+      "candidates": [
+        [
+          "nonconforming",
+          -995.1541638374329
+        ]
+      ]
+    },
+    {
+      "word": "recent",
+      "prediction": "correspondingly",
+      "frames": 42,
+      "step_calls": 66,
+      "encode_ms": 15.292501950170845,
+      "decode_ms": 32.93340699747205,
+      "total_ms": 48.250637017190456,
+      "candidates": [
+        [
+          "correspondingly",
+          -1285.3585301935673
+        ],
+        [
+          "correspondences",
+          -1293.8904221057892
+        ]
+      ]
+    },
+    {
+      "word": "company",
+      "prediction": "commandments",
+      "frames": 37,
+      "step_calls": 54,
+      "encode_ms": 14.894980005919933,
+      "decode_ms": 35.37988796597347,
+      "total_ms": 50.288716040086,
+      "candidates": [
+        [
+          "commandments",
+          -980.1625797766901
+        ],
+        [
+          "commonsense",
+          -1040.9308555559255
+        ]
+      ]
+    },
+    {
+      "word": "get",
+      "prediction": "splintered",
+      "frames": 26,
+      "step_calls": 40,
+      "encode_ms": 17.959290998987854,
+      "decode_ms": 28.349382046144456,
+      "total_ms": 46.324486029334366,
+      "candidates": [
+        [
+          "splintered",
+          -542.2837872505188
+        ],
+        [
+          "splintering",
+          -545.386129617691
+        ],
+        [
+          "splinters",
+          -553.8617317676544
+        ],
+        [
+          "propositions",
+          -601.2837631702423
+        ],
+        [
+          "proponents",
+          -613.5250067710876
+        ]
+      ]
+    },
+    {
+      "word": "one",
+      "prediction": "noncommittal",
+      "frames": 28,
+      "step_calls": 41,
+      "encode_ms": 18.493445008061826,
+      "decode_ms": 27.907657029572874,
+      "total_ms": 46.41827900195494,
+      "candidates": [
+        [
+          "noncommittal",
+          -561.4770954847336
+        ],
+        [
+          "nonconformist",
+          -572.5119358301163
+        ],
+        [
+          "nonconforming",
+          -576.611491560936
+        ],
+        [
+          "noncommercial",
+          -599.5345392227173
+        ],
+        [
+          "noncompliance",
+          -605.0096110701561
+        ]
+      ]
+    },
+    {
+      "word": "urban",
+      "prediction": "toothbrushes",
+      "frames": 51,
+      "step_calls": 66,
+      "encode_ms": 24.474346020724624,
+      "decode_ms": 40.20859603770077,
+      "total_ms": 64.69967897282913,
+      "candidates": [
+        [
+          "toothbrushes",
+          -1177.5051205158234
+        ]
+      ]
+    },
+    {
+      "word": "cushing",
+      "prediction": "cancellations",
+      "frames": 31,
+      "step_calls": 44,
+      "encode_ms": 12.313762970734388,
+      "decode_ms": 21.52696601115167,
+      "total_ms": 33.85211800923571,
+      "candidates": [
+        [
+          "cancellations",
+          -731.8782122731209
+        ],
+        [
+          "cancelling",
+          -763.9374943971634
+        ]
+      ]
+    },
+    {
+      "word": "his",
+      "prediction": "nongovernmental",
+      "frames": 28,
+      "step_calls": 61,
+      "encode_ms": 12.329231016337872,
+      "decode_ms": 35.093726008199155,
+      "total_ms": 47.43524902733043,
+      "candidates": [
+        [
+          "nongovernmental",
+          -1048.1363420188427
+        ]
+      ]
+    },
+    {
+      "word": "greatest",
+      "prediction": "massachusetts",
+      "frames": 49,
+      "step_calls": 68,
+      "encode_ms": 25.432306982111186,
+      "decode_ms": 46.625790011603385,
+      "total_ms": 72.07857898902148,
+      "candidates": [
+        [
+          "massachusetts",
+          -1398.0951881408691
+        ]
+      ]
+    },
+    {
+      "word": "in",
+      "prediction": "nationalization",
+      "frames": 28,
+      "step_calls": 43,
+      "encode_ms": 18.700940010603517,
+      "decode_ms": 29.93978199083358,
+      "total_ms": 48.6591340159066,
+      "candidates": [
+        [
+          "nationalization",
+          -661.3728027045727
+        ]
+      ]
+    },
+    {
+      "word": "it",
+      "prediction": "westernmost",
+      "frames": 28,
+      "step_calls": 41,
+      "encode_ms": 12.65985396457836,
+      "decode_ms": 25.906821014359593,
+      "total_ms": 38.5792120359838,
+      "candidates": [
+        [
+          "westernmost",
+          -650.3912389874458
+        ],
+        [
+          "treating",
+          -661.8748131394386
+        ],
+        [
+          "westernized",
+          -698.649297773838
+        ]
+      ]
+    },
+    {
+      "word": "several",
+      "prediction": "commandeered",
+      "frames": 48,
+      "step_calls": 62,
+      "encode_ms": 23.90723198186606,
+      "decode_ms": 36.99948498979211,
+      "total_ms": 60.92548300512135,
+      "candidates": [
+        [
+          "commandeered",
+          -1200.256923854351
+        ],
+        [
+          "chambersburg",
+          -1248.6139206290245
+        ],
+        [
+          "cancellations",
+          -1318.905860543251
+        ]
+      ]
+    },
+    {
+      "word": "present",
+      "prediction": "accessibility",
+      "frames": 48,
+      "step_calls": 78,
+      "encode_ms": 17.07979798084125,
+      "decode_ms": 51.986787002533674,
+      "total_ms": 69.08718799240887,
+      "candidates": [
+        [
+          "accessibility",
+          -1486.4216210842133
+        ]
+      ]
+    },
+    {
+      "word": "interest",
+      "prediction": "somethings",
+      "frames": 29,
+      "step_calls": 41,
+      "encode_ms": 20.383578026667237,
+      "decode_ms": 27.870636025909334,
+      "total_ms": 48.27651003142819,
+      "candidates": [
+        [
+          "somethings",
+          -758.0477990582585
+        ]
+      ]
+    },
+    {
+      "word": "the",
+      "prediction": "timberline",
+      "frames": 28,
+      "step_calls": 38,
+      "encode_ms": 12.776750954799354,
+      "decode_ms": 19.946505955886096,
+      "total_ms": 32.73510199505836,
+      "candidates": [
+        [
+          "timberline",
+          -599.255922794342
+        ],
+        [
+          "baccalaureate",
+          -615.7877371311188
+        ],
+        [
+          "bennington",
+          -626.2609541416168
+        ],
+        [
+          "timberland",
+          -653.1799397468567
+        ]
+      ]
+    },
+    {
+      "word": "walls",
+      "prediction": "internationalization",
+      "frames": 28,
+      "step_calls": 57,
+      "encode_ms": 13.036935008130968,
+      "decode_ms": 37.65326697612181,
+      "total_ms": 50.70550600066781,
+      "candidates": [
+        [
+          "internationalization",
+          -1002.8329783678055
+        ]
+      ]
+    },
+    {
+      "word": "of",
+      "prediction": "contingencies",
+      "frames": 28,
+      "step_calls": 42,
+      "encode_ms": 18.02799297729507,
+      "decode_ms": 29.1858310229145,
+      "total_ms": 47.23459598608315,
+      "candidates": [
+        [
+          "contingencies",
+          -675.4151085615158
+        ],
+        [
+          "consciousness",
+          -699.3040007352829
+        ],
+        [
+          "concentrating",
+          -699.8779851198196
+        ],
+        [
+          "concentrates",
+          -706.2734764814377
+        ],
+        [
+          "concentrations",
+          -709.3311265707016
+        ]
+      ]
+    },
+    {
+      "word": "of",
+      "prediction": "concentrates",
+      "frames": 28,
+      "step_calls": 48,
+      "encode_ms": 12.904982024338096,
+      "decode_ms": 30.00373102258891,
+      "total_ms": 42.931633011903614,
+      "candidates": [
+        [
+          "concentrates",
+          -777.5364603996277
+        ],
+        [
+          "concentrated",
+          -790.1964249610901
+        ],
+        [
+          "concentrating",
+          -870.6753344535828
+        ]
+      ]
+    },
+    {
+      "word": "is",
+      "prediction": "conscientiousness",
+      "frames": 28,
+      "step_calls": 55,
+      "encode_ms": 18.177463032770902,
+      "decode_ms": 37.12457203073427,
+      "total_ms": 55.327097012195736,
+      "candidates": [
+        [
+          "conscientiousness",
+          -917.9349389076233
+        ]
+      ]
+    },
+    {
+      "word": "with",
+      "prediction": "popularizing",
+      "frames": 54,
+      "step_calls": 68,
+      "encode_ms": 18.367979966569692,
+      "decode_ms": 36.11101896967739,
+      "total_ms": 54.49803301598877,
+      "candidates": [
+        [
+          "popularizing",
+          -1445.6856770515442
+        ],
+        [
+          "popularization",
+          -1449.2279663085938
+        ],
+        [
+          "populations",
+          -1500.1705589294434
+        ]
+      ]
+    },
+    {
+      "word": "the",
+      "prediction": "accessibility",
+      "frames": 28,
+      "step_calls": 59,
+      "encode_ms": 12.804515019524843,
+      "decode_ms": 31.167883018497378,
+      "total_ms": 43.98605803726241,
+      "candidates": [
+        [
+          "accessibility",
+          -1048.2151374220848
+        ]
+      ]
+    },
+    {
+      "word": "has",
+      "prediction": "differentiating",
+      "frames": 28,
+      "step_calls": 44,
+      "encode_ms": 15.269167954102159,
+      "decode_ms": 30.062286008615047,
+      "total_ms": 45.347334002144635,
+      "candidates": [
+        [
+          "differentiating",
+          -683.1601747293025
+        ],
+        [
+          "differentiates",
+          -690.9152421951294
+        ],
+        [
+          "distinctiveness",
+          -705.7754197120667
+        ],
+        [
+          "differentiation",
+          -709.4774470329285
+        ]
+      ]
+    },
+    {
+      "word": "only",
+      "prediction": "internationalization",
+      "frames": 45,
+      "step_calls": 65,
+      "encode_ms": 18.072215956635773,
+      "decode_ms": 34.364427032414824,
+      "total_ms": 52.4528770474717,
+      "candidates": [
+        [
+          "internationalization",
+          -1207.9351737499237
+        ]
+      ]
+    },
+    {
+      "word": "also",
+      "prediction": "missionaries",
+      "frames": 28,
+      "step_calls": 43,
+      "encode_ms": 12.072960031218827,
+      "decode_ms": 23.623126035090536,
+      "total_ms": 35.708034003619105,
+      "candidates": [
+        [
+          "missionaries",
+          -800.1316261291504
+        ],
+        [
+          "mississippian",
+          -814.7782082557678
+        ]
+      ]
+    },
+    {
+      "word": "fired",
+      "prediction": "affirmatively",
+      "frames": 28,
+      "step_calls": 51,
+      "encode_ms": 12.184867984615266,
+      "decode_ms": 28.275908960495144,
+      "total_ms": 40.474608016666025,
+      "candidates": [
+        [
+          "affirmatively",
+          -895.6012392044067
+        ]
+      ]
+    },
+    {
+      "word": "found",
+      "prediction": "changeover",
+      "frames": 47,
+      "step_calls": 57,
+      "encode_ms": 19.76777403615415,
+      "decode_ms": 37.38096001325175,
+      "total_ms": 57.164230034686625,
+      "candidates": [
+        [
+          "changeover",
+          -1229.4945503175259
+        ],
+        [
+          "changeable",
+          -1264.572033971548
+        ],
+        [
+          "changeling",
+          -1270.6104074418545
+        ]
+      ]
+    },
+    {
+      "word": "be",
+      "prediction": "accessibility",
+      "frames": 28,
+      "step_calls": 49,
+      "encode_ms": 18.035055953077972,
+      "decode_ms": 34.231773985084146,
+      "total_ms": 52.28551902109757,
+      "candidates": [
+        [
+          "accessibility",
+          -746.1550748348236
+        ]
+      ]
+    },
+    {
+      "word": "family",
+      "prediction": "frontlines",
+      "frames": 27,
+      "step_calls": 43,
+      "encode_ms": 12.784673017449677,
+      "decode_ms": 24.4674879941158,
+      "total_ms": 37.26504399674013,
+      "candidates": [
+        [
+          "frontlines",
+          -828.7869969010353
+        ],
+        [
+          "frontera",
+          -856.7591264247894
+        ]
+      ]
+    },
+    {
+      "word": "animated",
+      "prediction": "desertification",
+      "frames": 48,
+      "step_calls": 63,
+      "encode_ms": 15.926323016174138,
+      "decode_ms": 35.7720089959912,
+      "total_ms": 51.726436999160796,
+      "candidates": [
+        [
+          "desertification",
+          -1306.0028248315211
+        ]
+      ]
+    },
+    {
+      "word": "diversity",
+      "prediction": "compassionate",
+      "frames": 43,
+      "step_calls": 56,
+      "encode_ms": 15.465673001017421,
+      "decode_ms": 29.337782005313784,
+      "total_ms": 44.81897299410775,
+      "candidates": [
+        [
+          "compassionate",
+          -1006.8946079462767
+        ],
+        [
+          "combinatorics",
+          -1026.867533132434
+        ],
+        [
+          "companionship",
+          -1043.0739988535643
+        ],
+        [
+          "combinatorial",
+          -1058.7629904001951
+        ],
+        [
+          "complicating",
+          -1075.0168630629778
+        ]
+      ]
+    },
+    {
+      "word": "hes",
+      "prediction": "tournaments",
+      "frames": 28,
+      "step_calls": 52,
+      "encode_ms": 12.51931895967573,
+      "decode_ms": 26.666906022001058,
+      "total_ms": 39.19952595606446,
+      "candidates": [
+        [
+          "tournaments",
+          -803.4156143516302
+        ],
+        [
+          "terrifically",
+          -813.4688723087311
+        ]
+      ]
+    },
+    {
+      "word": "for",
+      "prediction": "outstretched",
+      "frames": 28,
+      "step_calls": 51,
+      "encode_ms": 12.321775022428483,
+      "decode_ms": 26.310454006306827,
+      "total_ms": 38.644008978735656,
+      "candidates": [
+        [
+          "outstretched",
+          -923.6722602844238
+        ]
+      ]
+    },
+    {
+      "word": "and",
+      "prediction": "stringers",
+      "frames": 28,
+      "step_calls": 42,
+      "encode_ms": 12.169800989795476,
+      "decode_ms": 22.507926973048598,
+      "total_ms": 34.690659027546644,
+      "candidates": [
+        [
+          "stringers",
+          -681.5259782075882
+        ],
+        [
+          "stringent",
+          -746.3056584596634
+        ],
+        [
+          "stringed",
+          -773.3651036024094
+        ],
+        [
+          "stringing",
+          -803.77006945014
+        ]
+      ]
+    },
+    {
+      "word": "the",
+      "prediction": "managements",
+      "frames": 28,
+      "step_calls": 51,
+      "encode_ms": 12.248029001057148,
+      "decode_ms": 26.803653978276998,
+      "total_ms": 39.06501200981438,
+      "candidates": [
+        [
+          "managements",
+          -861.8050647377968
+        ]
+      ]
+    },
+    {
+      "word": "the",
+      "prediction": "communicating",
+      "frames": 28,
+      "step_calls": 44,
+      "encode_ms": 12.908822973258793,
+      "decode_ms": 28.455217950977385,
+      "total_ms": 41.38058703392744,
+      "candidates": [
+        [
+          "communicating",
+          -634.6753707826138
+        ],
+        [
+          "communications",
+          -662.7958658337593
+        ]
+      ]
+    },
+    {
+      "word": "on",
+      "prediction": "assassinating",
+      "frames": 28,
+      "step_calls": 42,
+      "encode_ms": 20.370616985019296,
+      "decode_ms": 31.834900029934943,
+      "total_ms": 52.223457023501396,
+      "candidates": [
+        [
+          "assassinating",
+          -942.682904779911
+        ],
+        [
+          "assassinations",
+          -955.5936535000801
+        ]
+      ]
+    },
+    {
+      "word": "is",
+      "prediction": "throughout",
+      "frames": 48,
+      "step_calls": 59,
+      "encode_ms": 16.219652025029063,
+      "decode_ms": 31.505707011092454,
+      "total_ms": 47.742296010255814,
+      "candidates": [
+        [
+          "throughout",
+          -1827.2554580660508
+        ],
+        [
+          "throttling",
+          -1830.4286629173876
+        ],
+        [
+          "throughput",
+          -1835.9820954713941
+        ],
+        [
+          "thousandth",
+          -1904.219047299397
+        ],
+        [
+          "therefore",
+          -1906.6739699754835
+        ]
+      ]
+    },
+    {
+      "word": "was",
+      "prediction": "accommodating",
+      "frames": 28,
+      "step_calls": 42,
+      "encode_ms": 12.559775030240417,
+      "decode_ms": 23.999586002901196,
+      "total_ms": 36.572723009157926,
+      "candidates": [
+        [
+          "accommodating",
+          -681.1309670209885
+        ],
+        [
+          "accommodations",
+          -686.5984989404678
+        ]
+      ]
+    },
+    {
+      "word": "at",
+      "prediction": "mississippian",
+      "frames": 28,
+      "step_calls": 56,
+      "encode_ms": 14.028110017534345,
+      "decode_ms": 44.31927599944174,
+      "total_ms": 58.36843099677935,
+      "candidates": [
+        [
+          "mississippian",
+          -1094.0244410037994
+        ]
+      ]
+    },
+    {
+      "word": "served",
+      "prediction": "outstandingly",
+      "frames": 48,
+      "step_calls": 67,
+      "encode_ms": 23.41682300902903,
+      "decode_ms": 40.40042601991445,
+      "total_ms": 63.836910005193204,
+      "candidates": [
+        [
+          "outstandingly",
+          -1347.618258699309
+        ],
+        [
+          "outstretched",
+          -1363.4876804351807
+        ]
+      ]
+    },
+    {
+      "word": "went",
+      "prediction": "discontinuities",
+      "frames": 27,
+      "step_calls": 49,
+      "encode_ms": 13.655902002938092,
+      "decode_ms": 26.445737981703132,
+      "total_ms": 40.11904797516763,
+      "candidates": [
+        [
+          "discontinuities",
+          -766.6495224833488
+        ],
+        [
+          "discontinuing",
+          -799.8003180027008
+        ],
+        [
+          "discouragement",
+          -831.1201043725014
+        ],
+        [
+          "discontinuation",
+          -870.2976505756378
+        ]
+      ]
+    },
+    {
+      "word": "initial",
+      "prediction": "conceptualization",
+      "frames": 43,
+      "step_calls": 61,
+      "encode_ms": 14.646193012595177,
+      "decode_ms": 33.10884902020916,
+      "total_ms": 47.769250988494605,
+      "candidates": [
+        [
+          "conceptualization",
+          -1421.372681260109
+        ]
+      ]
+    },
+    {
+      "word": "and",
+      "prediction": "attentiveness",
+      "frames": 38,
+      "step_calls": 53,
+      "encode_ms": 14.631216006819159,
+      "decode_ms": 29.018127999734133,
+      "total_ms": 43.66356797982007,
+      "candidates": [
+        [
+          "attentiveness",
+          -1069.7204473018646
+        ],
+        [
+          "attendances",
+          -1111.1319482326508
+        ]
+      ]
+    },
+    {
+      "word": "tries",
+      "prediction": "displacements",
+      "frames": 25,
+      "step_calls": 47,
+      "encode_ms": 13.361554010771215,
+      "decode_ms": 25.049079034943134,
+      "total_ms": 38.425247999839485,
+      "candidates": [
+        [
+          "displacements",
+          -934.3647806942463
+        ]
+      ]
+    },
+    {
+      "word": "in",
+      "prediction": "accessibility",
+      "frames": 28,
+      "step_calls": 59,
+      "encode_ms": 12.402260035742074,
+      "decode_ms": 31.77178098121658,
+      "total_ms": 44.18746003648266,
+      "candidates": [
+        [
+          "accessibility",
+          -1021.7756847143173
+        ]
+      ]
+    },
+    {
+      "word": "and",
+      "prediction": "combinatorics",
+      "frames": 28,
+      "step_calls": 43,
+      "encode_ms": 14.153361029457301,
+      "decode_ms": 29.61540099931881,
+      "total_ms": 43.786079972051084,
+      "candidates": [
+        [
+          "combinatorics",
+          -618.5234144032001
+        ],
+        [
+          "consciousness",
+          -619.9490673840046
+        ],
+        [
+          "concentrating",
+          -659.4428611695766
+        ],
+        [
+          "concentrations",
+          -667.0605771839619
+        ]
+      ]
+    },
+    {
+      "word": "borough",
+      "prediction": "backcountry",
+      "frames": 44,
+      "step_calls": 68,
+      "encode_ms": 26.078719994984567,
+      "decode_ms": 45.086175960022956,
+      "total_ms": 71.18636800441891,
+      "candidates": [
+        [
+          "backcountry",
+          -1627.1554358005524
+        ]
+      ]
+    },
+    {
+      "word": "to",
+      "prediction": "toothbrushes",
+      "frames": 28,
+      "step_calls": 44,
+      "encode_ms": 18.432674987707287,
+      "decode_ms": 34.37981300521642,
+      "total_ms": 52.831034001428634,
+      "candidates": [
+        [
+          "toothbrushes",
+          -751.5814712047577
+        ],
+        [
+          "themselves",
+          -829.2733561992645
+        ],
+        [
+          "students",
+          -829.4715710878372
+        ]
+      ]
+    },
+    {
+      "word": "system",
+      "prediction": "kingsport",
+      "frames": 32,
+      "step_calls": 49,
+      "encode_ms": 20.08438599295914,
+      "decode_ms": 35.363267990760505,
+      "total_ms": 55.46497000614181,
+      "candidates": [
+        [
+          "kingsport",
+          -1037.7176795005798
+        ],
+        [
+          "monolingual",
+          -1062.456553220749
+        ],
+        [
+          "monongahela",
+          -1064.4003112316132
+        ],
+        [
+          "monopolizing",
+          -1089.2139775753021
+        ],
+        [
+          "moonshine",
+          -1116.2690217494965
+        ]
+      ]
+    },
+    {
+      "word": "for",
+      "prediction": "indistinguishable",
+      "frames": 34,
+      "step_calls": 51,
+      "encode_ms": 21.504133008420467,
+      "decode_ms": 35.27200600365177,
+      "total_ms": 56.79500300902873,
+      "candidates": [
+        [
+          "indistinguishable",
+          -1017.6939843893051
+        ],
+        [
+          "industrialization",
+          -1052.867542307824
+        ],
+        [
+          "industrialisation",
+          -1058.1688204221427
+        ]
+      ]
+    },
+    {
+      "word": "various",
+      "prediction": "assassinations",
+      "frames": 48,
+      "step_calls": 72,
+      "encode_ms": 24.00198095710948,
+      "decode_ms": 49.15924102533609,
+      "total_ms": 73.18023400148377,
+      "candidates": [
+        [
+          "assassinations",
+          -1757.1583574712276
+        ],
+        [
+          "assassinating",
+          -1760.0423279702663
+        ],
+        [
+          "assassinated",
+          -1783.2676402032375
+        ]
+      ]
+    },
+    {
+      "word": "all",
+      "prediction": "thermometers",
+      "frames": 28,
+      "step_calls": 48,
+      "encode_ms": 13.611822971142828,
+      "decode_ms": 26.615437993314117,
+      "total_ms": 40.24167195893824,
+      "candidates": [
+        [
+          "thermometers",
+          -912.9239557981491
+        ],
+        [
+          "thermodynamics",
+          -957.0502980947495
+        ],
+        [
+          "thermostats",
+          -967.8415488004684
+        ]
+      ]
+    },
+    {
+      "word": "such",
+      "prediction": "congregational",
+      "frames": 28,
+      "step_calls": 48,
+      "encode_ms": 12.818154995329678,
+      "decode_ms": 27.873245999217033,
+      "total_ms": 40.70471000159159,
+      "candidates": [
+        [
+          "congregational",
+          -765.5828437656164
+        ]
+      ]
+    },
+    {
+      "word": "this",
+      "prediction": "westinghouse",
+      "frames": 29,
+      "step_calls": 48,
+      "encode_ms": 13.332574046216905,
+      "decode_ms": 26.48424601648003,
+      "total_ms": 39.832604001276195,
+      "candidates": [
+        [
+          "westinghouse",
+          -786.8778219670057
+        ],
+        [
+          "assessments",
+          -807.2098870277405
+        ]
+      ]
+    },
+    {
+      "word": "skills",
+      "prediction": "cannonballs",
+      "frames": 30,
+      "step_calls": 51,
+      "encode_ms": 18.895560002420098,
+      "decode_ms": 34.5800329814665,
+      "total_ms": 53.49438497796655,
+      "candidates": [
+        [
+          "cannonballs",
+          -1027.7977181375027
+        ]
+      ]
+    },
+    {
+      "word": "to",
+      "prediction": "digitization",
+      "frames": 28,
+      "step_calls": 42,
+      "encode_ms": 17.726653022691607,
+      "decode_ms": 28.57585804304108,
+      "total_ms": 46.317778003867716,
+      "candidates": [
+        [
+          "digitization",
+          -760.9895956516266
+        ],
+        [
+          "digitisation",
+          -773.6226093769073
+        ],
+        [
+          "digitizing",
+          -774.1445214152336
+        ],
+        [
+          "students",
+          -830.331406712532
+        ]
+      ]
+    },
+    {
+      "word": "plural",
+      "prediction": "initialization",
+      "frames": 40,
+      "step_calls": 54,
+      "encode_ms": 21.353482035920024,
+      "decode_ms": 38.1461659562774,
+      "total_ms": 59.5172590110451,
+      "candidates": [
+        [
+          "initialization",
+          -1299.6449107527733
+        ]
+      ]
+    },
+    {
+      "word": "it",
+      "prediction": "nondiscrimination",
+      "frames": 28,
+      "step_calls": 46,
+      "encode_ms": 12.741043989080936,
+      "decode_ms": 28.11295900028199,
+      "total_ms": 40.87582597276196,
+      "candidates": [
+        [
+          "nondiscrimination",
+          -886.6806832551956
+        ]
+      ]
+    },
+    {
+      "word": "the",
+      "prediction": "assassinations",
+      "frames": 28,
+      "step_calls": 43,
+      "encode_ms": 13.129095023032278,
+      "decode_ms": 22.02922198921442,
+      "total_ms": 35.172118979971856,
+      "candidates": [
+        [
+          "assassinations",
+          -730.5326927900314
+        ],
+        [
+          "assassinating",
+          -733.6175623033196
+        ]
+      ]
+    },
+    {
+      "word": "book",
+      "prediction": "chambersburg",
+      "frames": 31,
+      "step_calls": 55,
+      "encode_ms": 14.50020499760285,
+      "decode_ms": 37.94821398332715,
+      "total_ms": 52.4667389690876,
+      "candidates": [
+        [
+          "chambersburg",
+          -1111.7487008571625
+        ],
+        [
+          "chamberlain",
+          -1278.974532842636
+        ]
+      ]
+    },
+    {
+      "word": "move",
+      "prediction": "commandeered",
+      "frames": 28,
+      "step_calls": 51,
+      "encode_ms": 18.004164041485637,
+      "decode_ms": 36.8059539468959,
+      "total_ms": 54.82813500566408,
+      "candidates": [
+        [
+          "commandeered",
+          -819.4524926543236
+        ]
+      ]
+    },
+    {
+      "word": "south",
+      "prediction": "championship",
+      "frames": 27,
+      "step_calls": 43,
+      "encode_ms": 18.98499095113948,
+      "decode_ms": 31.447604997083545,
+      "total_ms": 50.45017198426649,
+      "candidates": [
+        [
+          "championship",
+          -843.36925137043
+        ],
+        [
+          "chambersburg",
+          -878.3048604726791
+        ],
+        [
+          "shallowness",
+          -903.9157372415066
+        ]
+      ]
+    }
+  ]
+}
