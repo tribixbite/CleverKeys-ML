@@ -596,10 +596,6 @@ class PersonalizedRNNTModel(nemo_asr.models.EncDecRNNTModel):
             _, scores, words = self.wer.compute()
             self.wer.reset()
             logs['training_batch_wer'] = scores.float() / words
-            self._log_batch_errors(
-                (signal, signal_len, transcript, transcript_len),
-                stage="train",
-            )
 
         self.log_dict(logs)
         return {'loss': loss_value}
@@ -875,17 +871,18 @@ _EPOCH_REGEX = re.compile(r"epoch=(?:epoch=)?(\d+)")
 def _collect_checkpoint_paths() -> List[Path]:
     base_dirs = {SCRIPT_DIR.resolve(), Path.cwd().resolve()}
     patterns = [
-        'rnnt_checkpoints_*/*/version_*/*.ckpt',
-        'rnnt_checkpoints_*/*/checkpoints/*.ckpt',
-        'rnnt_logs_*/*/*/checkpoints/*.ckpt',
-        'rnnt_logs/*/*/checkpoints/*.ckpt',
+        'rnnt_checkpoints_*/lightning_logs/version_*/checkpoints/*.ckpt',
+        'rnnt_checkpoints_*/**/checkpoints/*.ckpt',
+        'rnnt_logs_*/conformer_rnnt/*/checkpoints/*.ckpt',
+        'rnnt_logs/conformer_rnnt/*/checkpoints/*.ckpt',
     ]
     paths: List[Path] = []
     for base in base_dirs:
         for pattern in patterns:
             search_glob = str(base / pattern)
-            paths.extend(Path(path) for path in glob.glob(search_glob))
-    return paths
+            paths.extend(Path(p).resolve() for p in glob.glob(search_glob, recursive=True))
+    deduped = list(dict.fromkeys(paths))
+    return deduped
 
 
 def _extract_metrics(path: Path) -> Tuple[float, int, float]:
