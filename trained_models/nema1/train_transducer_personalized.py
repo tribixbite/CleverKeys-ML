@@ -667,7 +667,9 @@ class ValidationErrorLogger(pl.Callback):
     def on_validation_epoch_start(self, trainer, pl_module) -> None:  # type: ignore[override]
         self._logged = 0
 
-    def on_validation_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx) -> None:  # type: ignore[override]
+    def on_validation_batch_end(
+        self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx: int | None = None
+    ) -> None:  # type: ignore[override]
         if self._logged >= self.max_batches:
             return
         pl_module._log_batch_errors(batch, stage="validation")
