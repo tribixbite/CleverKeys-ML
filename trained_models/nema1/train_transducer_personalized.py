@@ -872,7 +872,9 @@ _EPOCH_REGEX = re.compile(r"epoch=(?:epoch=)?(\d+)")
 
 
 def _collect_checkpoint_paths() -> List[Path]:
-    base_dirs = {SCRIPT_DIR.resolve(), Path.cwd().resolve()}
+    # Search in script dir, cwd, and project root
+    project_root = Path("/home/will/git/swype/cleverkeys")
+    base_dirs = {SCRIPT_DIR.resolve(), Path.cwd().resolve(), project_root}
     patterns = [
         'rnnt_checkpoints_*/lightning_logs/version_*/checkpoints/*.ckpt',
         'rnnt_checkpoints_*/**/checkpoints/*.ckpt',
@@ -921,21 +923,17 @@ def find_latest_checkpoint(prefer_checkpoint: Optional[str] = None) -> Optional[
         return prefer_checkpoint
 
     # Check for the specific high-quality checkpoints from personalized_tuning
+    # These are the best checkpoints - higher WER but on harder validation set
     preferred_paths = [
-        "rnnt_checkpoints_20250918_101359/lightning_logs/version_0/checkpoints/epoch=epoch=64-wer=val_wer=0.156.ckpt",
-        "rnnt_checkpoints_20250918_101359/lightning_logs/version_0/checkpoints/epoch=epoch=57-wer=val_wer=0.156.ckpt",
+        "/home/will/git/swype/cleverkeys/rnnt_checkpoints_20250918_101359/lightning_logs/version_0/checkpoints/epoch=epoch=64-wer=val_wer=0.156.ckpt",
+        "/home/will/git/swype/cleverkeys/rnnt_checkpoints_20250918_101359/lightning_logs/version_0/checkpoints/epoch=epoch=57-wer=val_wer=0.156.ckpt",
     ]
 
     for pref_path in preferred_paths:
-        full_path = SCRIPT_DIR / pref_path
-        if full_path.exists():
-            print(f"Using preferred checkpoint: {full_path}")
-            return str(full_path)
-        # Also check from cwd
-        cwd_path = Path.cwd() / pref_path
-        if cwd_path.exists():
-            print(f"Using preferred checkpoint: {cwd_path}")
-            return str(cwd_path)
+        if Path(pref_path).exists():
+            print(f"Using preferred checkpoint: {pref_path}")
+            print(f"  Note: WER 0.156 is on harder validation set - this is the best model")
+            return pref_path
 
     # Fall back to automatic discovery
     candidates = _collect_checkpoint_paths()
