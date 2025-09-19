@@ -4,101 +4,169 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-CleverKeys is a privacy-first gesture typing system for local-only modern keyboards. It's a production-ready swipe gesture recognition system using Transformer models with CTC loss for keyboard input prediction. No data leaves the user's device.
+CleverKeys is a privacy-first gesture typing system for local-only modern keyboards - a high-performance Gboard alternative that never sends data off-device. The project implements RNN-Transducer (RNN-T) models using NeMo for gesture swipe recognition on Android keyboards, with support for personalized on-device learning.
 
-## Architecture
+## Architecture & Key Components
 
-The system consists of three core components:
+### Model Architecture
+- **Base Model**: RNN-Transducer (RNN-T) with Conformer encoder for superior accuracy over CTC models
+- **Key Advantage**: Models output dependencies P(y_i | y_1...y_{i-1}, x) unlike CTC, providing 40-50% WER reduction
+- **Encoder**: Conformer with multi-head attention, convolutional modules, and feed-forward layers
+- **Decoder**: LSTM-based prediction network for character sequence modeling
+- **Joint Network**: Combines encoder and decoder outputs for final character predictions
 
-1. **Feature Engineering (`SwipeFeaturizer`)**: Transforms raw (x, y, t) gesture points into rich feature vectors including kinematics (velocity, acceleration) and spatial context (nearest keyboard keys)
+### Training Scripts (Primary Focus)
 
-2. **Neural Model (`GestureCTCModel`)**: Transformer Encoder that outputs character probability distributions using CTC loss - chosen for inference speed (non-autoregressive), simplicity (encoder-only), and alignment-free training
+#### Current Production Script: `trained_models/nema1/train_transducer_personalized.py`
+- **Latest Architecture**: Personalized RNN-T with end-to-end preprocessing pipeline
+- **Key Features**:
+  - Adaptive resampling (56-96 frames depending on trace length)
+  - 37-dimensional features: kinematic (position, velocity, acceleration) + spatial (nearest keys)
+  - Knowledge distillation support for smaller deployment models
+  - Configurable character-hypothesis budget for downstream decoders
+  - GPU/CPU auto-fallback optimized for RTX 4090M (16GB VRAM)
 
-3. **Decoder (`pyctcdecode`)**: Beam search decoder with vocabulary trie and KenLM language model for high accuracy without complex neural models
+#### Legacy Script: `archive/train_transducer.py`
+- **Earlier Implementation**: Basic RNN-T without personalization features
+- **Differences**: Simpler feature extraction, no adaptive resampling, no distillation
+- **Note**: May have validation WER metric inconsistencies vs. personalized version
 
-## Common Commands
-
-### Environment Setup
-```bash
-# Install uv if needed
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# Sync project dependencies
-uv sync
-```
-
-### Training
-```bash
-# Run main training script
-uv run python train.py
-
-# Monitor training with TensorBoard
-tensorboard --logdir logs
-```
-
-### Data Processing
-```bash
-# Split data into train/validation sets
-uv run python scripts/split_data.py
-
-# Generate vocabulary wordlists
-cd vocab/wordlist_gen && ./generate_wordlist.sh
-```
-
-### Model Export
-```bash
-# Export to ONNX format for web deployment
-uv run python scripts/onnx_export.py
-
-# Export to PTE format for Android deployment  
-uv run python scripts/pte_export.py
-```
-
-### Code Formatting
-```bash
-# Format Python code
-uv format
-```
-
-## Project Structure
-
-- `train.py` - Main training script with complete pipeline (featurizer, model, decoder)
-- `data/` - Training/validation data in JSONL format (word + gesture points)
-- `vocab/` - Vocabulary management (153k+ word list, generation scripts)
-- `scripts/` - Export utilities for ONNX and PTE formats
-- `web-demo/` - Browser-based demo with ONNX runtime
-- `checkpoints/` - Saved model checkpoints during training
-- `exports/` - Exported models (TorchScript, ONNX, PTE)
-- `logs/` - TensorBoard training logs
-
-## Key Configuration
-
-Training configuration is centralized in the `CONFIG` dict at the top of `train.py`:
-- Model: 256d embeddings, 4 attention heads, 6 encoder layers
-- Training: batch_size=256, lr=3e-4, 50 epochs, mixed precision
-- Decoding: beam_width=100, KenLM language model with alpha=0.5, beta=1.5
-
-## Data Format
-
-Training data uses JSONL format:
+### Data Format & Features
 ```json
 {
   "word": "example",
   "points": [
-    {"x": 0.1, "y": 0.2, "t": 0.0},
-    {"x": 0.15, "y": 0.25, "t": 0.1}
+    {"x": -0.784, "y": 0.214, "t": 0},
+    {"x": 0.522, "y": -0.193, "t": 37}
   ]
 }
 ```
+- **Coordinates**: x,y ∈ [-1,1] with (0,0) at keyboard center
+- **Timing**: t in milliseconds from gesture start
+- **Vocabulary**: Lowercase letters + apostrophe only
 
-## Deployment Notes
+### Hardware & Performance Optimization
+- **Target Hardware**: RTX 4090M with 16GB VRAM
+- **Precision**: bf16-mixed for training (avoids CUDA graph dtype conflicts)
+- **Batch Size**: 256-320 optimized for memory usage
+- **Optimizations**: TF32, cuDNN benchmarking, torch.compile when available
 
-- **Android**: Convert `exports/model.pt` to `.pte` using ExecuTorch toolchain
-- **Web**: Use `exports/model.onnx` with ONNX.js runtime (demo in `web-demo/`)
-- **Dynamic Vocabulary**: The decoder supports adding user-specific words at runtime without retraining
+## Development Commands
 
-## Development Tips
+### Training
+```bash
+# Run current personalized training
+uv run python trained_models/nema1/train_transducer_personalized.py
 
-- The model and decoder are decoupled - neural model stays static while vocabulary can be dynamic
-- CTC architecture enables fast single-pass inference critical for real-time keyboard response
-- Strong decoding with vocabulary trie + language model achieves high accuracy without large models
+# Run legacy training (for comparison)
+uv run python archive/train_transducer.py
+
+# Fast development run (single batch smoke test)
+FAST_DEV_RUN=1 uv run python trained_models/nema1/train_transducer_personalized.py
+```
+
+### Dependencies
+```bash
+# Install all dependencies
+uv sync
+
+# Python version
+uv run python --version  # Should be 3.12.x
+```
+
+### Data Validation
+```bash
+# Validate vocabulary system
+uv run python trained_models/scripts/validate_vocab_system.py
+
+# Split data for training
+uv run python trained_models/scripts/split_data.py
+```
+
+### Model Export & Deployment
+```bash
+# Export to ONNX for web inference
+uv run python trained_models/nema1/export_onnx.py
+
+# Export to PyTorch Mobile (.pte) for Android
+uv run python trained_models/nema1/export_pte_ultra.py
+
+# Beam search CLI with ONNX
+uv run python trained_models/nema1/beam_decode_onnx_cli.py
+```
+
+## Key Configuration Differences
+
+### Personalized vs Legacy Training
+| Feature | Personalized | Legacy |
+|---------|-------------|--------|
+| Resampling | Adaptive 56-96 frames | Fixed length |
+| Features | 37D with spatial awareness | 37D basic kinematic |
+| Distillation | Teacher-student support | None |
+| Validation | Configurable subset sampling | Full dataset |
+| Precision | bf16-mixed optimized | bf16-mixed basic |
+
+### Model Export Formats
+- **ONNX**: Web inference via JavaScript/TypeScript
+- **PTE**: Android on-device inference (PyTorch Mobile)
+- **NeMo**: Full model checkpoints for continued training
+
+## Data Paths & Structure
+- **Training Data**: `data/train_final_train.jsonl` (642,909 samples)
+- **Validation Data**: `data/train_final_val.jsonl` (33,838 samples)
+- **Vocabulary**: `data/vocab.txt` (150k words from wordfreq)
+- **Checkpoints**: Auto-generated `rnnt_checkpoints_YYYYMMDD_HHMMSS/`
+
+## Important Notes
+
+### Critical: Vocabulary & Token Handling
+
+**CRITICAL UNDERSTANDING**: NeMo automatically modifies the vocabulary during model construction:
+
+**Training Script Vocabulary** (`data/vocab.txt`):
+- 29 tokens: `<blank>`, `'`, `a-z`, `<unk>`
+- Loaded sequentially with `<blank>` at index 0
+
+**NeMo Model Behavior**:
+- **Adds 30th embedding dimension** automatically
+- **Moves actual blank to index 29** (`model.decoder.blank_idx = 29`)
+- **Token 0 still labeled `<blank>`** but is NOT the functioning blank
+- **Token 29 is empty string `''`** and is the actual blank used by the model
+
+**Runtime Metadata Requirements**:
+```json
+{
+  "vocab_size": 30,
+  "blank_id": 29,  // CRITICAL: Not 0!
+  "tokens": ["<blank>", "'", "a", ..., "z", "<unk>", ""]
+}
+```
+
+**ONNX Export Implications**:
+- ONNX models output 30 logits (not 29)
+- Must use `blank_id: 29` for correct decoding
+- Character mappings: `'i' → 10`, `'s' → 20`
+
+**Script Consistency**:
+- `make_runtime_meta.py`: Must derive from actual model checkpoint
+- Export scripts: Must handle 30-token output correctly
+- Beam decoders: Must use `blank_id: 29`
+
+### Validation WER Concerns
+The user has concerns about validation WER metric consistency between training scripts. The personalized version may restrict validation datasets differently based on config, potentially affecting metric comparability. Monitor validation subset sampling configurations when comparing models.
+
+### Model Selection Guidance
+- **Use Personalized**: For production deployments requiring on-device personalization
+- **Use Legacy**: For baseline comparisons or simpler deployment scenarios
+- **Architecture**: Both use RNN-T but personalized has superior feature engineering
+
+### Export/Deployment Parameters
+Multiple export scripts exist with different optimization levels. Choose based on target platform:
+- `export_pte_ultra.py`: Maximum optimization for Android
+- `export_pte_fp32.py`: Full precision for accuracy-critical applications
+- `export_onnx.py`: Web deployment
+
+### Hardware Requirements
+- **Training**: RTX 4090M or equivalent (16GB+ VRAM recommended)
+- **Inference**: Mid to high-end smartphones for Android deployment
+- **Dependencies**: Requires CUDA-capable PyTorch with NeMo toolkit

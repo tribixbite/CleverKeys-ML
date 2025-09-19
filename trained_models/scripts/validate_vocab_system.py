@@ -51,8 +51,11 @@ def validate_runtime_meta(meta_path):
         print(f"❌ Invalid unk_id: {unk_id}")
         return False
 
-    if tokens[blank_id] != "<blank>":
-        print(f"❌ Blank token mismatch: expected '<blank>', got '{tokens[blank_id]}'")
+    # NeMo models use empty string as the functional blank (at index 29)
+    # while keeping "<blank>" label at index 0 for compatibility
+    if tokens[blank_id] != "":
+        print(f"❌ Blank token mismatch: expected empty string '', got '{tokens[blank_id]}'")
+        print(f"   Note: NeMo models use blank_id={blank_id} with empty string as functional blank")
         return False
 
     if tokens[unk_id] != "<unk>":

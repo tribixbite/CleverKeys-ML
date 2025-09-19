@@ -1,6 +1,8 @@
 # RNNT Swipe Architecture (Android-Focused)
 
-This document captures the end-to-end pipeline used by the **personalized RNN-Transducer** training run (`trained_models/nema1/train_transducer_personalized.py`) and how it differs from the legacy transformer snapshot. It is the source of truth for Android work; the transformer docs in `trained_models/architecture_snapshot/` remain available as a web/demo reference but are not the production path for mobile.
+This document captures the end-to-end pipeline used by the **personalized RNN-Transducer** training run (`trained_models/nema1/train_transducer_personalized.py`) and how it differs from the legacy transformer snapshot. It is the **production architecture** for both web and mobile deployment.
+
+**Best Checkpoint**: `rnnt_checkpoints_20250917_082255/.../epoch=16-wer=val_wer=0.094.ckpt` (9.4% validation WER)
 
 ---
 
@@ -43,11 +45,19 @@ Lightning callbacks and NeMo logging mirror the current run; checkpoints land un
 
 ---
 
-## 3. Export & Android Runtime
+## 3. Export & Runtime
 
-- Encoder exports: use `export_optimized_onnx.py` or `export_pte_ultra.py` to produce INT8 ONNX / ExecuTorch binaries optimised for mobile. These scripts pull calibration batches from the validation manifest, ensuring quantisation stats match real gestures.
-- Decoder exports: `export_rnnt_step.py` emits both ONNX and `.pte` single-step decoder graphs used by the Kotlin beam search.
-- Kotlin runtime (`BeamDecode.kt`, `LexiconLoader.kt`) expects the RNNT encoder/decoder pair plus cached lexicon bundles. The 37-dim featuriser is embedded in Kotlin to guarantee parity with training.
+**Current Production Exports:**
+- **Web**: `encoder_web_ultra.onnx` (25MB INT8) + `rnnt_step_fp32.onnx` (7.5MB)
+- **Android**: `encoder_android_ultra.onnx` (25MB INT8) or `encoder_android_optimized.pte` (64MB) + `rnnt_step_fp32.pte` (7.6MB)
+- **Reference**: `encoder_fp32.onnx` (64MB) for accuracy baselines
+
+**Runtime Implementations:**
+- Web: `beam_decode_web.ts` with ONNX Runtime Web (WebGPU/WASM-SIMD)
+- Android: Kotlin runtime (`BeamDecode.kt`, `LexiconLoader.kt`) with ExecuTorch or ONNX Runtime Mobile
+- Desktop: `beam_decode_onnx_cli.py` for testing and validation
+
+The 37-dimensional PersonalizedSwipeFeaturizer is implemented consistently across all platforms to guarantee training/inference parity.
 
 ---
 

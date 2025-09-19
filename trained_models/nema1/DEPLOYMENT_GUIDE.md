@@ -2,39 +2,37 @@
 
 This guide covers deployment of the ultra-optimized quantized models for **magical Android fully-on-device gesture typing** with no load times, minimal latency, and blazing fast web performance.
 
-## 📦 Exported Models Overview
+## 📦 Current Production Models (After Cleanup)
 
-### **Android ExecuTorch Models**
-- **`encoder_android_optimized.pte`** (63.3 MB)
-  - Android-optimized ExecuTorch model
-  - XNNPACK backend for ARM acceleration
-  - Graph optimizations for mobile
-  - Memory layout optimizations
-  - Operator fusion for efficiency
-
-### **Web ONNX Models**
-- **`encoder_web_ultra_web_final.onnx`** (24.0 MB) ⭐ **RECOMMENDED FOR WEB**
+### **Web Deployment Models**
+- **`encoder_web_ultra.onnx`** (25 MB) ⭐ **RECOMMENDED FOR WEB**
   - Ultra-optimized for WebGPU/WASM-SIMD
-  - INT8 symmetric per-channel quantization
+  - INT8 symmetric per-channel quantization from PersonalizedRNNTModel
   - QDQ format for hardware acceleration
-  - Graph-level optimizations enabled
+  - Trained with 37-dimensional PersonalizedSwipeFeaturizer
 
-### **Android ONNX Alternative**
-- **`encoder_android_ultra.onnx`** (24.0 MB) ⭐ **RECOMMENDED FOR ANDROID ONNX**
+### **Android Deployment Models**
+- **`encoder_android_ultra.onnx`** (25 MB) ⭐ **RECOMMENDED FOR ANDROID ONNX**
   - Ultra-optimized for XNNPACK/NNAPI
   - INT8 symmetric per-channel quantization
   - Mobile-specific graph optimizations
+- **`encoder_android_optimized.pte`** (64 MB) - **EXECUTOCRCH ALTERNATIVE**
+  - Android-optimized ExecuTorch model
+  - XNNPACK backend for ARM acceleration
+
+### **RNN-T Decoder Models**
+- **`rnnt_step_fp32.onnx`** (7.5 MB) - Web deployment decoder
+- **`rnnt_step_fp32.pte`** (7.6 MB) - Android ExecuTorch decoder
 
 ### **Reference Models**
-- **`encoder_fp32.onnx`** (63.3 MB) - Non-quantized ONNX reference
-- **`encoder_fp32.pte`** (63.3 MB) - Non-quantized PTE reference
+- **`encoder_fp32.onnx`** (64 MB) - Non-quantized ONNX reference
 
 ## 🌐 Web Deployment (Blazing Fast ONNX Demo)
 
 ### 1. Model Integration
 ```typescript
 // Use the ultra-optimized web model
-const modelPath = "encoder_web_ultra_web_final.onnx";
+const modelPath = "encoder_web_ultra.onnx";
 
 // Initialize ONNX Runtime Web with WebGPU/WASM-SIMD
 import * as ort from "onnxruntime-web";
@@ -174,19 +172,20 @@ All models work seamlessly with the provided lexicon beam search implementations
 ## 🔧 Deployment Checklist
 
 ### Web Deployment
-- [ ] Deploy `encoder_web_ultra_web_final.onnx` (24MB)
-- [ ] Integrate `beam_decode_web.ts` or `lexicon_beam_web.ts`
-- [ ] Configure WebGPU/WASM-SIMD providers
+- [ ] Deploy `encoder_web_ultra.onnx` (25MB) + `rnnt_step_fp32.onnx` (7.5MB)
+- [ ] Integrate `beam_decode_web.ts` for RNN-T beam search
+- [ ] Configure WebGPU/WASM-SIMD providers in ONNX Runtime Web
 - [ ] Test on target browsers (Chrome, Safari, Firefox)
-- [ ] Verify SIMD support and GPU acceleration
+- [ ] Verify 37-dimensional PersonalizedSwipeFeaturizer implementation
 
 ### Android Deployment
 - [ ] Choose ExecuTorch `.pte` OR ONNX Runtime approach
-- [ ] Deploy `encoder_android_optimized.pte` (63MB) OR `encoder_android_ultra.onnx` (24MB)
+- [ ] Deploy `encoder_android_optimized.pte` (64MB) OR `encoder_android_ultra.onnx` (25MB)
+- [ ] Include corresponding RNN-T decoder: `rnnt_step_fp32.pte` or `rnnt_step_fp32.onnx`
 - [ ] Integrate `BeamDecode.kt` and `LexiconLoader.kt`
 - [ ] Configure XNNPACK/NNAPI acceleration
 - [ ] Test on target Android devices (API 24+)
-- [ ] Verify ARM NEON acceleration
+- [ ] Verify PersonalizedSwipeFeaturizer parity with training
 
 ### Performance Validation
 - [ ] Measure cold-start model loading time

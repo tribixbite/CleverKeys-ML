@@ -2,12 +2,12 @@
 
 ## Overview
 
-CleverKeys ships a single RNNT training graph and a focused export toolchain tailored for two deployment targets:
+CleverKeys ships a single RNN-Transducer (RNN-T) training graph from `train_transducer_personalized.py` and a focused export toolchain tailored for two deployment targets:
 
 - **Web & Desktop** – ONNX Runtime (WASM / WebGPU / CPU / CUDA)
 - **Android** – ExecuTorch (XNNPACK) with optional INT8 quantization
 
-All encoder exports now share `export_common.py`, which centralises model loading, featurizer creation, and calibration data management. Calibration defaults to the validation manifest so quantization statistics always come from real swipe traces.
+All encoder exports share `export_common.py`, which centralizes model loading, the 37-dimensional PersonalizedSwipeFeaturizer, and calibration data management from the validation manifest (`data/train_final_val.jsonl`).
 
 ## Lexicon Preparation & Packaging
 
@@ -31,19 +31,27 @@ Every export script now accepts `--lexicon`, `--package-dir`, and `--bundle-asse
 - **Bundled builds**: supply `--lexicon` (usually the full lexicon) and any trie/LM metadata via `--bundle-assets` to produce a self-contained folder.
 
 ```
-Training Checkpoint (.ckpt/.nemo)
+PersonalizedRNNTModel (.ckpt from train_transducer_personalized.py)
 │
 ├── Encoder → ONNX Exports
 │   ├── export_onnx.py              (FP32 baseline + optional FP16 + INT8 QDQ)
 │   └── export_optimized_onnx.py    (Multi-target INT8 + ORT graph optimisation)
 │
-└── Encoder → ExecuTorch PTE Exports
-    ├── export_pte_fp32.py          (FP32 baseline)
-    ├── export_pte_optimized.py     (Optimised FP32)
-    ├── export_pte.py               (PT2E + XNNPACK INT8)
-    └── export_pte_ultra.py         (Aggressively optimised INT8 with validation)
+├── Encoder → ExecuTorch PTE Exports
+│   ├── export_pte_fp32.py          (FP32 baseline)
+│   ├── export_pte_optimized.py     (Optimised FP32)
+│   ├── export_pte.py               (PT2E + XNNPACK INT8)
+│   └── export_pte_ultra.py         (Aggressively optimised INT8 with validation)
+│
+└── RNN-T Decoder → export_rnnt_step.py (Single-step decoder/joint, FP32 ONNX + PTE)
 
-Decoder → export_rnnt_step.py      (Single-step decoder/joint, FP32 ONNX + PTE)
+Current Best Exports:
+├── encoder_web_ultra.onnx          (25MB INT8 for web)
+├── encoder_android_ultra.onnx      (25MB INT8 for Android)
+├── encoder_fp32.onnx               (64MB FP32 reference)
+├── encoder_android_optimized.pte   (64MB ExecuTorch for Android)
+├── rnnt_step_fp32.onnx            (7.5MB RNN-T decoder)
+└── rnnt_step_fp32.pte             (7.6MB ExecuTorch decoder)
 ```
 
 ---
@@ -172,12 +180,12 @@ python export_rnnt_step.py \
 
 ## Recommended Workflow
 
-1. **Train / fine-tune** with `train_transducer.py` or `train_transducer_experimental.py`.
-2. **Run validation** to log WER and confirm checkpoints in `trained_models/nema1`.
-3. **Curate lexicons** (when needed) via `prepare_lexicons.py`, choosing between the small and full lists.
-4. **Export ONNX** using `export_optimized_onnx.py`, optionally packaging models + lexicons with `--package-dir`.
-5. **Generate ExecuTorch artefacts** with `export_pte.py` / `export_pte_ultra.py` (and FP32 fallbacks) tailored to the target deployment.
-6. **Bundle decoder assets** via `export_rnnt_step.py` alongside vocabulary metadata (`runtime_meta.json`, tries, language models).
-7. **Smoke test** exports using the provided Kotlin/TypeScript decoders (`BeamDecode.kt`, `beam_decode_web.ts`).
+1. **Train** with `train_transducer_personalized.py` using the best checkpoint: `rnnt_checkpoints_20250917_082255/.../epoch=16-wer=val_wer=0.094.ckpt` (9.4% WER)
+2. **Export models**:
+   - Web: `export_optimized_onnx.py` → `encoder_web_ultra.onnx` (25MB INT8)
+   - Android: `export_pte_ultra.py` → `encoder_android_optimized.pte` (64MB) + `encoder_android_ultra.onnx` (25MB INT8 alternative)
+   - Decoder: `export_rnnt_step.py` → `rnnt_step_fp32.onnx` + `rnnt_step_fp32.pte`
+3. **Test exports** with `beam_decode_onnx_cli.py` using validation samples
+4. **Deploy**: Use `beam_decode_web.ts` (web) or Kotlin runtime (Android)
 
 This pipeline keeps calibration tied to real swipe traces, exposes optional FP16 paths for ONNX, and surfaces diagnostics whenever quantisation quality could regress. Adjust batch counts or manifests as new datasets become available, and regenerate this documentation after adding new export targets.
