@@ -1,0 +1,12 @@
+{
+  "train_samples": 642909,
+  "unique_words": 33122,
+  "subset_counts": {
+    "val_short_common.jsonl": 1000,
+    "val_short_rare.jsonl": 700,
+    "val_medium_rare.jsonl": 1000,
+    "val_long_common.jsonl": 767,
+    "val_long_rare.jsonl": 1000,
+    "val_numeric.jsonl": 0
+  }
+}
