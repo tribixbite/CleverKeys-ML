@@ -906,7 +906,14 @@ def _extract_metrics(path: Path) -> Tuple[float, int, float]:
 
 
 def find_latest_checkpoint(prefer_checkpoint: Optional[str] = None) -> Optional[str]:
-    """Find the latest checkpoint, preferring specific checkpoints if provided."""
+    """Find the latest checkpoint, preferring most recent training date then lowest WER.
+
+    Since different training runs use different validation sampling configurations,
+    WER values are not directly comparable across runs. We prefer:
+    1. Most recent training date (from directory name)
+    2. Lowest WER within that date
+    3. Highest epoch as tiebreaker
+    """
 
     # If a specific checkpoint is requested and exists, use it
     if prefer_checkpoint and Path(prefer_checkpoint).exists():
@@ -935,25 +942,34 @@ def find_latest_checkpoint(prefer_checkpoint: Optional[str] = None) -> Optional[
     if not candidates:
         return None
 
+    # Extract training date from directory name (e.g., "20250918_101359" from path)
+    import re
+    date_pattern = re.compile(r'(\d{8}_\d{6})')
+
     best_path: Optional[Path] = None
-    best_key: Tuple[float, int, float] = (float('inf'), -1, 0.0)
+    best_key: Tuple[str, float, int] = ("", float('inf'), -1)  # (date DESC, wer ASC, epoch DESC)
 
     for path in candidates:
         wer, epoch, mtime = _extract_metrics(path)
-        # Prefer the personalized_tuning checkpoints
-        if "20250918_101359" in str(path) and epoch >= 57:
-            # Boost priority for the known good checkpoints
-            key = (wer, -epoch - 1000, -mtime)
-        else:
-            key = (wer, -epoch, -mtime)
+
+        # Extract date from path
+        date_match = date_pattern.search(str(path))
+        date_str = date_match.group(1) if date_match else "00000000_000000"
+
+        # Sort by: most recent date first, then lowest WER, then highest epoch
+        # Negate date string for descending order (most recent first)
+        key = (chr(255) * 15 + "\x00" * 15 if date_str == "00000000_000000" else
+               "".join(chr(255 - ord(c)) if c.isdigit() else chr(255 - ord('_')) for c in date_str),
+               wer,
+               -epoch)
 
         if key < best_key:
             best_key = key
             best_path = path
 
     if best_path:
-        actual_epoch = -best_key[1] if best_key[1] > -1000 else -best_key[1] - 1000
-        print(f"Resuming from best checkpoint: {best_path} (WER={best_key[0]:.3f}, epoch={actual_epoch})")
+        print(f"Resuming from best checkpoint: {best_path} (WER={best_key[1]:.3f}, epoch={-best_key[2]})")
+        print(f"  Selected based on: most recent training date, then lowest WER within that date")
         return str(best_path)
 
     return None
