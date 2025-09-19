@@ -121,36 +121,47 @@ uv run python trained_models/nema1/beam_decode_onnx_cli.py
 
 ### Critical: Vocabulary & Token Handling
 
-**CRITICAL UNDERSTANDING**: NeMo automatically modifies the vocabulary during model construction:
+**CRITICAL UNDERSTANDING**: NeMo's `blank_as_pad=True` setting modifies vocabulary handling:
 
 **Training Script Vocabulary** (`data/vocab.txt`):
 - 29 tokens: `<blank>`, `'`, `a-z`, `<unk>`
 - Loaded sequentially with `<blank>` at index 0
 
-**NeMo Model Behavior**:
-- **Adds 30th embedding dimension** automatically
-- **Moves actual blank to index 29** (`model.decoder.blank_idx = 29`)
-- **Token 0 still labeled `<blank>`** but is NOT the functioning blank
-- **Token 29 is empty string `''`** and is the actual blank used by the model
+**NeMo Model Architecture with `blank_as_pad=True`**:
+- **Purpose**: Enables efficient batch processing and RNNT model export
+- **Effect**: Adds extra embedding dimension for blank token as padding
+- **Vocab Size**: Parameter excludes blank token (29), but embedding has 30 dimensions
+- **Blank Position**: `model.decoder.blank_idx = 29` (moved to end)
+- **Index 0**: Still contains `<blank>` label but NOT the functional blank
+- **Index 29**: Empty string `''` serves as the actual blank token
+
+**Why This Architecture**:
+- `blank_as_pad=True` is required for:
+  - Efficient batched beam search
+  - Proper ONNX export support
+  - Zero tensor returns for padding optimization
+- This is standard NeMo RNNT practice, not a bug
 
 **Runtime Metadata Requirements**:
 ```json
 {
   "vocab_size": 30,
-  "blank_id": 29,  // CRITICAL: Not 0!
-  "tokens": ["<blank>", "'", "a", ..., "z", "<unk>", ""]
+  "blank_id": 29,  // CRITICAL: Functional blank at end
+  "tokens": ["<blank>", "'", "a", ..., "z", "<unk>", ""]  // 30 tokens total
 }
 ```
 
-**ONNX Export Implications**:
-- ONNX models output 30 logits (not 29)
-- Must use `blank_id: 29` for correct decoding
-- Character mappings: `'i' → 10`, `'s' → 20`
+**ONNX Export Behavior**:
+- ONNX models correctly output 30 logits
+- The 30th dimension (index 29) is the functional blank
+- Must use `blank_id: 29` for decoding
+- Character mappings remain: `'a' → 2`, `'i' → 10`, `'s' → 20`
 
-**Script Consistency**:
-- `make_runtime_meta.py`: Must derive from actual model checkpoint
-- Export scripts: Must handle 30-token output correctly
-- Beam decoders: Must use `blank_id: 29`
+**Script Consistency Requirements**:
+- All scripts must recognize 30-token output
+- `make_runtime_meta.py`: Derive from model checkpoint (gets blank_idx=29)
+- Export scripts: Preserve 30-token architecture
+- Beam decoders: Use `blank_id: 29` consistently
 
 ### Validation WER Concerns
 The user has concerns about validation WER metric consistency between training scripts. The personalized version may restrict validation datasets differently based on config, potentially affecting metric comparability. Monitor validation subset sampling configurations when comparing models.
