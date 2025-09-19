@@ -129,22 +129,34 @@ def main():
     )
     args = ap.parse_args()
 
-    # Derive blank_id from vocabulary if provided
-    blank_id = 0  # default fallback
+    # Derive blank_id from model (authoritative) and compare with optional vocab hint
+    vocab_blank: int | None = None
     if args.vocab:
         try:
             with open(args.vocab, "r", encoding="utf-8") as f:
                 tokens = [line.strip() for line in f if line.strip()]
             token_to_idx = {tok: i for i, tok in enumerate(tokens)}
-            blank_id = token_to_idx.get("<blank>", 0)
-            if "<blank>" not in token_to_idx:
-                log.warning("'<blank>' token not found in %s; defaulting blank_id=0", args.vocab)
-            log.info(f"Derived blank_id={blank_id} from vocab file: {args.vocab}")
-        except Exception as e:
-            log.warning(f"Failed to load vocab file {args.vocab}: {e}. Using default blank_id=0")
+            vocab_blank = token_to_idx.get("<blank>")
+            if vocab_blank is None:
+                log.warning("'<blank>' token not found in %s; runtime blank will be inferred from model", args.vocab)
+            else:
+                log.info("Vocabulary hint: blank_id=%s", vocab_blank)
+        except Exception as e:  # pragma: no cover - defensive logging
+            log.warning("Failed to load vocab file %s: %s", args.vocab, e)
 
     # Check if input is .nemo or .ckpt
     model = load_trained_model(args.checkpoint)
+    model_blank = getattr(model.decoder, "blank_idx", None)
+    if model_blank is None:
+        log.warning("Model decoder missing blank_idx attribute; defaulting to 0")
+        model_blank = 0
+    blank_id = int(model_blank)
+    if vocab_blank is not None and vocab_blank != blank_id:
+        log.warning(
+            "Vocabulary blank_id=%s disagrees with model blank_idx=%s; using model value",
+            vocab_blank,
+            blank_id,
+        )
 
     step = RNNTStep(model).eval()
     # Override the step's blank_idx with derived value
