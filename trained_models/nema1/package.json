@@ -1,0 +1,11 @@
+{
+  "name": "rare-words-decoder",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "demo": "bun run rare_words_demo.ts"
+  },
+  "dependencies": {
+    "onnxruntime-node": "^1.16.3"
+  }
+}

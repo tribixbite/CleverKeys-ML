@@ -83,9 +83,12 @@ def rnnt_word_beam(
         "features_bft": feats_bft.astype(np.float32),
         "lengths": np.array([T], np.int32),
     })
-    enc_btf = enc_out[0][0]  # (T_out, D)
+    # Encoder output is (B, D, T_out) where T_out = T/2 due to downsampling
+    enc_bdt = enc_out[0]  # (1, 256, T_out)
+    enc_btf = enc_bdt[0].T  # Transpose to (T_out, D)
     T_out, Denc = enc_btf.shape
     assert Denc == D, f"Encoder output dim mismatch: {Denc} != {D}"
+    print(f"Encoder: {T} frames -> {T_out} frames (downsampling by 2)")
 
     # Initialize beam
     beams = [{
@@ -111,12 +114,30 @@ def rnnt_word_beam(
             enc_t = np.repeat(enc_btf[t][None, :], N, axis=0)  # (N, D)
 
             # Run step
-            logits, h1, c1 = step_sess.run(None, {
+            outputs = step_sess.run(None, {
                 "y_prev": yprev,
                 "h0": h0,
                 "c0": c0,
                 "enc_t": enc_t
             })
+            logits = outputs[0]
+            h1 = outputs[1]
+            c1 = outputs[2]
+
+            # Handle different logits shapes
+            if len(logits.shape) == 4:  # (1, 1, 1, vocab_size)
+                logits = logits.squeeze()
+                if len(logits.shape) == 0:
+                    logits = logits.reshape(1, -1)
+                elif len(logits.shape) == 1:
+                    logits = logits.reshape(1, -1)
+            elif len(logits.shape) == 3:  # (1, 1, vocab_size)
+                logits = logits.squeeze(1)
+
+            # Ensure logits is 2D: (N, vocab_size)
+            if len(logits.shape) == 1:
+                logits = logits.reshape(1, -1)
+
             V = logits.shape[1]
 
             # Expand beams

@@ -48,6 +48,21 @@ from nemo.core.classes.mixins import AccessMixin
 
 from swipe_data_utils import collate_fn
 
+# Import augmentation and progressive unfreezing
+try:
+    from data_augmentation import SwipeAugmentation, create_augmentation_pipeline
+    AUGMENTATION_AVAILABLE = True
+except ImportError:
+    AUGMENTATION_AVAILABLE = False
+    print("Warning: data_augmentation module not available")
+
+try:
+    from progressive_unfreezing import ProgressiveUnfreezingCallback, DiscriminativeLearningRates
+    UNFREEZING_AVAILABLE = True
+except ImportError:
+    UNFREEZING_AVAILABLE = False
+    print("Warning: progressive_unfreezing module not available")
+
 SCRIPT_DIR = Path(__file__).resolve().parent
 runtime_id = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
 
@@ -125,6 +140,22 @@ CONFIG: Dict[str, Any] = {
         "check_interval": 0.33,
         "max_samples": 1500,
         "log_error_batches": 3,
+    },
+    "augmentation": {
+        "enabled": False,  # Set to True to enable augmentation
+        "noise_std": 0.02,
+        "time_warp_factor": 0.1,
+        "spatial_shift_range": 0.05,
+        "speed_variation": 0.2,
+        "enable_for_rare_only": True,
+        "rare_threshold": 50,
+        "augmentation_prob": 0.5,
+    },
+    "unfreezing": {
+        "enabled": False,  # Set to True to enable progressive unfreezing
+        "warmup_epochs": 2,
+        "discriminative_lr": True,
+        "lr_decay_factor": 0.95,
     },
 }
 
@@ -368,6 +399,8 @@ class PersonalizedSwipeDataset(Dataset):
         max_trace_len: int,
         preprocess_cfg: Dict[str, Any],
         featurizer: Optional[PersonalizedSwipeFeaturizer] = None,
+        augmenter: Optional['SwipeAugmentation'] = None,
+        is_training: bool = False,
     ) -> None:
         super().__init__()
         self.manifest_path = manifest_path
@@ -375,6 +408,8 @@ class PersonalizedSwipeDataset(Dataset):
         self.max_trace_len = max_trace_len
         self.preprocess_cfg = preprocess_cfg
         self.featurizer = featurizer or PersonalizedSwipeFeaturizer()
+        self.augmenter = augmenter
+        self.is_training = is_training
         self.samples: List[Dict[str, Any]] = []
 
         with open(manifest_path, "r", encoding="utf-8") as fh:
@@ -391,6 +426,11 @@ class PersonalizedSwipeDataset(Dataset):
 
     def __getitem__(self, index: int):
         item = self.samples[index]
+
+        # Apply augmentation if in training mode and augmenter is available
+        if self.is_training and self.augmenter is not None:
+            item = self.augmenter.augment(item)
+
         raw_points = item["points"][: self.max_trace_len]
 
         normalized = self._normalize_points(raw_points)
@@ -690,11 +730,28 @@ def load_vocab(vocab_path: str) -> Dict[str, int]:
 
 
 def build_dataloaders(cfg: DictConfig, vocab: Dict[str, int]):
+    # Create augmenter if enabled
+    augmenter = None
+    if AUGMENTATION_AVAILABLE and cfg.augmentation.get('enabled', False):
+        augmenter = create_augmentation_pipeline(cfg.augmentation)
+        # Set word frequencies from training data for rare word detection
+        train_word_counts = Counter()
+        with open(cfg.data.train_manifest, "r") as f:
+            for line in f:
+                sample = json.loads(line)
+                word = sample.get('word', '')
+                if word:
+                    train_word_counts[word] += 1
+        augmenter.set_word_frequencies(dict(train_word_counts))
+        print(f"Data augmentation enabled for rare words (threshold={cfg.augmentation.rare_threshold})")
+
     train_ds = PersonalizedSwipeDataset(
         manifest_path=cfg.data.train_manifest,
         vocab=vocab,
         max_trace_len=cfg.data.max_trace_len,
         preprocess_cfg=cfg.preprocess,
+        augmenter=augmenter,
+        is_training=True,
     )
 
     val_ds = PersonalizedSwipeDataset(
@@ -702,6 +759,8 @@ def build_dataloaders(cfg: DictConfig, vocab: Dict[str, int]):
         vocab=vocab,
         max_trace_len=cfg.data.max_trace_len,
         preprocess_cfg=cfg.preprocess,
+        augmenter=None,  # No augmentation for validation
+        is_training=False,
     )
 
     collate = collate_fn
@@ -996,6 +1055,8 @@ def main() -> None:
     parser.add_argument("--profile", type=str, help="Sampling profile name (e.g., 'rare_words', 'base_random')")
     parser.add_argument("--checkpoint", type=str, help="Specific checkpoint to resume from")
     parser.add_argument("--compare", action="store_true", help="Run comparison mode with base_random profile")
+    parser.add_argument("--augment", action="store_true", help="Enable data augmentation for rare words")
+    parser.add_argument("--unfreeze", action="store_true", help="Enable progressive unfreezing")
     args = parser.parse_args()
 
     # Apply profile if specified
@@ -1021,6 +1082,24 @@ def main() -> None:
             for key, value in cfg.sampling.items():
                 print(f"  {key}: {value}")
             print()
+
+    # Enable augmentation if requested
+    if args.augment:
+        cfg.augmentation.enabled = True
+        print("\n" + "=" * 60)
+        print("Data augmentation ENABLED for rare words")
+        print(f"  Rare word threshold: {cfg.augmentation.rare_threshold}")
+        print(f"  Augmentation probability: {cfg.augmentation.augmentation_prob}")
+        print("=" * 60 + "\n")
+
+    # Enable progressive unfreezing if requested
+    if args.unfreeze:
+        cfg.unfreezing.enabled = True
+        print("\n" + "=" * 60)
+        print("Progressive unfreezing ENABLED")
+        print(f"  Warmup epochs: {cfg.unfreezing.warmup_epochs}")
+        print(f"  Discriminative LR: {cfg.unfreezing.discriminative_lr}")
+        print("=" * 60 + "\n")
 
     cfg.data.train_manifest = _resolve_path(cfg.data.train_manifest)
     cfg.data.val_manifest = _resolve_path(cfg.data.val_manifest)
@@ -1056,6 +1135,9 @@ def main() -> None:
         save_last=True,
     )
 
+    # Build callback list
+    callbacks = [checkpoint_callback]
+
     fast_dev = bool(int(os.environ.get("FAST_DEV_RUN", "0")))
     if fast_dev:
         print("FAST_DEV_RUN=1 -> running a single batch for smoke test")
@@ -1065,6 +1147,24 @@ def main() -> None:
     error_logger = ValidationErrorLogger(
         max_batches=int(cfg.validation.get('log_error_batches', 1))
     )
+    callbacks.append(error_logger)
+
+    # Add progressive unfreezing callback if enabled
+    if UNFREEZING_AVAILABLE and cfg.unfreezing.get('enabled', False):
+        # Create unfreezing schedule based on profile if specified
+        schedule = None
+        if args.profile and args.profile != 'base_random':
+            from progressive_unfreezing import create_unfreezing_schedule_for_profile
+            schedule = create_unfreezing_schedule_for_profile(args.profile)
+            print(f"Progressive unfreezing enabled with {args.profile} schedule")
+        else:
+            print("Progressive unfreezing enabled with default schedule")
+
+        unfreezing_callback = ProgressiveUnfreezingCallback(
+            unfreeze_schedule=schedule,
+            warmup_epochs=cfg.unfreezing.get('warmup_epochs', 2),
+        )
+        callbacks.append(unfreezing_callback)
 
     # Adjust root dir to include profile name if specified
     root_dir = f'./rnnt_checkpoints_{runtime_id}'
@@ -1080,7 +1180,7 @@ def main() -> None:
         gradient_clip_val=1.0,
         accumulate_grad_batches=cfg.training.gradient_accumulation,
         enable_checkpointing=True,
-        callbacks=[checkpoint_callback, error_logger],
+        callbacks=callbacks,
         default_root_dir=root_dir,
         enable_progress_bar=True,
         check_val_every_n_epoch=1,
