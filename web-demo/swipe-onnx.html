@@ -1443,15 +1443,126 @@
         }        
         function drawNeonTrail() {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
-            
+
             if (swipePath.length < 2) return;
-            
+
+            // Enhanced trail with fading effect
+            const totalPoints = swipePath.length;
+
+            // Draw shadow/glow layer first
+            ctx.shadowBlur = 20;
+            ctx.shadowColor = 'rgba(179, 0, 255, 0.6)';
+
+            // Draw multiple passes for enhanced glow
+            for (let pass = 0; pass < 2; pass++) {
+                ctx.beginPath();
+                ctx.lineCap = 'round';
+                ctx.lineJoin = 'round';
+
+                for (let i = 0; i < totalPoints - 1; i++) {
+                    const progress = i / totalPoints;
+                    const nextProgress = (i + 1) / totalPoints;
+
+                    // Create gradient for this segment
+                    const gradient = ctx.createLinearGradient(
+                        swipePath[i].x, swipePath[i].y,
+                        swipePath[i + 1].x, swipePath[i + 1].y
+                    );
+
+                    // Fade from cyan to purple to pink
+                    const startColor = interpolateColor('#00d4ff', '#b300ff', progress);
+                    const endColor = interpolateColor('#00d4ff', '#b300ff', nextProgress);
+
+                    // Fade out older parts of the trail
+                    const opacity = 0.3 + (progress * 0.7);
+
+                    gradient.addColorStop(0, hexToRgba(startColor, opacity));
+                    gradient.addColorStop(1, hexToRgba(endColor, opacity));
+
+                    ctx.strokeStyle = gradient;
+                    ctx.lineWidth = pass === 0 ? 8 : 4; // Thicker for glow, thinner for core
+
+                    ctx.beginPath();
+                    ctx.moveTo(swipePath[i].x, swipePath[i].y);
+                    ctx.lineTo(swipePath[i + 1].x, swipePath[i + 1].y);
+                    ctx.stroke();
+                }
+            }
+
+            // Reset shadow for next draw
+            ctx.shadowBlur = 0;
+
+            // Draw points at key positions for emphasis
+            keySequence.forEach((key, index) => {
+                const keyData = getKeyData(key);
+                if (keyData) {
+                    const progress = index / Math.max(keySequence.length - 1, 1);
+                    const color = interpolateColor('#00d4ff', '#ff00d4', progress);
+
+                    ctx.fillStyle = hexToRgba(color, 0.8);
+                    ctx.beginPath();
+                    ctx.arc(keyData.x, keyData.y, 6, 0, Math.PI * 2);
+                    ctx.fill();
+
+                    // Add small text label
+                    ctx.fillStyle = 'white';
+                    ctx.font = 'bold 10px sans-serif';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText(key.toUpperCase(), keyData.x, keyData.y);
+                }
+            });
+        }
+
+        // Helper functions for color interpolation
+        function interpolateColor(color1, color2, progress) {
+            const r1 = parseInt(color1.slice(1, 3), 16);
+            const g1 = parseInt(color1.slice(3, 5), 16);
+            const b1 = parseInt(color1.slice(5, 7), 16);
+
+            const r2 = parseInt(color2.slice(1, 3), 16);
+            const g2 = parseInt(color2.slice(3, 5), 16);
+            const b2 = parseInt(color2.slice(5, 7), 16);
+
+            const r = Math.round(r1 + (r2 - r1) * progress);
+            const g = Math.round(g1 + (g2 - g1) * progress);
+            const b = Math.round(b1 + (b2 - b1) * progress);
+
+            return '#' + [r, g, b].map(x => x.toString(16).padStart(2, '0')).join('');
+        }
+
+        function hexToRgba(hex, alpha) {
+            const r = parseInt(hex.slice(1, 3), 16);
+            const g = parseInt(hex.slice(3, 5), 16);
+            const b = parseInt(hex.slice(5, 7), 16);
+            return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+        }
+
+        function getKeyData(key) {
+            const keyElement = document.querySelector(`[data-key="${key}"]`);
+            if (!keyElement) return null;
+
+            const rect = keyElement.getBoundingClientRect();
+            const canvasRect = canvas.getBoundingClientRect();
+
+            return {
+                x: rect.left + rect.width / 2 - canvasRect.left,
+                y: rect.top + rect.height / 2 - canvasRect.top
+            };
+        }
+
+        function drawNeonTrailOriginal() {
+            // Keep original simple version as fallback
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            if (swipePath.length < 2) return;
+
             // Create gradient effect
             const gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
             gradient.addColorStop(0, '#00d4ff');
             gradient.addColorStop(0.5, '#b300ff');
             gradient.addColorStop(1, '#ff00d4');
-            
+
             // Draw multiple layers for glow effect
             for (let layer = 3; layer > 0; layer--) {
                 ctx.strokeStyle = gradient;
