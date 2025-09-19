@@ -151,15 +151,23 @@
             </div>
         </div>
         <div class="flex gap-2">
-            <button onclick="clearInput()" 
+            <button onclick="clearInput()"
                     class="px-4 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 text-sm transition-all hover:border-neon-blue/50">
                 Clear
             </button>
-            <button onclick="toggleDebug()" 
+            <!-- Model Selector Dropdown -->
+            <select id="modelSelector" onchange="switchModel(this.value)"
+                    class="px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 text-sm transition-all hover:border-neon-blue/50">
+                <option value="encoder_web_ultra.onnx">Web Ultra (23MB)</option>
+                <option value="encoder_android_int8_final.onnx">Android INT8 (22MB)</option>
+                <option value="encoder_android_ultra.onnx">Android Ultra (25MB)</option>
+                <option value="encoder_fp32.onnx">FP32 Full (62MB)</option>
+            </select>
+            <button onclick="toggleDebug()"
                     class="px-4 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 text-sm transition-all hover:border-neon-purple/50">
                 Debug: <span id="debugStatus">OFF</span>
             </button>
-            <button onclick="toggleDictionary()" 
+            <button onclick="toggleDictionary()"
                     class="px-4 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 text-sm transition-all hover:border-neon-green/50">
                 📚 Dictionary
             </button>
@@ -1161,6 +1169,47 @@
         }
         
         // Initialize canvas and keyboard
+        // Hot-swap ONNX models
+        async function switchModel(modelPath) {
+            try {
+                updateLoadingStatus(`Loading ${modelPath}...`);
+                document.getElementById('loadingOverlay').classList.remove('hidden');
+
+                // Clean up existing session
+                if (encoderSession) {
+                    encoderSession = null;
+                }
+
+                // Load new model
+                const sessionOptions = {
+                    executionProviders: ['wasm'],
+                    graphOptimizationLevel: 'all',
+                    enableCpuMemArena: false,
+                    enableMemPattern: false,
+                    executionMode: 'sequential'
+                };
+
+                encoderSession = await ort.InferenceSession.create(modelPath, sessionOptions);
+                console.log(`Loaded model: ${modelPath}`);
+                console.log('Model inputs:', encoderSession.inputNames);
+                console.log('Model outputs:', encoderSession.outputNames);
+
+                // Update UI
+                document.getElementById('modelStatus').textContent = `${modelPath.replace('.onnx', '')} • Ready`;
+                updateLoadingStatus('Model switched successfully!');
+
+                setTimeout(() => {
+                    document.getElementById('loadingOverlay').classList.add('hidden');
+                }, 500);
+
+            } catch (error) {
+                console.error('Failed to switch model:', error);
+                updateLoadingStatus(`Error loading ${modelPath}: ${error.message}`);
+                // Revert to default model
+                document.getElementById('modelSelector').value = 'encoder_web_ultra.onnx';
+            }
+        }
+
         async function init() {
             resizeCanvas();
             updateKeyboardBounds();
