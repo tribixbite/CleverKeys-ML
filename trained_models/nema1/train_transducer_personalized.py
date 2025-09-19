@@ -19,6 +19,7 @@ Key capabilities beyond the baseline trainer:
 
 from __future__ import annotations
 
+import argparse
 import datetime as dt
 import json
 import math
@@ -904,7 +905,32 @@ def _extract_metrics(path: Path) -> Tuple[float, int, float]:
     return wer, epoch, mtime
 
 
-def find_latest_checkpoint() -> Optional[str]:
+def find_latest_checkpoint(prefer_checkpoint: Optional[str] = None) -> Optional[str]:
+    """Find the latest checkpoint, preferring specific checkpoints if provided."""
+
+    # If a specific checkpoint is requested and exists, use it
+    if prefer_checkpoint and Path(prefer_checkpoint).exists():
+        print(f"Using specified checkpoint: {prefer_checkpoint}")
+        return prefer_checkpoint
+
+    # Check for the specific high-quality checkpoints from personalized_tuning
+    preferred_paths = [
+        "rnnt_checkpoints_20250918_101359/lightning_logs/version_0/checkpoints/epoch=epoch=64-wer=val_wer=0.156.ckpt",
+        "rnnt_checkpoints_20250918_101359/lightning_logs/version_0/checkpoints/epoch=epoch=57-wer=val_wer=0.156.ckpt",
+    ]
+
+    for pref_path in preferred_paths:
+        full_path = SCRIPT_DIR / pref_path
+        if full_path.exists():
+            print(f"Using preferred checkpoint: {full_path}")
+            return str(full_path)
+        # Also check from cwd
+        cwd_path = Path.cwd() / pref_path
+        if cwd_path.exists():
+            print(f"Using preferred checkpoint: {cwd_path}")
+            return str(cwd_path)
+
+    # Fall back to automatic discovery
     candidates = _collect_checkpoint_paths()
     if not candidates:
         return None
@@ -914,21 +940,74 @@ def find_latest_checkpoint() -> Optional[str]:
 
     for path in candidates:
         wer, epoch, mtime = _extract_metrics(path)
-        # prefer lower WER, then higher epoch, then latest mtime
-        key = (wer, -epoch, -mtime)
+        # Prefer the personalized_tuning checkpoints
+        if "20250918_101359" in str(path) and epoch >= 57:
+            # Boost priority for the known good checkpoints
+            key = (wer, -epoch - 1000, -mtime)
+        else:
+            key = (wer, -epoch, -mtime)
+
         if key < best_key:
             best_key = key
             best_path = path
 
     if best_path:
-        print(f"Resuming from best checkpoint: {best_path} (WER={best_key[0]:.3f}, epoch={-best_key[1]})")
+        actual_epoch = -best_key[1] if best_key[1] > -1000 else -best_key[1] - 1000
+        print(f"Resuming from best checkpoint: {best_path} (WER={best_key[0]:.3f}, epoch={actual_epoch})")
         return str(best_path)
 
     return None
 
 
+def load_sampling_profile(profile_name: Optional[str]) -> Optional[Dict[str, Any]]:
+    """Load a sampling profile by name."""
+    if not profile_name:
+        return None
+
+    # Try to import sampling profiles
+    try:
+        from sampling_profiles import get_profile
+        return get_profile(profile_name)
+    except ImportError:
+        print(f"Warning: Could not import sampling_profiles. Using default configuration.")
+        return None
+    except ValueError as e:
+        print(f"Warning: {e}. Using default configuration.")
+        return None
+
+
 def main() -> None:
+    # Parse command-line arguments
+    parser = argparse.ArgumentParser(description="Train RNN-T with optional sampling profile")
+    parser.add_argument("--profile", type=str, help="Sampling profile name (e.g., 'rare_words', 'base_random')")
+    parser.add_argument("--checkpoint", type=str, help="Specific checkpoint to resume from")
+    parser.add_argument("--compare", action="store_true", help="Run comparison mode with base_random profile")
+    args = parser.parse_args()
+
+    # Apply profile if specified
     cfg = DictConfig(CONFIG)
+    if args.compare:
+        args.profile = "base_random"
+        print("\n" + "=" * 60)
+        print("COMPARISON MODE: Using base_random profile for fair checkpoint comparison")
+        print("=" * 60)
+
+    if args.profile:
+        profile_config = load_sampling_profile(args.profile)
+        if profile_config:
+            # Remove description field if present
+            profile_config = {k: v for k, v in profile_config.items() if k != "description"}
+
+            # Update sampling config
+            cfg.sampling = profile_config
+            print("\n" + "=" * 60)
+            print(f"Training with profile: {args.profile}")
+            print("=" * 60)
+            print("Sampling parameters:")
+            for key, value in cfg.sampling.items():
+                print(f"  {key}: {value}")
+            print()
+
     cfg.data.train_manifest = _resolve_path(cfg.data.train_manifest)
     cfg.data.val_manifest = _resolve_path(cfg.data.val_manifest)
     cfg.data.vocab_path = _resolve_path(cfg.data.vocab_path)
@@ -973,6 +1052,11 @@ def main() -> None:
         max_batches=int(cfg.validation.get('log_error_batches', 1))
     )
 
+    # Adjust root dir to include profile name if specified
+    root_dir = f'./rnnt_checkpoints_{runtime_id}'
+    if args.profile:
+        root_dir = f'./rnnt_checkpoints_{args.profile}_{runtime_id}'
+
     trainer = pl.Trainer(
         accelerator=cfg.training.accelerator,
         devices=cfg.training.devices,
@@ -983,7 +1067,7 @@ def main() -> None:
         accumulate_grad_batches=cfg.training.gradient_accumulation,
         enable_checkpointing=True,
         callbacks=[checkpoint_callback, error_logger],
-        default_root_dir=f'./rnnt_checkpoints_{runtime_id}',
+        default_root_dir=root_dir,
         enable_progress_bar=True,
         check_val_every_n_epoch=1,
         num_sanity_val_steps=0,
@@ -992,13 +1076,15 @@ def main() -> None:
         limit_val_batches=limit_val_batches,
     )
 
-    resume_from = find_latest_checkpoint()
+    resume_from = find_latest_checkpoint(prefer_checkpoint=args.checkpoint)
     if resume_from:
         print(f"Resuming from {resume_from}")
 
     trainer.fit(model, train_dataloaders=train_loader, val_dataloaders=val_loader, ckpt_path=resume_from)
 
     nemo_path = Path(f"conformer_rnnt_personalized_{runtime_id}.nemo")
+    if args.profile:
+        nemo_path = Path(f"conformer_rnnt_{args.profile}_{runtime_id}.nemo")
     model.save_to(str(nemo_path))
     print(f"Saved final NeMo checkpoint to {nemo_path}")
 
