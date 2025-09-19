@@ -1,0 +1,123 @@
+# VISUAL COMPARISON: Training Data Selection
+================================================================================
+
+## WITHOUT rare_words profile (uniform sampling)
+```
+Training Batch #1:
+  the → [swipe gesture data]
+  and → [swipe gesture data]
+  you → [swipe gesture data]
+  the → [swipe gesture data]
+  that → [swipe gesture data]
+  hello → [swipe gesture data]
+  the → [swipe gesture data]
+  world → [swipe gesture data]
+  and → [swipe gesture data]
+  you → [swipe gesture data]
+
+Training Batch #2:
+  the → [swipe gesture data]
+  that → [swipe gesture data]
+  this → [swipe gesture data]
+  and → [swipe gesture data]
+  the → [swipe gesture data]
+  you → [swipe gesture data]
+  hello → [swipe gesture data]
+  the → [swipe gesture data]
+  world → [swipe gesture data]
+  that → [swipe gesture data]
+```
+
+Word frequency in 100 training batches:
+┌──────────────────┬───────────┬──────────────────────────┐
+│ Word             │ Frequency │ Times Seen in Training   │
+├──────────────────┼───────────┼──────────────────────────┤
+│ the              │  50,000   │ ████████████████ 320    │
+│ and              │  40,000   │ ████████████████ 310    │
+│ you              │  30,000   │ ███████████████  290    │
+│ that             │  25,000   │ ██████████████   280    │
+│ ...              │           │                          │
+│ cryptocurrency   │     45    │ ██               35     │
+│ blockchain       │     40    │ ██               33     │
+│ kubernetes       │     15    │ █                20     │
+│ anthropic        │      3    │ │                5      │
+│ quixotic         │      1    │ │                3      │
+└──────────────────┴───────────┴──────────────────────────┘
+
+## WITH rare_words profile
+```
+Training Batch #1:
+  quixotic → [swipe gesture data]
+  syzygy → [swipe gesture data]
+  anthropic → [swipe gesture data]
+  serendipity → [swipe gesture data]
+  onomatopoeia → [swipe gesture data]
+  kubernetes → [swipe gesture data]
+  quixotic → [swipe gesture data]
+  anthropomorphic → [swipe gesture data]
+  syzygy → [swipe gesture data]
+  jupyter → [swipe gesture data]
+
+Training Batch #2:
+  quixotic → [swipe gesture data]
+  anthropic → [swipe gesture data]
+  tensorflow → [swipe gesture data]
+  syzygy → [swipe gesture data]
+  cryptocurrency → [swipe gesture data]
+  quixotic → [swipe gesture data]
+  blockchain → [swipe gesture data]
+  serendipity → [swipe gesture data]
+  neural → [swipe gesture data]
+  quixotic → [swipe gesture data]
+```
+
+Word frequency in 100 training batches:
+┌──────────────────┬───────────┬──────────────────────────┐
+│ Word             │ Frequency │ Times Seen in Training   │
+├──────────────────┼───────────┼──────────────────────────┤
+│ quixotic         │      1    │ ████████████████ 2,570  │
+│ syzygy           │      2    │ ███████████████  1,580  │
+│ anthropic        │      3    │ ████████████     1,240  │
+│ onomatopoeia     │      5    │ ████████         790    │
+│ serendipity      │      8    │ ███████          610    │
+│ kubernetes       │     15    │ █████            370    │
+│ tensorflow       │     20    │ ████             200    │
+│ cryptocurrency   │     45    │ ████             180    │
+│ ...              │           │                          │
+│ hello            │   5,000   │ │                 2      │
+│ you              │  30,000   │                   0      │
+│ and              │  40,000   │                   0      │
+│ the              │  50,000   │                   0      │
+└──────────────────┴───────────┴──────────────────────────┘
+
+================================================================================
+## IMPACT ON MODEL LEARNING
+
+### Without rare_words profile:
+- Model sees "the" 320 times → becomes EXPERT at recognizing "the"
+- Model sees "quixotic" 3 times → barely learns it exists
+
+### With rare_words profile:
+- Model sees "quixotic" 2,570 times → learns it VERY WELL
+- Model sees "the" 0 times → relies on pre-existing knowledge from checkpoint
+
+### Result:
+- Dramatically better performance on technical terms
+- Better handling of proper nouns
+- More robust on uncommon vocabulary
+- Slight degradation on very common words (acceptable trade-off)
+
+================================================================================
+## REAL-WORLD EXAMPLE
+
+User swipes: "kubernetes"
+
+### Model trained WITHOUT rare_words:
+- Prediction: "yesterday" (wrong - never learned "kubernetes" properly)
+- The swipe path is similar, but model defaults to common words
+
+### Model trained WITH rare_words:
+- Prediction: "kubernetes" (correct!)
+- Model has seen this word hundreds of times and learned its pattern
+
+================================================================================
