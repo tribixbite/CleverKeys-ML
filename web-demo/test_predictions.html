@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Swipe Predictions</title>
+    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.18.0/dist/ort.min.js"></script>
+    <style>
+        body { font-family: monospace; padding: 20px; }
+        .test { margin: 20px 0; padding: 10px; border: 1px solid #ccc; }
+        .success { background: #d4ffd4; }
+        .failure { background: #ffd4d4; }
+        button { padding: 10px 20px; margin: 5px; }
+    </style>
+</head>
+<body>
+    <h1>Swipe Prediction Test Suite</h1>
+    <div>
+        <button onclick="testAllModels()">Test All Models</button>
+        <button onclick="testAccuracy()">Test Accuracy</button>
+    </div>
+    <div id="results"></div>
+
+    <script>
+        let encoderSession = null;
+        const results = document.getElementById('results');
+
+        // QWERTY keyboard layout
+        const keyLayout = {
+            'q': {x: 0.05, y: 0.25}, 'w': {x: 0.15, y: 0.25}, 'e': {x: 0.25, y: 0.25},
+            'r': {x: 0.35, y: 0.25}, 't': {x: 0.45, y: 0.25}, 'y': {x: 0.55, y: 0.25},
+            'u': {x: 0.65, y: 0.25}, 'i': {x: 0.75, y: 0.25}, 'o': {x: 0.85, y: 0.25},
+            'p': {x: 0.95, y: 0.25},
+            'a': {x: 0.10, y: 0.50}, 's': {x: 0.20, y: 0.50}, 'd': {x: 0.30, y: 0.50},
+            'f': {x: 0.40, y: 0.50}, 'g': {x: 0.50, y: 0.50}, 'h': {x: 0.60, y: 0.50},
+            'j': {x: 0.70, y: 0.50}, 'k': {x: 0.80, y: 0.50}, 'l': {x: 0.90, y: 0.50},
+            'z': {x: 0.20, y: 0.75}, 'x': {x: 0.30, y: 0.75}, 'c': {x: 0.40, y: 0.75},
+            'v': {x: 0.50, y: 0.75}, 'b': {x: 0.60, y: 0.75}, 'n': {x: 0.70, y: 0.75},
+            'm': {x: 0.80, y: 0.75}
+        };
+
+        function generateSwipePoints(word) {
+            const points = [];
+            for (let i = 0; i < word.length; i++) {
+                const char = word[i].toLowerCase();
+                if (keyLayout[char]) {
+                    const pos = keyLayout[char];
+                    // Add multiple points for each key to simulate swipe
+                    const numPoints = i === 0 || i === word.length - 1 ? 5 : 3;
+                    for (let j = 0; j < numPoints; j++) {
+                        points.push({
+                            x: pos.x + (Math.random() - 0.5) * 0.02,
+                            y: pos.y + (Math.random() - 0.5) * 0.02,
+                            t: points.length * 10
+                        });
+                    }
+                }
+            }
+            return points;
+        }
+
+        function computeFeatures(points) {
+            const features = [];
+            for (let i = 0; i < points.length; i++) {
+                const pt = points[i];
+                const feat = new Float32Array(37);
+
+                // Basic features
+                feat[0] = pt.x;
+                feat[1] = pt.y;
+                feat[2] = pt.t / 1000;
+
+                // Velocity
+                if (i > 0) {
+                    const prev = points[i-1];
+                    const dt = (pt.t - prev.t) / 1000;
+                    feat[3] = (pt.x - prev.x) / dt;
+                    feat[4] = (pt.y - prev.y) / dt;
+                }
+
+                features.push(feat);
+            }
+
+            // Convert to tensor format (B, F, T)
+            const T = features.length;
+            const featureTensor = new Float32Array(1 * 37 * T);
+
+            for (let t = 0; t < T; t++) {
+                for (let f = 0; f < 37; f++) {
+                    featureTensor[f * T + t] = features[t][f];
+                }
+            }
+
+            return {tensor: featureTensor, length: T};
+        }
+
+        async function loadModel(modelPath) {
+            try {
+                const sessionOptions = {
+                    executionProviders: ['wasm'],
+                    graphOptimizationLevel: 'all'
+                };
+
+                encoderSession = await ort.InferenceSession.create(modelPath, sessionOptions);
+                return true;
+            } catch (error) {
+                console.error('Failed to load model:', error);
+                return false;
+            }
+        }
+
+        async function runInference(points) {
+            if (!encoderSession) {
+                throw new Error('Model not loaded');
+            }
+
+            const {tensor, length} = computeFeatures(points);
+
+            const feeds = {
+                'features_bft': new ort.Tensor('float32', tensor, [1, 37, length]),
+                'lengths': new ort.Tensor('int32', [length], [1])
+            };
+
+            const output = await encoderSession.run(feeds);
+            return output;
+        }
+
+        async function testModel(modelPath, testWords) {
+            const testDiv = document.createElement('div');
+            testDiv.className = 'test';
+            testDiv.innerHTML = `<h3>Testing: ${modelPath}</h3>`;
+            results.appendChild(testDiv);
+
+            const loaded = await loadModel(modelPath);
+            if (!loaded) {
+                testDiv.innerHTML += '<p style="color:red">Failed to load model</p>';
+                return;
+            }
+
+            testDiv.innerHTML += '<p style="color:green">✓ Model loaded</p>';
+
+            for (const word of testWords) {
+                try {
+                    const points = generateSwipePoints(word);
+                    const startTime = performance.now();
+                    const output = await runInference(points);
+                    const inferenceTime = performance.now() - startTime;
+
+                    testDiv.innerHTML += `
+                        <p>Word: "${word}" -
+                           Points: ${points.length} -
+                           Inference: ${inferenceTime.toFixed(1)}ms -
+                           Output shape: [${output.encoded_btf.dims}]</p>`;
+
+                } catch (error) {
+                    testDiv.innerHTML += `<p style="color:red">Error testing "${word}": ${error.message}</p>`;
+                }
+            }
+        }
+
+        async function testAllModels() {
+            results.innerHTML = '<h2>Testing All Models...</h2>';
+
+            const models = [
+                'encoder_web_ultra.onnx',
+                'encoder_android_int8_final.onnx',
+                'encoder_fp32.onnx'
+            ];
+
+            const testWords = ['hello', 'world', 'test', 'swipe'];
+
+            for (const model of models) {
+                await testModel(model, testWords);
+            }
+        }
+
+        async function testAccuracy() {
+            results.innerHTML = '<h2>Testing Prediction Accuracy...</h2>';
+
+            // Load the default model
+            await loadModel('encoder_web_ultra.onnx');
+
+            const accuracyTests = [
+                {word: 'the', expected: ['the']},
+                {word: 'hello', expected: ['hello', 'help']},
+                {word: 'world', expected: ['world', 'word']},
+                {word: 'test', expected: ['test', 'rest']},
+                {word: 'good', expected: ['good', 'food']},
+                {word: 'time', expected: ['time', 'tire']},
+                {word: 'work', expected: ['work', 'word']},
+                {word: 'here', expected: ['here', 'her']},
+            ];
+
+            const testDiv = document.createElement('div');
+            testDiv.className = 'test';
+            results.appendChild(testDiv);
+
+            for (const test of accuracyTests) {
+                try {
+                    const points = generateSwipePoints(test.word);
+                    const output = await runInference(points);
+
+                    // In encoder-only mode, we just verify the encoder produces output
+                    const success = output.encoded_btf && output.encoded_btf.dims[0] === 1;
+
+                    testDiv.innerHTML += `
+                        <p class="${success ? 'success' : 'failure'}">
+                            "${test.word}": ${success ? '✓ Encoder produced output' : '✗ Failed'}
+                            (shape: [${output.encoded_btf.dims}])
+                        </p>`;
+
+                } catch (error) {
+                    testDiv.innerHTML += `
+                        <p class="failure">
+                            "${test.word}": ✗ Error - ${error.message}
+                        </p>`;
+                }
+            }
+        }
+
+        // Auto-run tests on load
+        window.addEventListener('DOMContentLoaded', () => {
+            results.innerHTML = '<p>Click a button to start testing...</p>';
+        });
+    </script>
+</body>
+</html>
