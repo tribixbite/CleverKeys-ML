@@ -7,6 +7,8 @@ import logging
 import torch
 import types
 
+import json
+
 from executorch.backends.xnnpack.partition.xnnpack_partitioner import XnnpackPartitioner
 from executorch.exir import to_edge
 
@@ -31,8 +33,16 @@ class RNNTStep(torch.nn.Module):
     """
     def __init__(self, model):
         super().__init__()
-        self.blank_idx = 0
-        self.vocab_size = len(model.cfg.labels)
+        # The model, when loaded, has the final vocabulary with the blank token at the end.
+        # This is the source of truth.
+        # Vocabulary is stored in the joint module, blank_idx in the decoder
+        self.vocabulary = model.joint.vocabulary
+        self.vocab_size = len(self.vocabulary)
+        self.blank_idx = model.decoder.blank_idx
+
+        log.info(f"Initializing RNNTStep with vocab size: {self.vocab_size} and blank_id: {self.blank_idx}")
+        if self.vocab_size != 30 or self.blank_idx != 29:
+            log.warning(f"Expected vocab_size=30 and blank_id=29 for blank_as_pad=True, but got {self.vocab_size} and {self.blank_idx}")
 
         # Decoder prediction net
         # Try standard NeMo layout: model.decoder.prednet.{embedding, decoder}
@@ -110,15 +120,29 @@ def save_pte(module: torch.nn.Module, example_inputs, out_path: str):
         f.write(buf)
 
 
+def save_runtime_metadata(out_path: str, vocab, blank_id: int):
+    """Saves critical metadata for the runtime decoder."""
+    # Convert OmegaConf ListConfig to regular list
+    vocab_list = list(vocab) if hasattr(vocab, '__iter__') else vocab
+    meta = {
+        "vocab_size": len(vocab_list),
+        "blank_id": blank_id,
+        "tokens": vocab_list,
+    }
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(meta, f, indent=2)
+    log.info(f"✓ Saved runtime metadata to {out_path}")
+
+
 def main():
     ap = argparse.ArgumentParser(description="Export single-step RNNT decoder+joint to ONNX and ExecuTorch.")
     ap.add_argument("--checkpoint", required=True, help="Path to trained .ckpt or .nemo artifact.")
     ap.add_argument("--onnx_out", default="rnnt_step_fp32.onnx", help="Output ONNX path.")
     ap.add_argument("--pte_out",  default="rnnt_step_fp32.pte",  help="Output ExecuTorch .pte path.")
+    ap.add_argument("--meta_out", default="runtime_meta.json", help="Output runtime metadata JSON path.")
     ap.add_argument("--layers", type=int, default=None, help="Override L (num_layers) if needed.")
     ap.add_argument("--hidden", type=int, default=None, help="Override H (hidden_size) if needed.")
     ap.add_argument("--enc_dim", type=int, default=None, help="Override encoder D if needed.")
-    ap.add_argument("--vocab", type=str, default=None, help="Path to vocabulary file for deriving blank_id.")
     ap.add_argument("--lexicon", help="Optional lexicon to include when packaging")
     ap.add_argument("--package-dir", help="Copy exports (and assets) into this directory")
     ap.add_argument(
@@ -129,38 +153,12 @@ def main():
     )
     args = ap.parse_args()
 
-    # Derive blank_id from model (authoritative) and compare with optional vocab hint
-    vocab_blank: int | None = None
-    if args.vocab:
-        try:
-            with open(args.vocab, "r", encoding="utf-8") as f:
-                tokens = [line.strip() for line in f if line.strip()]
-            token_to_idx = {tok: i for i, tok in enumerate(tokens)}
-            vocab_blank = token_to_idx.get("<blank>")
-            if vocab_blank is None:
-                log.warning("'<blank>' token not found in %s; runtime blank will be inferred from model", args.vocab)
-            else:
-                log.info("Vocabulary hint: blank_id=%s", vocab_blank)
-        except Exception as e:  # pragma: no cover - defensive logging
-            log.warning("Failed to load vocab file %s: %s", args.vocab, e)
-
-    # Check if input is .nemo or .ckpt
+    # Remove the old, confusing blank_id derivation logic
     model = load_trained_model(args.checkpoint)
-    model_blank = getattr(model.decoder, "blank_idx", None)
-    if model_blank is None:
-        log.warning("Model decoder missing blank_idx attribute; defaulting to 0")
-        model_blank = 0
-    blank_id = int(model_blank)
-    if vocab_blank is not None and vocab_blank != blank_id:
-        log.warning(
-            "Vocabulary blank_id=%s disagrees with model blank_idx=%s; using model value",
-            vocab_blank,
-            blank_id,
-        )
-
     step = RNNTStep(model).eval()
-    # Override the step's blank_idx with derived value
-    step.blank_idx = blank_id
+
+    # Save the metadata that the runtime needs
+    save_runtime_metadata(args.meta_out, step.vocabulary, step.blank_idx)
 
     # Example shapes
     B = 1
@@ -176,7 +174,7 @@ def main():
         except Exception:  # pragma: no cover - defensive fallback
             D = 512
 
-    y_prev = torch.tensor([blank_id], dtype=torch.long)
+    y_prev = torch.tensor([step.blank_idx], dtype=torch.long)
     h0 = torch.zeros(L, B, H)
     c0 = torch.zeros(L, B, H)
     enc_t = torch.randn(B, D)
@@ -208,12 +206,10 @@ def main():
     log.info("ExecuTorch export complete.")
 
     if args.package_dir:
-        artifacts = [args.onnx_out, args.pte_out]
+        artifacts = [args.onnx_out, args.pte_out, args.meta_out]
         extras = list(args.bundle_assets or [])
         if args.lexicon:
             extras.append(args.lexicon)
-        if args.vocab:
-            extras.append(args.vocab)
         package_artifacts(artifacts, args.package_dir, extra_files=extras)
 
 if __name__ == "__main__":
