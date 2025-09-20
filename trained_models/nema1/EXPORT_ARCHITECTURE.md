@@ -168,7 +168,7 @@ python export_rnnt_step.py \
   --checkpoint trained.ckpt \
   --onnx_out rnnt_step_fp32.onnx \
   --pte_out rnnt_step_fp32.pte \
-  --vocab trained_models/nema1/words.txt
+  --vocab ../../data/vocab.txt
 ```
 
 - Automatically detects embedding/LSTM layers and infers encoder dimensionality via a short forward pass.
@@ -180,7 +180,7 @@ python export_rnnt_step.py \
 
 ## Recommended Workflow
 
-1. **Train** with `train_transducer_personalized.py` using the best checkpoint: `rnnt_checkpoints_20250917_082255/.../epoch=16-wer=val_wer=0.094.ckpt` (9.4% WER)
+1. **Train** with `train_transducer_personalized.py` using the best checkpoint: `rnnt_checkpoints_rare_words_20250919_140007/.../epoch=80-wer=val_wer=0.152.ckpt` (15.2% WER on a difficult validation set)
 2. **Export models**:
    - Web: `export_optimized_onnx.py` → `encoder_web_ultra.onnx` (25MB INT8)
    - Android: `export_pte_ultra.py` → `encoder_android_optimized.pte` (64MB) + `encoder_android_ultra.onnx` (25MB INT8 alternative)

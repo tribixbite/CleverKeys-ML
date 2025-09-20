@@ -16,9 +16,8 @@ This guide covers deployment of the ultra-optimized quantized models for **magic
   - Ultra-optimized for XNNPACK/NNAPI
   - INT8 symmetric per-channel quantization
   - Mobile-specific graph optimizations
-- **`encoder_android_optimized.pte`** (64 MB) - **EXECUTOCRCH ALTERNATIVE**
-  - Android-optimized ExecuTorch model
-  - XNNPACK backend for ARM acceleration
+- **`encoder_android_optimized.pte`** (64 MB) - **FP32 EXECUTORCH ALTERNATIVE**
+  - Non-quantized, XNNPACK-accelerated FP32 model for baseline comparisons.
 
 ### **RNN-T Decoder Models**
 - **`rnnt_step_fp32.onnx`** (7.5 MB) - Web deployment decoder

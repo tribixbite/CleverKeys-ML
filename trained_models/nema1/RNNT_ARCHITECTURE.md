@@ -2,7 +2,7 @@
 
 This document captures the end-to-end pipeline used by the **personalized RNN-Transducer** training run (`trained_models/nema1/train_transducer_personalized.py`) and how it differs from the legacy transformer snapshot. It is the **production architecture** for both web and mobile deployment.
 
-**Best Checkpoint**: `rnnt_checkpoints_20250917_082255/.../epoch=16-wer=val_wer=0.094.ckpt` (9.4% validation WER)
+**Best Checkpoint**: `rnnt_checkpoints_rare_words_20250919_140007/.../epoch=80-wer=val_wer=0.152.ckpt` (15.2% validation WER on a curated difficult word set).
 
 ---
 
