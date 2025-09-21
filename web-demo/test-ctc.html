@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Test CTC Models</title>
+    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
+    <script src="js/ctc-decoder.js"></script>
+    <style>
+        body { font-family: monospace; padding: 20px; }
+        #status { color: blue; margin-bottom: 20px; }
+        #result { margin-top: 20px; background: #f0f0f0; padding: 10px; }
+        .error { color: red; }
+        .success { color: green; }
+        button { padding: 10px 20px; margin: 5px; }
+        button:disabled { opacity: 0.5; }
+    </style>
+</head>
+<body>
+    <h1>Test CTC Models</h1>
+    <div id="status">Loading models...</div>
+    <button id="testBtn" disabled>Run Test</button>
+    <button id="testSimpleBtn" disabled>Test Simple CTC</button>
+    <div id="result"></div>
+
+    <script>
+        const decoder = new CTCDecoder();
+
+        // Test trace for "hello" in [-1,1] coordinates matching training data format
+        const testTrace = {
+            word: "hello",
+            points: [
+                // h at position (5, 1) in QWERTY - converted from [0,1] to [-1,1]
+                {x: 0.1, y: 0.0, t: 0},
+                {x: 0.08, y: 0.0, t: 20},
+                // e at position (2, 0)
+                {x: -0.5, y: -0.66, t: 40},
+                {x: -0.52, y: -0.66, t: 60},
+                // l at position (8, 1)
+                {x: 0.7, y: 0.0, t: 80},
+                {x: 0.68, y: 0.0, t: 100},
+                // l again
+                {x: 0.7, y: 0.0, t: 120},
+                {x: 0.68, y: 0.0, t: 140},
+                // o at position (8, 0)
+                {x: 0.7, y: -0.66, t: 160},
+                {x: 0.68, y: -0.66, t: 180}
+            ]
+        };
+
+        async function init() {
+            try {
+                await decoder.initialize(
+                    'models/ctc/swipe_model_character_quant.onnx',
+                    'models/ctc/swipe_decoder_character_quant.onnx',
+                    'models/ctc/tokenizer_config.json'
+                );
+                document.getElementById('status').textContent = 'Models loaded successfully!';
+                document.getElementById('status').className = 'success';
+                document.getElementById('testBtn').disabled = false;
+                document.getElementById('testSimpleBtn').disabled = false;
+            } catch (error) {
+                document.getElementById('status').textContent = 'Error loading models: ' + error.message;
+                document.getElementById('status').className = 'error';
+                console.error(error);
+            }
+        }
+
+        async function runTest() {
+            const statusEl = document.getElementById('status');
+            const resultEl = document.getElementById('result');
+
+            try {
+                statusEl.textContent = 'Processing...';
+                console.log('Starting CTC test with trace:', testTrace);
+
+                // Run CTC decoding
+                const result = await decoder.greedyDecodeCTC(testTrace.points);
+                console.log('CTC result:', result);
+
+                // Display results
+                resultEl.innerHTML = `
+                    <h3>CTC Autoregressive Results</h3>
+                    <p>Expected: <strong>${testTrace.word}</strong></p>
+                    <p>Predicted: <strong>${result.text}</strong></p>
+                    <p>Token IDs: ${result.tokens.join(', ')}</p>
+                    <p>Status: ${result.text === testTrace.word ?
+                        '<span class="success">✓ Correct!</span>' :
+                        '<span class="error">✗ Incorrect</span>'}</p>
+                `;
+
+                statusEl.textContent = 'Test complete!';
+                statusEl.className = 'success';
+
+            } catch (error) {
+                statusEl.textContent = 'Error: ' + error.message;
+                statusEl.className = 'error';
+                console.error(error);
+                resultEl.innerHTML = `<pre>${error.stack}</pre>`;
+            }
+        }
+
+        async function runSimpleTest() {
+            const statusEl = document.getElementById('status');
+            const resultEl = document.getElementById('result');
+
+            try {
+                statusEl.textContent = 'Processing with simple CTC...';
+
+                // Run simple CTC decoding
+                const result = await decoder.simpleCTCDecode(testTrace.points);
+
+                // Display results
+                resultEl.innerHTML = `
+                    <h3>Simple CTC Results</h3>
+                    <p>Expected: <strong>${testTrace.word}</strong></p>
+                    <p>Predicted: <strong>${result.text}</strong></p>
+                    <p>Status: ${result.text === testTrace.word ?
+                        '<span class="success">✓ Correct!</span>' :
+                        '<span class="error">✗ Incorrect</span>'}</p>
+                `;
+
+                statusEl.textContent = 'Test complete!';
+                statusEl.className = 'success';
+
+            } catch (error) {
+                statusEl.textContent = 'Error: ' + error.message;
+                statusEl.className = 'error';
+                console.error(error);
+                resultEl.innerHTML = `<pre>${error.stack}</pre>`;
+            }
+        }
+
+        document.getElementById('testBtn').addEventListener('click', runTest);
+        document.getElementById('testSimpleBtn').addEventListener('click', runSimpleTest);
+
+        // Initialize on load
+        init();
+    </script>
+</body>
+</html>

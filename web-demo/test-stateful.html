@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Test Stateful RNN-T Decoder</title>
+    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
+    <script src="js/feature-extractor.js"></script>
+    <script src="js/onnx-rnnt-decoder.js"></script>
+    <style>
+        body { font-family: monospace; padding: 20px; }
+        #status { color: blue; }
+        #result { margin-top: 20px; background: #f0f0f0; padding: 10px; }
+        .error { color: red; }
+        .success { color: green; }
+    </style>
+</head>
+<body>
+    <h1>Test Stateful RNN-T Decoder</h1>
+    <div id="status">Loading models...</div>
+    <button id="testBtn" disabled>Run Test</button>
+    <div id="result"></div>
+
+    <script>
+        // Make objects globally available for testing
+        window.decoder = new RNNTDecoder();
+        window.preprocessor = new SwipePreprocessor();
+        const decoder = window.decoder;
+        const preprocessor = window.preprocessor;
+
+        // Test trace for "hello"
+        const testTrace = {
+            word: "hello",
+            points: [
+                {x: -0.15, y: 0.0, t: 0},     // h
+                {x: -0.1, y: 0.0, t: 20},
+                {x: 0.5, y: -0.3, t: 40},      // e
+                {x: 0.45, y: -0.35, t: 60},
+                {x: 0.2, y: -0.3, t: 80},      // l
+                {x: 0.15, y: -0.35, t: 100},
+                {x: 0.2, y: -0.3, t: 120},     // l
+                {x: 0.15, y: -0.35, t: 140},
+                {x: 0.6, y: -0.3, t: 160},     // o
+                {x: 0.55, y: -0.35, t: 180}
+            ]
+        };
+
+        async function init() {
+            try {
+                await decoder.initialize(
+                    'models/encoder.onnx',
+                    'models/decoder.onnx',
+                    'models/joint.onnx'
+                );
+                document.getElementById('status').textContent = 'Models loaded successfully!';
+                document.getElementById('status').className = 'success';
+                document.getElementById('testBtn').disabled = false;
+            } catch (error) {
+                document.getElementById('status').textContent = 'Error loading models: ' + error.message;
+                document.getElementById('status').className = 'error';
+                console.error(error);
+            }
+        }
+
+        async function runTest() {
+            const statusEl = document.getElementById('status');
+            const resultEl = document.getElementById('result');
+
+            try {
+                statusEl.textContent = 'Processing...';
+
+                // Preprocess the trace
+                const { features, numFrames } = preprocessor.process(testTrace.points);
+
+                // Convert to feature matrix
+                const featureMatrix = [];
+                for (let t = 0; t < numFrames; t++) {
+                    const frame = [];
+                    for (let f = 0; f < 37; f++) {
+                        frame.push(features[t * 37 + f]);
+                    }
+                    featureMatrix.push(frame);
+                }
+
+                // Run greedy decoding
+                console.log('Running greedy decode...');
+                const greedyResult = await decoder.greedyDecode(featureMatrix);
+
+                // Display results
+                resultEl.innerHTML = `
+                    <h3>Results</h3>
+                    <p>Expected: <strong>${testTrace.word}</strong></p>
+                    <p>Predicted: <strong>${greedyResult.text}</strong></p>
+                    <p>Token IDs: ${greedyResult.tokens.join(', ')}</p>
+                    <p>Status: ${greedyResult.text === testTrace.word ?
+                        '<span class="success">✓ Correct!</span>' :
+                        '<span class="error">✗ Incorrect</span>'}</p>
+                `;
+
+                statusEl.textContent = 'Test complete!';
+                statusEl.className = 'success';
+
+            } catch (error) {
+                statusEl.textContent = 'Error: ' + error.message;
+                statusEl.className = 'error';
+                console.error(error);
+            }
+        }
+
+        document.getElementById('testBtn').addEventListener('click', runTest);
+
+        // Initialize on load
+        init();
+    </script>
+</body>
+</html>

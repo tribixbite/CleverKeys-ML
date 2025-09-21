@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Swipe RNN-T Demo - Final</title>
+    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
+    <script src="js/feature-extractor-corrected.js"></script>
+    <script src="js/onnx-rnnt-decoder.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        h1 {
+            color: #333;
+            border-bottom: 2px solid #007bff;
+            padding-bottom: 10px;
+        }
+        .container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-top: 20px;
+        }
+        .panel {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .status {
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 10px;
+        }
+        .status.loading { background: #ffeaa7; }
+        .status.success { background: #55efc4; }
+        .status.error { background: #ff7675; color: white; }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .result {
+            margin-top: 20px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 4px;
+            border-left: 4px solid #007bff;
+        }
+        .test-case {
+            margin: 10px 0;
+            padding: 10px;
+            background: #f8f9fa;
+            border-radius: 4px;
+        }
+        .correct {
+            color: green;
+            font-weight: bold;
+        }
+        .incorrect {
+            color: red;
+            font-weight: bold;
+        }
+        pre {
+            background: #2c3e50;
+            color: #ecf0f1;
+            padding: 10px;
+            border-radius: 4px;
+            overflow-x: auto;
+        }
+    </style>
+</head>
+<body>
+    <h1>🚀 Swipe RNN-T Demo - Production Ready</h1>
+
+    <div class="status loading" id="status">Loading models...</div>
+
+    <div class="container">
+        <div class="panel">
+            <h2>Test Controls</h2>
+            <button id="testSingleBtn" disabled>Test Single Word</button>
+            <button id="testMultipleBtn" disabled>Test Multiple Words</button>
+            <button id="testBeamBtn" disabled>Test with Beam Search</button>
+
+            <h3>Test Cases</h3>
+            <div id="testCases"></div>
+        </div>
+
+        <div class="panel">
+            <h2>Results</h2>
+            <div id="results"></div>
+        </div>
+    </div>
+
+    <div class="panel" style="margin-top: 20px;">
+        <h2>Debug Console</h2>
+        <pre id="console"></pre>
+    </div>
+
+    <script>
+        // Global objects
+        const decoder = new RNNTDecoder();
+        const featureExtractor = new SwipeFeatureExtractorCorrected();
+
+        // Test traces in [0, 1] coordinates (matching training data format)
+        const testTraces = {
+            hello: {
+                word: "hello",
+                points: [
+                    // h at position (4, 1) in QWERTY -> (0.45, 0.5)
+                    {x: 0.45, y: 0.5, t: 0},
+                    {x: 0.44, y: 0.5, t: 20},
+                    // e at position (2, 0) -> (0.25, 0.17)
+                    {x: 0.25, y: 0.17, t: 40},
+                    {x: 0.24, y: 0.17, t: 60},
+                    // l at position (8, 1) -> (0.85, 0.5)
+                    {x: 0.85, y: 0.5, t: 80},
+                    {x: 0.84, y: 0.5, t: 100},
+                    // l again
+                    {x: 0.85, y: 0.5, t: 120},
+                    {x: 0.84, y: 0.5, t: 140},
+                    // o at position (8, 0) -> (0.85, 0.17)
+                    {x: 0.85, y: 0.17, t: 160},
+                    {x: 0.84, y: 0.17, t: 180}
+                ]
+            },
+            the: {
+                word: "the",
+                points: [
+                    // t at position (4, 0) -> (0.45, 0.17)
+                    {x: 0.45, y: 0.17, t: 0},
+                    {x: 0.44, y: 0.17, t: 20},
+                    // h at position (5, 1) -> (0.55, 0.5)
+                    {x: 0.55, y: 0.5, t: 40},
+                    {x: 0.54, y: 0.5, t: 60},
+                    // e at position (2, 0) -> (0.25, 0.17)
+                    {x: 0.25, y: 0.17, t: 80},
+                    {x: 0.24, y: 0.17, t: 100}
+                ]
+            },
+            world: {
+                word: "world",
+                points: [
+                    // w at position (1, 0) -> (0.15, 0.17)
+                    {x: 0.15, y: 0.17, t: 0},
+                    {x: 0.14, y: 0.17, t: 20},
+                    // o at position (8, 0) -> (0.85, 0.17)
+                    {x: 0.85, y: 0.17, t: 40},
+                    {x: 0.84, y: 0.17, t: 60},
+                    // r at position (3, 0) -> (0.35, 0.17)
+                    {x: 0.35, y: 0.17, t: 80},
+                    {x: 0.34, y: 0.17, t: 100},
+                    // l at position (8, 1) -> (0.85, 0.5)
+                    {x: 0.85, y: 0.5, t: 120},
+                    {x: 0.84, y: 0.5, t: 140},
+                    // d at position (2, 1) -> (0.25, 0.5)
+                    {x: 0.25, y: 0.5, t: 160},
+                    {x: 0.24, y: 0.5, t: 180}
+                ]
+            }
+        };
+
+        function log(message) {
+            const consoleEl = document.getElementById('console');
+            const timestamp = new Date().toISOString().split('T')[1].split('.')[0];
+            consoleEl.textContent += `[${timestamp}] ${message}\n`;
+            consoleEl.scrollTop = consoleEl.scrollHeight;
+        }
+
+        async function init() {
+            try {
+                log('Initializing RNN-T decoder...');
+                await decoder.initialize(
+                    'models/encoder.onnx',
+                    'models/decoder.onnx',
+                    'models/joint.onnx'
+                );
+
+                const status = document.getElementById('status');
+                status.textContent = '✅ Models loaded successfully!';
+                status.className = 'status success';
+
+                // Enable buttons
+                document.getElementById('testSingleBtn').disabled = false;
+                document.getElementById('testMultipleBtn').disabled = false;
+                document.getElementById('testBeamBtn').disabled = false;
+
+                log('Models loaded successfully');
+                log(`Vocab size: ${decoder.vocabSize}, Blank ID: ${decoder.blankId}`);
+
+            } catch (error) {
+                const status = document.getElementById('status');
+                status.textContent = '❌ Error loading models: ' + error.message;
+                status.className = 'status error';
+                log('Error: ' + error.message);
+                console.error(error);
+            }
+        }
+
+        async function processTrace(trace, useBeamSearch = false) {
+            // Extract features
+            const result = featureExtractor.process(trace.points);
+            log(`Processing "${trace.word}": ${result.numFrames} frames`);
+
+            // Convert to feature matrix for decoder
+            const featureMatrix = [];
+            for (let t = 0; t < result.numFrames; t++) {
+                const frame = [];
+                for (let f = 0; f < 37; f++) {
+                    frame.push(result.features[t * 37 + f]);
+                }
+                featureMatrix.push(frame);
+            }
+
+            // Run decoding
+            if (useBeamSearch) {
+                const hypotheses = await decoder.beamSearch(featureMatrix, {
+                    beamSize: 5,
+                    maxSymbols: 20
+                });
+                return hypotheses[0]; // Return best hypothesis
+            } else {
+                return await decoder.greedyDecode(featureMatrix);
+            }
+        }
+
+        async function testSingle() {
+            const resultsEl = document.getElementById('results');
+            resultsEl.innerHTML = '<h3>Single Word Test</h3>';
+
+            const trace = testTraces.hello;
+            const result = await processTrace(trace);
+
+            const isCorrect = result.text === trace.word;
+            resultsEl.innerHTML += `
+                <div class="result">
+                    <p>Expected: <strong>${trace.word}</strong></p>
+                    <p>Predicted: <strong>${result.text}</strong></p>
+                    <p>Token IDs: ${result.tokens.join(', ')}</p>
+                    <p class="${isCorrect ? 'correct' : 'incorrect'}">
+                        ${isCorrect ? '✓ Correct!' : '✗ Incorrect'}
+                    </p>
+                </div>
+            `;
+        }
+
+        async function testMultiple() {
+            const resultsEl = document.getElementById('results');
+            resultsEl.innerHTML = '<h3>Multiple Words Test</h3>';
+
+            let correct = 0;
+            let total = 0;
+
+            for (const [key, trace] of Object.entries(testTraces)) {
+                const result = await processTrace(trace);
+                const isCorrect = result.text === trace.word;
+
+                if (isCorrect) correct++;
+                total++;
+
+                resultsEl.innerHTML += `
+                    <div class="test-case">
+                        <strong>${trace.word}</strong> → ${result.text}
+                        <span class="${isCorrect ? 'correct' : 'incorrect'}">
+                            ${isCorrect ? '✓' : '✗'}
+                        </span>
+                    </div>
+                `;
+            }
+
+            resultsEl.innerHTML += `
+                <div class="result">
+                    <h4>Accuracy: ${correct}/${total} (${(100 * correct / total).toFixed(1)}%)</h4>
+                </div>
+            `;
+        }
+
+        async function testBeamSearch() {
+            const resultsEl = document.getElementById('results');
+            resultsEl.innerHTML = '<h3>Beam Search Test</h3>';
+
+            const trace = testTraces.hello;
+            const result = await processTrace(trace, true);
+
+            const isCorrect = result.text === trace.word;
+            resultsEl.innerHTML += `
+                <div class="result">
+                    <p>Expected: <strong>${trace.word}</strong></p>
+                    <p>Predicted: <strong>${result.text}</strong></p>
+                    <p>Score: ${result.score.toFixed(4)}</p>
+                    <p class="${isCorrect ? 'correct' : 'incorrect'}">
+                        ${isCorrect ? '✓ Correct!' : '✗ Incorrect'}
+                    </p>
+                </div>
+            `;
+        }
+
+        // Event listeners
+        document.getElementById('testSingleBtn').addEventListener('click', testSingle);
+        document.getElementById('testMultipleBtn').addEventListener('click', testMultiple);
+        document.getElementById('testBeamBtn').addEventListener('click', testBeamSearch);
+
+        // Initialize on load
+        init();
+    </script>
+</body>
+</html>

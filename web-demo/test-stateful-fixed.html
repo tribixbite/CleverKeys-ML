@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Test Stateful RNN-T Decoder</title>
+    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
+    <script src="js/feature-extractor.js"></script>
+    <script src="js/onnx-rnnt-decoder.js"></script>
+    <style>
+        body { font-family: monospace; padding: 20px; }
+        #status { color: blue; }
+        #result { margin-top: 20px; background: #f0f0f0; padding: 10px; }
+        .error { color: red; }
+        .success { color: green; }
+    </style>
+</head>
+<body>
+    <h1>Test Stateful RNN-T Decoder</h1>
+    <div id="status">Loading models...</div>
+    <button id="testBtn" disabled>Run Test</button>
+    <div id="result"></div>
+
+    <script>
+        // Make objects globally available for testing
+        window.decoder = new RNNTDecoder();
+
+        // Create preprocessor that expects [0,1] input and converts to [-1,1]
+        class SwipePreprocessorNormalized {
+            constructor() {
+                this.extractor = new SwipeFeatureExtractor();
+            }
+
+            process(points) {
+                // Convert [0,1] to [-1,1] coordinates
+                const normalizedPoints = points.map(pt => ({
+                    x: pt.x * 2.0 - 1.0,
+                    y: pt.y * 2.0 - 1.0,
+                    t: pt.t
+                }));
+
+                const result = this.extractor.extractFeatures(normalizedPoints);
+                // Flatten feature matrix for ONNX input
+                const numFrames = result.features.length;
+                const featureDim = 37;
+                const flatFeatures = new Float32Array(numFrames * featureDim);
+
+                for (let t = 0; t < numFrames; t++) {
+                    for (let f = 0; f < featureDim; f++) {
+                        flatFeatures[t * featureDim + f] = result.features[t][f];
+                    }
+                }
+
+                return {
+                    features: flatFeatures,
+                    numFrames: numFrames,
+                    originalLength: result.originalLength,
+                    duration: result.duration
+                };
+            }
+        }
+
+        window.preprocessor = new SwipePreprocessorNormalized();
+        const decoder = window.decoder;
+        const preprocessor = window.preprocessor;
+
+        // Test trace for "hello" in [0,1] coordinates matching training data format
+        const testTrace = {
+            word: "hello",
+            points: [
+                // h at position (4, 1) in QWERTY layout -> roughly (0.4, 0.5)
+                {x: 0.42, y: 0.50, t: 0},
+                {x: 0.43, y: 0.50, t: 20},
+                // e at position (2, 0) -> roughly (0.25, 0.17)
+                {x: 0.25, y: 0.17, t: 40},
+                {x: 0.24, y: 0.17, t: 60},
+                // l at position (8, 1) -> roughly (0.85, 0.5)
+                {x: 0.85, y: 0.50, t: 80},
+                {x: 0.84, y: 0.50, t: 100},
+                // l again
+                {x: 0.85, y: 0.50, t: 120},
+                {x: 0.84, y: 0.50, t: 140},
+                // o at position (8, 0) -> roughly (0.85, 0.17)
+                {x: 0.85, y: 0.17, t: 160},
+                {x: 0.84, y: 0.17, t: 180}
+            ]
+        };
+
+        // Also store this globally for tests
+        window.testTrace = testTrace;
+
+        async function init() {
+            try {
+                await decoder.initialize(
+                    'models/encoder.onnx',
+                    'models/decoder.onnx',
+                    'models/joint.onnx'
+                );
+                document.getElementById('status').textContent = 'Models loaded successfully!';
+                document.getElementById('status').className = 'success';
+                document.getElementById('testBtn').disabled = false;
+            } catch (error) {
+                document.getElementById('status').textContent = 'Error loading models: ' + error.message;
+                document.getElementById('status').className = 'error';
+                console.error(error);
+            }
+        }
+
+        async function runTest() {
+            const statusEl = document.getElementById('status');
+            const resultEl = document.getElementById('result');
+
+            try {
+                statusEl.textContent = 'Processing...';
+
+                // Preprocess the trace
+                const { features, numFrames } = preprocessor.process(testTrace.points);
+
+                // Convert to feature matrix
+                const featureMatrix = [];
+                for (let t = 0; t < numFrames; t++) {
+                    const frame = [];
+                    for (let f = 0; f < 37; f++) {
+                        frame.push(features[t * 37 + f]);
+                    }
+                    featureMatrix.push(frame);
+                }
+
+                // Run greedy decoding
+                console.log('Running greedy decode...');
+                const greedyResult = await decoder.greedyDecode(featureMatrix);
+
+                // Display results
+                resultEl.innerHTML = `
+                    <h3>Results</h3>
+                    <p>Expected: <strong>${testTrace.word}</strong></p>
+                    <p>Predicted: <strong>${greedyResult.text}</strong></p>
+                    <p>Token IDs: ${greedyResult.tokens.join(', ')}</p>
+                    <p>Status: ${greedyResult.text === testTrace.word ?
+                        '<span class="success">✓ Correct!</span>' :
+                        '<span class="error">✗ Incorrect</span>'}</p>
+                `;
+
+                statusEl.textContent = 'Test complete!';
+                statusEl.className = 'success';
+
+            } catch (error) {
+                statusEl.textContent = 'Error: ' + error.message;
+                statusEl.className = 'error';
+                console.error(error);
+            }
+        }
+
+        document.getElementById('testBtn').addEventListener('click', runTest);
+
+        // Initialize on load
+        init();
+    </script>
+</body>
+</html>

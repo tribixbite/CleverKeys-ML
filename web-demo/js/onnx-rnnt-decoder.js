@@ -178,7 +178,8 @@ class RNNTDecoder {
         let currentToken = this.blankId; // Start with blank token
 
         // Process each encoder frame
-        for (let t = 0; t < Math.min(encodedLen, maxSymbols); t++) {
+        const seqLength = typeof encodedLen === 'bigint' ? Number(encodedLen) : encodedLen;
+        for (let t = 0; t < Math.min(seqLength, maxSymbols); t++) {
             // Extract encoder frame at time t
             const frameData = new Float32Array(this.decoderConfig.encoder_dim);
             for (let i = 0; i < this.decoderConfig.encoder_dim; i++) {
@@ -252,7 +253,8 @@ class RNNTDecoder {
         }];
 
         // Process each encoder frame
-        for (let t = 0; t < Math.min(encodedLen, maxSymbols); t++) {
+        const seqLength = typeof encodedLen === 'bigint' ? Number(encodedLen) : encodedLen;
+        for (let t = 0; t < Math.min(seqLength, maxSymbols); t++) {
             let nextBeam = [];
 
             // Extract encoder frame

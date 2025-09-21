@@ -28,11 +28,17 @@ class StatefulRNNTDecoder(nn.Module):
     def __init__(self, nemo_decoder):
         super().__init__()
         self.embedding = nemo_decoder.prediction.embed
-        self.lstm_layers = nemo_decoder.prediction.lstm_layers
+        self.dec_rnn = nemo_decoder.prediction.dec_rnn
+        self.lstm = self.dec_rnn.lstm  # The actual multi-layer LSTM
         self.dropout = nemo_decoder.prediction.dropout if hasattr(nemo_decoder.prediction, 'dropout') else None
-        self.projection = nemo_decoder.prediction.project
-        self.vocab_size = nemo_decoder.vocab_size
+        # Project/projection layer is optional
+        self.projection = getattr(nemo_decoder.prediction, 'project', None) or getattr(nemo_decoder.prediction, 'projection', None)
+        self.vocab_size = nemo_decoder.vocab_size if hasattr(nemo_decoder, 'vocab_size') else nemo_decoder.num_classes_with_blank
         self.blank_idx = nemo_decoder.blank_idx
+
+        # Store LSTM configuration
+        self.num_layers = self.lstm.num_layers
+        self.hidden_size = self.lstm.hidden_size
 
     def forward(self, input_tokens, h_prev, c_prev):
         """
@@ -51,29 +57,13 @@ class StatefulRNNTDecoder(nn.Module):
         # Embed input tokens
         embedded = self.embedding(input_tokens)  # [batch, 1, embed_dim]
 
-        # Process through LSTM layers with state
-        output = embedded
-        h_list = []
-        c_list = []
+        # Process through multi-layer LSTM with state
+        # The LSTM expects states as (h, c) where each has shape [num_layers, batch, hidden]
+        output, (h_next, c_next) = self.lstm(embedded, (h_prev, c_prev))
 
-        for i, lstm in enumerate(self.lstm_layers):
-            # Extract layer-specific states
-            h_i = h_prev[i:i+1]  # [1, batch, hidden]
-            c_i = c_prev[i:i+1]  # [1, batch, hidden]
-
-            # Run LSTM
-            output, (h_new, c_new) = lstm(output, (h_i, c_i))
-
-            h_list.append(h_new)
-            c_list.append(c_new)
-
-            # Apply dropout if available
-            if self.dropout is not None:
-                output = self.dropout(output)
-
-        # Stack states for all layers
-        h_next = torch.cat(h_list, dim=0)  # [num_layers, batch, hidden]
-        c_next = torch.cat(c_list, dim=0)  # [num_layers, batch, hidden]
+        # Apply dropout if available
+        if self.dropout is not None:
+            output = self.dropout(output)
 
         # Project to decoder output space (not vocab space yet - joint does that)
         decoder_output = self.projection(output) if self.projection else output
@@ -87,8 +77,11 @@ class StatefulRNNTJoint(nn.Module):
     """
     def __init__(self, nemo_joint):
         super().__init__()
+        # The joint network has separate projections for encoder and decoder
+        self.enc_proj = nemo_joint.enc
+        self.pred_proj = nemo_joint.pred
         self.joint_net = nemo_joint.joint_net
-        self.vocab_size = nemo_joint.num_classes
+        self.vocab_size = nemo_joint._num_classes
 
     def forward(self, encoder_output, decoder_output):
         """
@@ -101,12 +94,17 @@ class StatefulRNNTJoint(nn.Module):
         Returns:
             logits: [batch_size, 1, vocab_size]
         """
-        # Combine and project to vocabulary
-        joint_out = self.joint_net(encoder_output, decoder_output)
+        # Project encoder and decoder to joint space
+        enc_proj = self.enc_proj(encoder_output)
+        pred_proj = self.pred_proj(decoder_output)
+
+        # Combine and compute logits
+        combined = enc_proj + pred_proj  # Element-wise addition in joint space
+        joint_out = self.joint_net(combined)
         return joint_out
 
 
-def export_stateful_onnx(model, output_dir, quantize_int8=False):
+def export_stateful_onnx(model, output_dir, quantize_int8=False, verbose=False):
     """Export the model as separate stateful ONNX components."""
     output_dir = Path(output_dir)
     output_dir.mkdir(exist_ok=True, parents=True)
@@ -126,9 +124,23 @@ def export_stateful_onnx(model, output_dir, quantize_int8=False):
     dummy_audio = torch.randn(batch_size, feat_dim, time_steps)
     dummy_length = torch.tensor([time_steps], dtype=torch.long)
 
+    # Wrap encoder to handle NeMo's kwargs requirement
+    class EncoderWrapper(torch.nn.Module):
+        def __init__(self, encoder):
+            super().__init__()
+            self.encoder = encoder
+
+        def forward(self, audio_signal, length):
+            return self.encoder(audio_signal=audio_signal, length=length)
+
+    encoder_wrapper = EncoderWrapper(encoder)
+    encoder_wrapper.eval()
+
     encoder_path = output_dir / "encoder.onnx"
+    if verbose:
+        print("Exporting encoder with verbose output...")
     torch.onnx.export(
-        encoder,
+        encoder_wrapper,
         (dummy_audio, dummy_length),
         str(encoder_path),
         input_names=["audio_signal", "length"],
@@ -141,7 +153,8 @@ def export_stateful_onnx(model, output_dir, quantize_int8=False):
         },
         opset_version=14,
         export_params=True,
-        do_constant_folding=True
+        do_constant_folding=True,
+        verbose=verbose
     )
     print(f"Encoder exported to {encoder_path}")
 
@@ -150,9 +163,9 @@ def export_stateful_onnx(model, output_dir, quantize_int8=False):
     stateful_decoder = StatefulRNNTDecoder(model.decoder)
     stateful_decoder.eval()
 
-    # Get LSTM dimensions
-    num_layers = len(model.decoder.prediction.lstm_layers)
-    hidden_size = model.decoder.prediction.pred_hidden
+    # Get LSTM dimensions from the stateful decoder
+    num_layers = stateful_decoder.num_layers
+    hidden_size = stateful_decoder.hidden_size
 
     # Example inputs for decoder
     dummy_tokens = torch.zeros(batch_size, 1, dtype=torch.long)
@@ -232,8 +245,9 @@ def generate_runtime_meta(model, vocab, output_dir):
     print(f"Generating runtime_meta.json in {output_dir}...")
 
     # Get LSTM configuration
-    num_layers = len(model.decoder.prediction.lstm_layers)
-    hidden_size = model.decoder.prediction.pred_hidden
+    lstm = model.decoder.prediction.dec_rnn.lstm
+    num_layers = lstm.num_layers
+    hidden_size = lstm.hidden_size
 
     meta = {
         "vocab_size": len(vocab) + 1,  # Include blank token
@@ -245,7 +259,7 @@ def generate_runtime_meta(model, vocab, output_dir):
             "num_layers": num_layers,
             "hidden_size": hidden_size,
             "encoder_dim": model.encoder.d_model,
-            "decoder_dim": model.decoder.pred_hidden if hasattr(model.decoder, 'pred_hidden') else hidden_size
+            "decoder_dim": hidden_size
         }
     }
 
@@ -257,11 +271,43 @@ def generate_runtime_meta(model, vocab, output_dir):
     print("runtime_meta.json generated.")
 
 
+def validate_exported_models(output_dir):
+    """Validate that exported models can be loaded and run inference."""
+    try:
+        import onnxruntime as ort
+        print("\nValidating exported models...")
+
+        # Check encoder
+        encoder_session = ort.InferenceSession(str(output_dir / "encoder.onnx"))
+        print(f"✓ Encoder loaded successfully")
+        print(f"  Inputs: {[i.name for i in encoder_session.get_inputs()]}")
+        print(f"  Outputs: {[o.name for o in encoder_session.get_outputs()]}")
+
+        # Check decoder
+        decoder_session = ort.InferenceSession(str(output_dir / "decoder.onnx"))
+        print(f"✓ Decoder loaded successfully")
+        print(f"  Inputs: {[i.name for i in decoder_session.get_inputs()]}")
+        print(f"  Outputs: {[o.name for o in decoder_session.get_outputs()]}")
+
+        # Check joint
+        joint_session = ort.InferenceSession(str(output_dir / "joint.onnx"))
+        print(f"✓ Joint network loaded successfully")
+        print(f"  Inputs: {[i.name for i in joint_session.get_inputs()]}")
+        print(f"  Outputs: {[o.name for o in joint_session.get_outputs()]}")
+
+        return True
+    except Exception as e:
+        print(f"✗ Validation failed: {e}")
+        return False
+
+
 def main():
     parser = argparse.ArgumentParser(description="Stateful ONNX Export for RNN-T")
     parser.add_argument("--checkpoint", required=True, type=str, help="Path to .ckpt file")
     parser.add_argument("--output_dir", required=True, type=str, help="Directory to save exported files")
     parser.add_argument("--quantize", choices=['int8', 'none'], default='none', help="Quantization type")
+    parser.add_argument("--validate", action="store_true", help="Validate exported models")
+    parser.add_argument("--verbose", action="store_true", help="Enable verbose export output")
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir)
@@ -286,6 +332,10 @@ def main():
 
     # Generate runtime metadata
     generate_runtime_meta(model, vocab, output_dir)
+
+    # Validate if requested
+    if args.validate:
+        validate_exported_models(output_dir)
 
     print(f"\nExport complete! Files saved to {output_dir}")
     print("Files created:")

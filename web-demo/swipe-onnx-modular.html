@@ -4,8 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Neural Swipe Typing - Modular ONNX Demo</title>
-    <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.16.3/dist/ort.min.js"></script>
+    <script src="js/feature-extractor-corrected.js"></script>
+    <script src="js/onnx-rnnt-decoder.js"></script>
+    <script src="js/ctc-decoder.js"></script>
     <style>
         .key {
             transition: all 0.1s;
@@ -39,10 +41,20 @@
             <p id="status" class="text-gray-400">Loading models...</p>
         </div>
 
+        <!-- Model Selector -->
+        <div class="mb-4 p-4 bg-gray-800 rounded">
+            <label for="modelType" class="block text-sm text-gray-400 mb-2">Select Model Type:</label>
+            <select id="modelType" class="w-full px-4 py-2 bg-gray-700 rounded text-white">
+                <option value="rnnt">RNN-T Model (Advanced)</option>
+                <option value="ctc">CTC Model (Character-based)</option>
+            </select>
+        </div>
+
         <!-- Controls -->
         <div class="mb-4 flex gap-2 justify-center">
             <button id="clearBtn" class="px-4 py-2 bg-blue-600 rounded hover:bg-blue-700">Clear</button>
             <button id="debugBtn" class="px-4 py-2 bg-gray-700 rounded hover:bg-gray-600">Debug: OFF</button>
+            <button id="testBtn" class="px-4 py-2 bg-green-600 rounded hover:bg-green-700">Test "hello"</button>
         </div>
 
         <!-- Input Display -->
@@ -111,12 +123,12 @@
     </div>
 
     <!-- Load modular components -->
-    <script src="js/feature-extractor.js"></script>
-    <script src="js/onnx-model-interface.js"></script>
 
     <script>
         // Global state
-        let modelInterface = null;
+        let currentModelType = 'rnnt';
+        let rnntDecoder = null;
+        let ctcDecoder = null;
         let featureExtractor = null;
         let isModelReady = false;
         let inputText = '';
@@ -139,22 +151,36 @@
 
             // Initialize components
             featureExtractor = new SwipeFeatureExtractor();
-            modelInterface = new ONNXModelInterface();
+            await featureExtractor.loadMetadata('models/rnnt/runtime_meta.json');
 
             // Load models
             try {
-                updateStatus('Loading encoder model...');
-                await modelInterface.initialize('encoder-model.onnx', 'decoder_joint-model.onnx');
+                updateStatus('Loading models...');
 
-                updateStatus('Loading runtime metadata...');
-                await modelInterface.loadRuntimeMeta('runtime_meta.json');
+                // Initialize RNN-T decoder
+                rnntDecoder = new ONNXRNNTDecoder();
+                await rnntDecoder.initialize(
+                    'models/rnnt/encoder.onnx',
+                    'models/rnnt/decoder.onnx',
+                    'models/rnnt/joint.onnx',
+                    'models/rnnt/runtime_meta.json'
+                );
+                rnntDecoder.setFeatureExtractor(featureExtractor);
+
+                // Initialize CTC decoder
+                ctcDecoder = new CTCDecoder();
+                await ctcDecoder.initialize(
+                    'models/ctc/swipe_model_character_quant.onnx',
+                    'models/ctc/swipe_decoder_character_quant.onnx',
+                    'models/ctc/tokenizer_config.json'
+                );
 
                 isModelReady = true;
-                updateStatus('Ready');
+                updateStatus('Ready - Both models loaded');
                 console.log('✅ All models loaded successfully');
             } catch (error) {
                 console.error('Failed to load models:', error);
-                updateStatus('Failed to load models', 'error');
+                updateStatus('Failed to load models: ' + error.message, 'error');
             }
 
             // Setup event handlers
@@ -193,6 +219,8 @@
             // Control buttons
             document.getElementById('clearBtn').onclick = clearInput;
             document.getElementById('debugBtn').onclick = toggleDebug;
+            document.getElementById('testBtn').onclick = testHello;
+            document.getElementById('modelType').onchange = switchModel;
 
             // Suggestion clicks
             document.getElementById('suggestions').addEventListener('click', e => {
@@ -333,32 +361,36 @@
         async function processSwipe() {
             if (!isModelReady || swipePath.length < 3) return;
 
-            updateStatus('Processing swipe...');
+            updateStatus(`Processing swipe with ${currentModelType.toUpperCase()}...`);
 
             try {
-                // Extract features
-                const extracted = featureExtractor.extractFeatures(swipePath);
-                console.log(`📊 Features extracted: ${extracted.features.length} frames`);
-
-                // Run beam search
+                let result;
                 const startTime = performance.now();
-                const hypotheses = await modelInterface.beamSearch(extracted.features, {
-                    beamSize: 10,
-                    maxSymbols: 20,
-                    topK: 5
-                });
-                const latency = performance.now() - startTime;
 
+                if (currentModelType === 'rnnt') {
+                    // Process with RNN-T model
+                    result = await rnntDecoder.decode(swipePath, 'greedy');
+                    console.log('RNN-T result:', result);
+                } else {
+                    // Process with CTC model
+                    result = await ctcDecoder.greedyDecodeCTC(swipePath);
+                    console.log('CTC result:', result);
+                }
+
+                const latency = performance.now() - startTime;
                 console.log(`✅ Inference complete in ${latency.toFixed(1)}ms`);
-                console.log('Top predictions:', hypotheses.slice(0, 3));
 
                 // Display results
+                const hypotheses = [{
+                    text: result.text,
+                    score: result.score || 1.0
+                }];
                 displayPredictions(hypotheses);
 
-                updateStatus('Ready');
+                updateStatus(`Ready (${currentModelType.toUpperCase()})`);
             } catch (error) {
                 console.error('Processing error:', error);
-                updateStatus('Processing failed', 'error');
+                updateStatus('Processing failed: ' + error.message, 'error');
             }
         }
 
@@ -423,6 +455,49 @@
             } else {
                 debugOutput.classList.add('hidden');
             }
+        }
+
+        function switchModel() {
+            currentModelType = document.getElementById('modelType').value;
+            clearInput();
+            updateStatus(`Switched to ${currentModelType.toUpperCase()} model`);
+            console.log(`Model switched to: ${currentModelType}`);
+        }
+
+        function testHello() {
+            // Test trace for "hello" in [-1,1] coordinates
+            swipePath = [
+                {x: 0.1, y: 0.0, t: 0},      // h
+                {x: 0.08, y: 0.0, t: 20},
+                {x: -0.5, y: -0.66, t: 40},   // e
+                {x: -0.52, y: -0.66, t: 60},
+                {x: 0.7, y: 0.0, t: 80},      // l
+                {x: 0.68, y: 0.0, t: 100},
+                {x: 0.7, y: 0.0, t: 120},     // l
+                {x: 0.68, y: 0.0, t: 140},
+                {x: 0.7, y: -0.66, t: 160},   // o
+                {x: 0.68, y: -0.66, t: 180}
+            ];
+
+            // Draw the trace
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.beginPath();
+            ctx.strokeStyle = 'rgba(34, 197, 94, 0.8)'; // Green for test
+
+            for (let i = 0; i < swipePath.length; i++) {
+                const p = swipePath[i];
+                const x = ((p.x + 1) / 2) * canvas.width;
+                const y = ((p.y + 1) / 2) * canvas.height;
+
+                if (i === 0) {
+                    ctx.moveTo(x, y);
+                } else {
+                    ctx.lineTo(x, y);
+                }
+            }
+            ctx.stroke();
+
+            processSwipe();
         }
 
         function showDebugInfo() {

@@ -250,7 +250,42 @@ class SwipeFeatureExtractor {
     }
 }
 
+/**
+ * Preprocessor wrapper for compatibility
+ */
+class SwipePreprocessor {
+    constructor() {
+        this.extractor = new SwipeFeatureExtractor();
+    }
+
+    /**
+     * Process swipe trace into features
+     * @param {Array} points - Array of {x, y, t} points
+     * @returns {Object} Features and metadata
+     */
+    process(points) {
+        const result = this.extractor.extractFeatures(points);
+        // Flatten feature matrix for ONNX input
+        const numFrames = result.features.length;
+        const featureDim = 37;
+        const flatFeatures = new Float32Array(numFrames * featureDim);
+
+        for (let t = 0; t < numFrames; t++) {
+            for (let f = 0; f < featureDim; f++) {
+                flatFeatures[t * featureDim + f] = result.features[t][f];
+            }
+        }
+
+        return {
+            features: flatFeatures,
+            numFrames: numFrames,
+            originalLength: result.originalLength,
+            duration: result.duration
+        };
+    }
+}
+
 // Export for use
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = SwipeFeatureExtractor;
+    module.exports = { SwipeFeatureExtractor, SwipePreprocessor };
 }
