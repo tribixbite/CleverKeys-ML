@@ -535,7 +535,7 @@
                 if (name.includes('feature') || name.includes('audio')) {
                     encInputs[name] = new ort.Tensor('float32', featsBFT, [1, F, T]);
                 } else if (name.includes('length')) {
-                    encInputs[name] = new ort.Tensor('int32', new Int32Array([T]), [1]);
+                    encInputs[name] = new ort.Tensor('int64', new BigInt64Array([BigInt(T)]), [1]);
                 }
             }
 
@@ -777,21 +777,16 @@
                     executionMode: 'sequential' // Sequential execution for deterministic timing
                 };
                 
-                encoderSession = await ort.InferenceSession.create('encoder_web_ultra.onnx', sessionOptions);
-                console.log('Ultra-optimized encoder model loaded (25MB INT8)');
+                encoderSession = await ort.InferenceSession.create('encoder-model.onnx', sessionOptions);
+                console.log('Loaded 6-layer custom encoder model');
 
                 // Log input/output names for debugging
                 console.log('Model inputs:', encoderSession.inputNames);
                 console.log('Model outputs:', encoderSession.outputNames);
 
-                // Load decoder model - TEMPORARILY DISABLED FOR ENCODER-ONLY TESTING
-                updateLoadingStatus('Running in encoder-only mode...');
-                // decoderSession = await ort.InferenceSession.create('rnnt_step_fp32.onnx', sessionOptions);
-                // console.log('RNNT step model loaded (8MB FP32)');
-                // console.log('Step model inputs:', decoderSession.inputNames);
-                // console.log('Step model outputs:', decoderSession.outputNames);
-
-                console.log('Note: Running in encoder-only mode for testing purposes');
+                updateLoadingStatus('Loading decoder model...');
+                decoderSession = await ort.InferenceSession.create('decoder_joint-model.onnx', sessionOptions);
+                console.log('Loaded custom decoder & joint model');
                 // const logitsOutputName = decoderSession.outputNames.find(name => name.includes('logits')) || decoderSession.outputNames[0];
                 // const logitsMeta = decoderSession.outputMetadata?.[logitsOutputName];
                 // if (logitsMeta && Array.isArray(logitsMeta.dimensions)) {
@@ -882,7 +877,7 @@
                         if (inputName.includes('feature') || inputName.includes('audio')) {
                             encoderInputs[inputName] = new ort.Tensor("float32", dummyFeatures, [1, dummyF, dummyT]);
                         } else if (inputName.includes('length')) {
-                            encoderInputs[inputName] = new ort.Tensor("int32", new Int32Array([dummyT]), [1]);
+                            encoderInputs[inputName] = new ort.Tensor("int64", new BigInt64Array([BigInt(dummyT)]), [1]);
                         }
                     }
 
@@ -1254,20 +1249,7 @@
         }
         
         function getNormalizedCoords(clientX, clientY) {
-            if (!keyboardBounds) {
-                return {
-                    x: 0,
-                    y: 0,
-                    normalized: {
-                        x01: 0.5,
-                        y01: 0.5,
-                        xCentered: 0,
-                        yCentered: 0,
-                        x: 0,
-                        y: 0
-                    }
-                };
-            }
+            if (!keyboardBounds) return null;
 
             const x = clientX - keyboardBounds.minX;
             const y = clientY - keyboardBounds.minY;
@@ -1275,22 +1257,12 @@
             const norm01X = clamp(x / keyboardBounds.width, 0, 1);
             const norm01Y = clamp(y / keyboardBounds.height, 0, 1);
 
-            const normX = norm01X * NORMALIZED_WIDTH;
-            const normY = norm01Y * NORMALIZED_HEIGHT;
-
-            const centeredX = norm01X * 2 - 1;
-            const centeredY = norm01Y * 2 - 1;
-
             return {
-                x: Math.round(normX),
-                y: Math.round(normY),
+                x: norm01X * NORMALIZED_WIDTH,
+                y: norm01Y * NORMALIZED_HEIGHT,
                 normalized: {
-                    x01: norm01X,
-                    y01: norm01Y,
-                    xCentered: centeredX,
-                    yCentered: centeredY,
-                    x: centeredX,
-                    y: centeredY
+                    x: norm01X * 2 - 1,
+                    y: norm01Y * 2 - 1
                 }
             };
         }
@@ -2332,38 +2304,25 @@
             const resampledLength = features?.resampledLength ?? T;
             console.log(`🔥 Starting inference with ${T} frames (37 features each) | original=${originalLength}, resampled=${resampledLength}`);
 
-            // ENCODER-ONLY MODE: Run encoder inference and simulate results
-            console.log('🔬 Running encoder-only inference...');
+            // Run actual RNNT beam search decoder
+            console.log('🔬 Running RNNT beam search decoder...');
 
-            // Prepare feature tensor: (1, 37, T)
-            const featureTensor = new Float32Array(37 * T);
-            for (let t = 0; t < T; t++) {
-                for (let f = 0; f < 37; f++) {
-                    featureTensor[t * 37 + f] = featureVectors[t][f];
+            // Use the actual rnntCharBeam function for real inference
+            const charHypotheses = await rnntCharBeam(
+                encoderSession,
+                decoderSession,
+                featureVectors,
+                {
+                    beamSize: RUNTIME_CONFIG.beamWidth,
+                    symbolsPerStep: RUNTIME_CONFIG.symbolsPerStep,
+                    maxSymbols: RUNTIME_CONFIG.maxSymbols,
+                    topK: RUNTIME_CONFIG.topK
                 }
-            }
-            const featuresBFT = new ort.Tensor('float32', featureTensor, [1, 37, T]);
-            const lengths = new ort.Tensor('int32', new Int32Array([T]), [1]);
-
-            // Run encoder
-            const encoderOutputs = await encoderSession.run({
-                'features_bft': featuresBFT,
-                'lengths': lengths
-            });
-
-            const encoded = encoderOutputs.encoded_btf;
-            const encodedLength = encoderOutputs.encoded_lengths;
-
-            console.log(`✓ Encoder output: ${encoded.dims} | Length: ${encodedLength.data[0]}`);
-
-            // For demo purposes, simulate character hypotheses based on encoder output
-            const charHypotheses = [
-                { char: 't', prob: 0.8, timing: 0.3 },
-                { char: 'h', prob: 0.7, timing: 0.5 },
-                { char: 'e', prob: 0.6, timing: 0.8 }
-            ];
+            );
 
             lastCharHypotheses = charHypotheses;
+
+            console.log(`✓ Beam search completed with ${charHypotheses.length} hypotheses`);
 
             const rankedWords = mapCharHypothesesToWords(charHypotheses, {
                 lmLambda: 0.45,
