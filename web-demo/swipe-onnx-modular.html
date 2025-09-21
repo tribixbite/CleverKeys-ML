@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Neural Swipe Typing - Modular ONNX Demo</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.16.3/dist/ort.min.js"></script>
+    <style>
+        .key {
+            transition: all 0.1s;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+        .key:active, .key-active {
+            transform: scale(0.95);
+            background-color: rgb(59 130 246) !important;
+        }
+        #swipeCanvas {
+            touch-action: none;
+            pointer-events: auto;
+        }
+        .trail-dot {
+            position: absolute;
+            width: 8px;
+            height: 8px;
+            background: radial-gradient(circle, rgba(59,130,246,0.8) 0%, transparent 70%);
+            border-radius: 50%;
+            pointer-events: none;
+            transform: translate(-50%, -50%);
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white font-sans">
+    <div class="container mx-auto p-4 max-w-4xl">
+        <!-- Header -->
+        <div class="mb-6 text-center">
+            <h1 class="text-3xl font-bold mb-2">Neural Swipe Typing - Modular ONNX</h1>
+            <p id="status" class="text-gray-400">Loading models...</p>
+        </div>
+
+        <!-- Controls -->
+        <div class="mb-4 flex gap-2 justify-center">
+            <button id="clearBtn" class="px-4 py-2 bg-blue-600 rounded hover:bg-blue-700">Clear</button>
+            <button id="debugBtn" class="px-4 py-2 bg-gray-700 rounded hover:bg-gray-600">Debug: OFF</button>
+        </div>
+
+        <!-- Input Display -->
+        <div class="mb-6 p-4 bg-gray-800 rounded">
+            <div class="text-sm text-gray-400 mb-1">Input Text</div>
+            <div id="inputText" class="text-xl min-h-[2em]"></div>
+        </div>
+
+        <!-- Suggestions -->
+        <div id="suggestions" class="mb-4 flex flex-wrap gap-2"></div>
+
+        <!-- Debug Output -->
+        <div id="debugOutput" class="hidden mb-4 p-4 bg-gray-800 rounded text-xs font-mono"></div>
+
+        <!-- Keyboard -->
+        <div class="relative bg-gray-800 p-4 rounded">
+            <canvas id="swipeCanvas" class="absolute inset-0 z-10"></canvas>
+
+            <div class="keyboard-rows">
+                <!-- Row 1: QWERTYUIOP -->
+                <div class="flex gap-1 mb-1">
+                    <button class="key flex-1 h-12 bg-gray-700 hover:bg-gray-600 rounded text-white" data-key="q">Q</button>
+                    <button class="key flex-1 h-12 bg-gray-700 hover:bg-gray-600 rounded text-white" data-key="w">W</button>
+                    <button class="key flex-1 h-12 bg-gray-700 hover:bg-gray-600 rounded text-white" data-key="e">E</button>
+                    <button class="key flex-1 h-12 bg-gray-700 hover:bg-gray-600 rounded text-white" data-key="r">R</button>
+                    <button class="key flex-1 h-12 bg-gray-700 hover:bg-gray-600 rounded text-white" data-key="t">T</button>
+                    <button class="key flex-1 h-12 bg-gray-700 hover:bg-gray-600 rounded text-white" data-key="y">Y</button>
+                    <button class="key flex-1 h-12 bg-gray-700 hover:bg-gray-600 rounded text-white" data-key="u">U</button>
+                    <button class="key flex-1 h-12 bg-gray-700 hover:bg-gray-600 rounded text-white" data-key="i">I</button>
+                    <button class="key flex-1 h-12 bg-gray-700 hover:bg-gray-600 rounded text-white" data-key="o">O</button>
+                    <button class="key flex-1 h-12 bg-gray-700 hover:bg-gray-600 rounded text-white" data-key="p">P</button>
+                </div>
+
+                <!-- Row 2: ASDFGHJKL -->
+                <div class="flex gap-1 mb-1 px-4">
+                    <button class="key flex-1 h-12 bg-gray-700 hover:bg-gray-600 rounded text-white" data-key="a">A</button>
+                    <button class="key flex-1 h-12 bg-gray-700 hover:bg-gray-600 rounded text-white" data-key="s">S</button>
+                    <button class="key flex-1 h-12 bg-gray-700 hover:bg-gray-600 rounded text-white" data-key="d">D</button>
+                    <button class="key flex-1 h-12 bg-gray-700 hover:bg-gray-600 rounded text-white" data-key="f">F</button>
+                    <button class="key flex-1 h-12 bg-gray-700 hover:bg-gray-600 rounded text-white" data-key="g">G</button>
+                    <button class="key flex-1 h-12 bg-gray-700 hover:bg-gray-600 rounded text-white" data-key="h">H</button>
+                    <button class="key flex-1 h-12 bg-gray-700 hover:bg-gray-600 rounded text-white" data-key="j">J</button>
+                    <button class="key flex-1 h-12 bg-gray-700 hover:bg-gray-600 rounded text-white" data-key="k">K</button>
+                    <button class="key flex-1 h-12 bg-gray-700 hover:bg-gray-600 rounded text-white" data-key="l">L</button>
+                </div>
+
+                <!-- Row 3: ZXCVBNM -->
+                <div class="flex gap-1 mb-1">
+                    <button class="key flex-1 h-12 bg-gray-700 hover:bg-gray-600 rounded text-white" data-special="shift">⇧</button>
+                    <button class="key flex-1 h-12 bg-gray-700 hover:bg-gray-600 rounded text-white" data-key="z">Z</button>
+                    <button class="key flex-1 h-12 bg-gray-700 hover:bg-gray-600 rounded text-white" data-key="x">X</button>
+                    <button class="key flex-1 h-12 bg-gray-700 hover:bg-gray-600 rounded text-white" data-key="c">C</button>
+                    <button class="key flex-1 h-12 bg-gray-700 hover:bg-gray-600 rounded text-white" data-key="v">V</button>
+                    <button class="key flex-1 h-12 bg-gray-700 hover:bg-gray-600 rounded text-white" data-key="b">B</button>
+                    <button class="key flex-1 h-12 bg-gray-700 hover:bg-gray-600 rounded text-white" data-key="n">N</button>
+                    <button class="key flex-1 h-12 bg-gray-700 hover:bg-gray-600 rounded text-white" data-key="m">M</button>
+                    <button class="key flex-1 h-12 bg-gray-700 hover:bg-gray-600 rounded text-white" data-special="backspace">⌫</button>
+                </div>
+
+                <!-- Row 4: Space -->
+                <div class="flex gap-1">
+                    <button class="key flex-3 h-12 bg-gray-700 hover:bg-gray-600 rounded text-white px-8" data-special="space">space</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Load modular components -->
+    <script src="js/feature-extractor.js"></script>
+    <script src="js/onnx-model-interface.js"></script>
+
+    <script>
+        // Global state
+        let modelInterface = null;
+        let featureExtractor = null;
+        let isModelReady = false;
+        let inputText = '';
+        let debugMode = false;
+
+        // Canvas and drawing state
+        let canvas, ctx;
+        let isDrawing = false;
+        let swipePath = [];
+        let keySequence = [];
+
+        // Initialize on load
+        window.addEventListener('DOMContentLoaded', init);
+
+        async function init() {
+            console.log('🚀 Initializing Modular ONNX Demo...');
+
+            // Setup canvas
+            setupCanvas();
+
+            // Initialize components
+            featureExtractor = new SwipeFeatureExtractor();
+            modelInterface = new ONNXModelInterface();
+
+            // Load models
+            try {
+                updateStatus('Loading encoder model...');
+                await modelInterface.initialize('encoder-model.onnx', 'decoder_joint-model.onnx');
+
+                updateStatus('Loading runtime metadata...');
+                await modelInterface.loadRuntimeMeta('runtime_meta.json');
+
+                isModelReady = true;
+                updateStatus('Ready');
+                console.log('✅ All models loaded successfully');
+            } catch (error) {
+                console.error('Failed to load models:', error);
+                updateStatus('Failed to load models', 'error');
+            }
+
+            // Setup event handlers
+            setupEventHandlers();
+        }
+
+        function setupCanvas() {
+            canvas = document.getElementById('swipeCanvas');
+            ctx = canvas.getContext('2d');
+
+            // Size canvas to keyboard
+            const keyboard = canvas.parentElement;
+            const rect = keyboard.getBoundingClientRect();
+            canvas.width = rect.width;
+            canvas.height = rect.height;
+
+            // Style for drawing
+            ctx.strokeStyle = 'rgba(59, 130, 246, 0.8)';
+            ctx.lineWidth = 3;
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+        }
+
+        function setupEventHandlers() {
+            // Canvas events
+            canvas.addEventListener('mousedown', startSwipe);
+            canvas.addEventListener('mousemove', continueSwipe);
+            canvas.addEventListener('mouseup', endSwipe);
+            canvas.addEventListener('touchstart', startSwipe);
+            canvas.addEventListener('touchmove', continueSwipe);
+            canvas.addEventListener('touchend', endSwipe);
+
+            // Prevent scrolling
+            canvas.addEventListener('touchmove', e => e.preventDefault(), { passive: false });
+
+            // Control buttons
+            document.getElementById('clearBtn').onclick = clearInput;
+            document.getElementById('debugBtn').onclick = toggleDebug;
+
+            // Suggestion clicks
+            document.getElementById('suggestions').addEventListener('click', e => {
+                if (e.target.classList.contains('suggestion')) {
+                    selectSuggestion(e.target.textContent);
+                }
+            });
+        }
+
+        function getEventPosition(e) {
+            if (e.touches && e.touches.length > 0) {
+                return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+            }
+            return { x: e.clientX, y: e.clientY };
+        }
+
+        function getCanvasCoordinates(clientX, clientY) {
+            const rect = canvas.getBoundingClientRect();
+            return {
+                x: clientX - rect.left,
+                y: clientY - rect.top,
+                canvasWidth: rect.width,
+                canvasHeight: rect.height
+            };
+        }
+
+        function startSwipe(e) {
+            e.preventDefault();
+            isDrawing = true;
+            swipePath = [];
+            keySequence = [];
+
+            const pos = getEventPosition(e);
+            const canvasCoords = getCanvasCoordinates(pos.x, pos.y);
+
+            // Normalize coordinates to [-1, 1]
+            const normalized = featureExtractor.normalizeCoordinates(
+                canvasCoords.x,
+                canvasCoords.y,
+                canvasCoords.canvasWidth,
+                canvasCoords.canvasHeight
+            );
+
+            swipePath.push({
+                x: normalized.x,
+                y: normalized.y,
+                t: Date.now(),
+                canvasX: canvasCoords.x,
+                canvasY: canvasCoords.y
+            });
+
+            // Start drawing
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.beginPath();
+            ctx.moveTo(canvasCoords.x, canvasCoords.y);
+
+            // Track key
+            const key = getKeyAtPosition(pos.x, pos.y);
+            if (key) {
+                keySequence.push(key.dataset.key);
+                key.classList.add('key-active');
+            }
+        }
+
+        function continueSwipe(e) {
+            if (!isDrawing) return;
+            e.preventDefault();
+
+            const pos = getEventPosition(e);
+            const canvasCoords = getCanvasCoordinates(pos.x, pos.y);
+
+            // Normalize coordinates
+            const normalized = featureExtractor.normalizeCoordinates(
+                canvasCoords.x,
+                canvasCoords.y,
+                canvasCoords.canvasWidth,
+                canvasCoords.canvasHeight
+            );
+
+            swipePath.push({
+                x: normalized.x,
+                y: normalized.y,
+                t: Date.now(),
+                canvasX: canvasCoords.x,
+                canvasY: canvasCoords.y
+            });
+
+            // Draw trail
+            ctx.lineTo(canvasCoords.x, canvasCoords.y);
+            ctx.stroke();
+
+            // Track key
+            const key = getKeyAtPosition(pos.x, pos.y);
+            if (key) {
+                const keyChar = key.dataset.key;
+                if (!keySequence.includes(keyChar)) {
+                    keySequence.push(keyChar);
+                    key.classList.add('key-active');
+                }
+            }
+        }
+
+        async function endSwipe(e) {
+            if (!isDrawing) return;
+            e.preventDefault();
+            isDrawing = false;
+
+            // Clear active keys
+            document.querySelectorAll('.key-active').forEach(key => {
+                key.classList.remove('key-active');
+            });
+
+            // Process swipe if we have enough points
+            if (swipePath.length >= 3) {
+                console.log(`🌀 Swipe detected: ${swipePath.length} points, keys: ${keySequence.join('')}`);
+
+                if (debugMode) {
+                    showDebugInfo();
+                }
+
+                // Process with model
+                await processSwipe();
+            } else if (swipePath.length > 0) {
+                // Treat as tap
+                const pos = getEventPosition(e);
+                const key = getKeyAtPosition(pos.x, pos.y);
+                if (key && key.dataset.key) {
+                    handleTap(key.dataset.key);
+                }
+            }
+
+            // Clear canvas after delay
+            setTimeout(() => {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+            }, 300);
+        }
+
+        async function processSwipe() {
+            if (!isModelReady || swipePath.length < 3) return;
+
+            updateStatus('Processing swipe...');
+
+            try {
+                // Extract features
+                const extracted = featureExtractor.extractFeatures(swipePath);
+                console.log(`📊 Features extracted: ${extracted.features.length} frames`);
+
+                // Run beam search
+                const startTime = performance.now();
+                const hypotheses = await modelInterface.beamSearch(extracted.features, {
+                    beamSize: 10,
+                    maxSymbols: 20,
+                    topK: 5
+                });
+                const latency = performance.now() - startTime;
+
+                console.log(`✅ Inference complete in ${latency.toFixed(1)}ms`);
+                console.log('Top predictions:', hypotheses.slice(0, 3));
+
+                // Display results
+                displayPredictions(hypotheses);
+
+                updateStatus('Ready');
+            } catch (error) {
+                console.error('Processing error:', error);
+                updateStatus('Processing failed', 'error');
+            }
+        }
+
+        function displayPredictions(hypotheses) {
+            const suggestionsDiv = document.getElementById('suggestions');
+            suggestionsDiv.innerHTML = '';
+
+            hypotheses.slice(0, 5).forEach((hyp, i) => {
+                const btn = document.createElement('button');
+                btn.className = 'suggestion px-3 py-1 bg-blue-600 hover:bg-blue-700 rounded';
+                btn.textContent = hyp.text || '?';
+                btn.title = `Score: ${hyp.score.toFixed(2)}`;
+                suggestionsDiv.appendChild(btn);
+            });
+
+            // Auto-select top prediction
+            if (hypotheses.length > 0 && hypotheses[0].text) {
+                selectSuggestion(hypotheses[0].text);
+            }
+        }
+
+        function selectSuggestion(word) {
+            inputText += word + ' ';
+            document.getElementById('inputText').textContent = inputText;
+            document.getElementById('suggestions').innerHTML = '';
+        }
+
+        function handleTap(key) {
+            console.log(`👆 Tap: ${key}`);
+            inputText += key;
+            document.getElementById('inputText').textContent = inputText;
+        }
+
+        function getKeyAtPosition(clientX, clientY) {
+            const keys = document.querySelectorAll('.key[data-key]');
+            for (const key of keys) {
+                const rect = key.getBoundingClientRect();
+                if (clientX >= rect.left && clientX <= rect.right &&
+                    clientY >= rect.top && clientY <= rect.bottom) {
+                    return key;
+                }
+            }
+            return null;
+        }
+
+        function clearInput() {
+            inputText = '';
+            document.getElementById('inputText').textContent = '';
+            document.getElementById('suggestions').innerHTML = '';
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+        }
+
+        function toggleDebug() {
+            debugMode = !debugMode;
+            const btn = document.getElementById('debugBtn');
+            btn.textContent = `Debug: ${debugMode ? 'ON' : 'OFF'}`;
+            btn.classList.toggle('bg-green-600', debugMode);
+
+            const debugOutput = document.getElementById('debugOutput');
+            if (debugMode) {
+                debugOutput.classList.remove('hidden');
+            } else {
+                debugOutput.classList.add('hidden');
+            }
+        }
+
+        function showDebugInfo() {
+            if (!debugMode) return;
+
+            const debugOutput = document.getElementById('debugOutput');
+            debugOutput.innerHTML = `
+                <div>Path length: ${swipePath.length}</div>
+                <div>Keys: ${keySequence.join(' → ')}</div>
+                <div>Duration: ${swipePath[swipePath.length-1].t - swipePath[0].t}ms</div>
+                <div>First point: (${swipePath[0].x.toFixed(2)}, ${swipePath[0].y.toFixed(2)})</div>
+                <div>Last point: (${swipePath[swipePath.length-1].x.toFixed(2)}, ${swipePath[swipePath.length-1].y.toFixed(2)})</div>
+            `;
+        }
+
+        function updateStatus(message, type = 'normal') {
+            const status = document.getElementById('status');
+            status.textContent = message;
+            status.className = 'text-gray-400';
+
+            if (type === 'error') {
+                status.className = 'text-red-400';
+            } else if (type === 'success') {
+                status.className = 'text-green-400';
+            }
+        }
+    </script>
+</body>
+</html>

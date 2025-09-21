@@ -1,0 +1,42 @@
+[
+  {
+    "word": "is",
+    "prediction": "unknown",
+    "correct": false,
+    "latency": 6.657123565673828,
+    "num_points": 29,
+    "num_frames": 56
+  },
+  {
+    "word": "is",
+    "prediction": "unknown",
+    "correct": false,
+    "latency": 8.500099182128906,
+    "num_points": 40,
+    "num_frames": 56
+  },
+  {
+    "word": "descent",
+    "prediction": "unknown",
+    "correct": false,
+    "latency": 7.922172546386719,
+    "num_points": 47,
+    "num_frames": 56
+  },
+  {
+    "word": "at",
+    "prediction": "unknown",
+    "correct": false,
+    "latency": 8.858919143676758,
+    "num_points": 16,
+    "num_frames": 56
+  },
+  {
+    "word": "delegate",
+    "prediction": "unknown",
+    "correct": false,
+    "latency": 8.468389511108398,
+    "num_points": 108,
+    "num_frames": 93
+  }
+]

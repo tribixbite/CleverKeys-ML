@@ -1,0 +1,82 @@
+[
+  {
+    "word": "is",
+    "prediction": "at",
+    "correct": false,
+    "latency": 110.54348945617676,
+    "num_points": 29,
+    "num_frames": 56
+  },
+  {
+    "word": "is",
+    "prediction": "at",
+    "correct": false,
+    "latency": 18.228769302368164,
+    "num_points": 40,
+    "num_frames": 56
+  },
+  {
+    "word": "descent",
+    "prediction": "at",
+    "correct": false,
+    "latency": 11.690616607666016,
+    "num_points": 47,
+    "num_frames": 56
+  },
+  {
+    "word": "at",
+    "prediction": "at",
+    "correct": true,
+    "latency": 16.22462272644043,
+    "num_points": 16,
+    "num_frames": 56
+  },
+  {
+    "word": "delegate",
+    "prediction": "the",
+    "correct": false,
+    "latency": 25.36940574645996,
+    "num_points": 108,
+    "num_frames": 93
+  },
+  {
+    "word": "is",
+    "prediction": "at",
+    "correct": false,
+    "latency": 16.68572425842285,
+    "num_points": 14,
+    "num_frames": 56
+  },
+  {
+    "word": "by",
+    "prediction": "at",
+    "correct": false,
+    "latency": 26.730775833129883,
+    "num_points": 26,
+    "num_frames": 56
+  },
+  {
+    "word": "some",
+    "prediction": "the",
+    "correct": false,
+    "latency": 28.066158294677734,
+    "num_points": 70,
+    "num_frames": 69
+  },
+  {
+    "word": "on",
+    "prediction": "at",
+    "correct": false,
+    "latency": 16.329526901245117,
+    "num_points": 19,
+    "num_frames": 56
+  },
+  {
+    "word": "the",
+    "prediction": "at",
+    "correct": false,
+    "latency": 23.76413345336914,
+    "num_points": 19,
+    "num_frames": 56
+  }
+]
