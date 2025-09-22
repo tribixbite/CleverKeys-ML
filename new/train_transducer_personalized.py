@@ -1193,16 +1193,15 @@ def main() -> None:
     )
 
     # Optional: torch.compile for speedup (PyTorch 2.x)
-    # DISABLED: Guard check failures with resumed checkpoints
-    # try:
-    #     if hasattr(torch, "compile"):
-    #         print("Compiling model with torch.compile()...")
-    #         # Mode can be tuned; keep defaults for broad compatibility
-    #         model = torch.compile(model)  # type: ignore[arg-type]
-    # except Exception as exc:
-    #     print(
-    #         f"torch.compile unavailable or failed ({exc}); continuing without compile."
-    #     )
+    try:
+        if hasattr(torch, "compile"):
+            print("Compiling model with torch.compile()...")
+            # Mode can be tuned; keep defaults for broad compatibility
+            model = torch.compile(model)  # type: ignore[arg-type]
+    except Exception as exc:
+        print(
+            f"torch.compile unavailable or failed ({exc}); continuing without compile."
+        )
 
     # --- Callbacks ---
     checkpoint_callback = AnnounceCheckpoint(
