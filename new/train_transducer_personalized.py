@@ -30,13 +30,11 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 import lightning.pytorch as pl
 from lightning.pytorch.callbacks import ModelCheckpoint
 from torch.utils.data import WeightedRandomSampler
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import DictConfig
 import numpy as np
 import torch
 from torch.utils.data import DataLoader, Dataset
-from torch.nn.utils.rnn import pad_sequence
 from collections import Counter
-import glob
 import re
 
 import nemo.collections.asr as nemo_asr
@@ -47,7 +45,6 @@ except ImportError:  # pragma: no cover - DALI optional dependency
     DALIOutputs = type(
         "DALIOutputsPlaceholder", (object,), {"has_processed_signal": False}
     )
-from nemo.core.classes.mixins import AccessMixin
 
 # Local script dependencies are now expected in the same directory.
 from swipe_data_utils import collate_fn
@@ -147,7 +144,7 @@ CONFIG: Dict[str, Any] = {
         "rare_frequency_threshold": 25,  # Words seen fewer than this many times are considered "rare".
         "rare_word_boost": 3.5,  # A direct multiplier for rare words. A key parameter for improving tail-end accuracy.
         "max_weight_factor": 12.0,  # Caps the maximum weight of any sample to prevent extreme values from destabilizing training.
-        "min_word_length": 4,  # Ignores very short words during this sampling phase.
+        "min_word_length": 1,  # Include all words by default to avoid biasing against short words.
         "max_frequency": 3000,  # Can be used to ignore very common words to focus on the middle/rare part of the vocabulary.
     },
     # --- Validation Parameters ---
@@ -155,7 +152,7 @@ CONFIG: Dict[str, Any] = {
         "strategy": "inverse_sqrt_freq",  # Can also apply sampling to validation to focus evaluation on challenging cases.
         "freq_power": 0.75,
         "length_power": 1.3,
-        "min_word_length": 7,
+        "min_word_length": 1,
         "rare_frequency_threshold": 40,
         "rare_word_boost": 6.0,
         "max_weight_factor": 28.0,
@@ -1085,6 +1082,61 @@ def load_sampling_profile(profile_name: Optional[str]) -> Optional[Dict[str, Any
 def main() -> None:
     cfg = DictConfig(CONFIG)
 
+    # --- CLI Arguments ---
+    parser = argparse.ArgumentParser(
+        description="Train Personalized RNNT for CleverKeys"
+    )
+    # Feature toggles
+    parser.add_argument(
+        "--augment", action="store_true", help="Enable data augmentation"
+    )
+    parser.add_argument(
+        "--unfreeze",
+        action="store_true",
+        help="Enable progressive unfreezing if available",
+    )
+    # Sampling profiles
+    try:
+        # Discover available profiles for better UX
+        from sampling_profiles import SAMPLING_PROFILES as _SP  # type: ignore
+
+        profile_choices = sorted(list(_SP.keys()))
+    except Exception:
+        profile_choices = None
+    parser.add_argument(
+        "--profile",
+        type=str,
+        choices=profile_choices,
+        help="Sampling profile for TRAIN set (see new/sampling_profiles.py)",
+    )
+    parser.add_argument(
+        "--val-profile",
+        dest="val_profile",
+        type=str,
+        choices=profile_choices,
+        help="Sampling profile for VALIDATION set",
+    )
+    # Training overrides
+    parser.add_argument(
+        "--checkpoint",
+        type=str,
+        default=None,
+        help="Resume from specific checkpoint path",
+    )
+    parser.add_argument(
+        "--batch-size", type=int, default=None, help="Override training batch size"
+    )
+    parser.add_argument(
+        "--num-workers", type=int, default=None, help="Override DataLoader worker count"
+    )
+    parser.add_argument(
+        "--learning-rate",
+        type=float,
+        default=None,
+        help="Override optimizer learning rate",
+    )
+    args = parser.parse_args()
+
     # --- Resolve Paths and Set up Environment ---
     cfg.data.train_manifest = _resolve_path(cfg.data.train_manifest)
     cfg.data.val_manifest = _resolve_path(cfg.data.val_manifest)
@@ -1102,6 +1154,30 @@ def main() -> None:
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
 
+    # --- Apply CLI overrides ---
+    if args.augment:
+        cfg.augmentation.enabled = True
+    if args.unfreeze and UNFREEZING_AVAILABLE:
+        cfg.unfreezing.enabled = True
+    if args.batch_size is not None and args.batch_size > 0:
+        cfg.training.batch_size = int(args.batch_size)
+    if args.num_workers is not None and args.num_workers >= 0:
+        cfg.training.num_workers = int(args.num_workers)
+    if args.learning_rate is not None and args.learning_rate > 0:
+        cfg.training.learning_rate = float(args.learning_rate)
+
+    # Load sampling profiles for training/validation when provided
+    if args.profile:
+        prof = load_sampling_profile(args.profile)
+        if prof:
+            cfg.sampling.update(prof)
+            print(f"Applied training sampling profile: {args.profile}")
+    if args.val_profile:
+        vprof = load_sampling_profile(args.val_profile)
+        if vprof:
+            cfg.validation.update(vprof)
+            print(f"Applied validation sampling profile: {args.val_profile}")
+
     # --- Build Model and DataLoaders ---
     vocab = load_vocab(cfg.data.vocab_path)
     train_loader, val_loader = build_dataloaders(cfg, vocab)
@@ -1115,6 +1191,18 @@ def main() -> None:
         if cfg.training.teacher_checkpoint
         else None,
     )
+
+    # Optional: torch.compile for speedup (PyTorch 2.x)
+    # DISABLED: Guard check failures with resumed checkpoints
+    # try:
+    #     if hasattr(torch, "compile"):
+    #         print("Compiling model with torch.compile()...")
+    #         # Mode can be tuned; keep defaults for broad compatibility
+    #         model = torch.compile(model)  # type: ignore[arg-type]
+    # except Exception as exc:
+    #     print(
+    #         f"torch.compile unavailable or failed ({exc}); continuing without compile."
+    #     )
 
     # --- Callbacks ---
     checkpoint_callback = AnnounceCheckpoint(
@@ -1150,11 +1238,11 @@ def main() -> None:
 
     # --- Trainer ---
     # Find the latest checkpoint to resume from
-    resume_from = find_latest_checkpoint(
-        "/home/will/git/swype/cleverkeys/rnnt_checkpoints_default_20250920_154614/lightning_logs/version_0/checkpoints/last.ckpt"
-    )
+    prefer_ckpt = _resolve_path(args.checkpoint) if args.checkpoint else None
+    resume_from = find_latest_checkpoint(prefer_ckpt)
 
-    root_dir = f"./rnnt_checkpoints_default_{runtime_id}"
+    profile_tag = args.profile if args.profile else "default"
+    root_dir = f"./rnnt_checkpoints_{profile_tag}_{runtime_id}"
     trainer = pl.Trainer(
         accelerator=cfg.training.accelerator,
         devices=cfg.training.devices,

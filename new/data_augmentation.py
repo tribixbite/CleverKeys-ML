@@ -38,7 +38,7 @@ class SwipeAugmentation:
         self.noise_std = noise_std
         self.time_warp_factor = time_warp_factor
         self.spatial_shift_range = spatial_shift_range
-        self.speed_variation = speed_variation
+        self.speed_variation_factor = speed_variation
         self.enable_for_rare_only = enable_for_rare_only
         self.rare_threshold = rare_threshold
 
@@ -123,7 +123,7 @@ class SwipeAugmentation:
         if len(points) <= 1:
             return points
 
-        speed_factor = 1.0 + random.uniform(-self.speed_variation, self.speed_variation)
+        speed_factor = 1.0 + random.uniform(-self.speed_variation_factor, self.speed_variation_factor)
 
         points_aug = points.copy()
         points_aug[:, 2] *= speed_factor

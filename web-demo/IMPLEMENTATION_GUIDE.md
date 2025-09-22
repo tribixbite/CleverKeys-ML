@@ -1,27 +1,233 @@
-Of course. Your model architecture and training script are very well-structured and employ advanced techniques like weighted sampling and knowledge distillation. The primary flaws are in the experimental ExecuTorch (`.pte`) export logic. For training speed, the easiest and most effective improvement is to use `torch.compile`.
+# CleverKeys RNN-T Implementation Guide
 
-Here's a detailed breakdown of potential improvements, training speed optimizations, and a full architecture document for a web demo.
+**Last Updated**: January 2025
+**Status**: Active Development
+**Current Val WER**: 0.232
 
------
+## Overview
 
-## Part 1: Architecture and Exporting Flaws & Improvements
+This document contains implementation details for the CleverKeys RNN-T swipe gesture model, including architecture analysis, training insights, and deployment guidance. It documents both confirmed findings and areas of uncertainty discovered during development.
 
-Your core training script is robust. The Conformer-RNNT architecture, data preprocessing (adaptive resampling), and sampling strategies are excellent choices. The issues are minor or concentrated in the export script.
+## Architecture Summary
 
-### 📉 Flaws
+### Core Model: Conformer-RNNT
+- **Encoder**: 6-layer Conformer with multi-head attention (4 heads), d_model=256
+- **Decoder**: 2-layer LSTM prediction network, hidden_size=320
+- **Joint Network**: Feed-forward network combining encoder/decoder outputs, hidden_size=512
+- **Vocabulary**: 30 tokens (including blank at index 29)
+- **Features**: 37-dimensional vector per frame
 
-1.  **Major Flaw in `.pte` Export:** The ExecuTorch export function `export_pte` is incomplete and will produce a non-functional model.
+### Training Configuration (Current Production)
+- **Script**: `new/train_transducer_personalized.py`
+- **Batch Size**: 1000 (optimized for RTX 4090M)
+- **Learning Rate**: 2e-4 with cosine annealing
+- **Precision**: bf16-mixed (avoids CUDA graph issues)
+- **Sampling**: Weighted random sampling with rare word boost
 
-      * **Missing Joint Network:** The script exports the `encoder` and `decoder`, but **it completely omits the `joint` network**. The joint network is essential for combining the encoder and decoder outputs to produce probabilities. It must be exported as well.
-      * **Static Input Shapes:** The export uses `torch.randn(1, 37, 96)` as a sample input. This bakes a static sequence length of 96 into the exported graph. The model will fail on any input that isn't exactly 96 frames long. You must use `torch.export`'s `dynamic_shapes` argument to specify that the time dimension is variable.
+## Confirmed Findings
 
-2.  **Minor Flaw in ONNX Export:** The script renames `encoder-model.onnx` to `encoder.onnx`, but for the decoder, it renames `decoder_joint-model.onnx` to `decoder_joint.onnx`. NeMo's export actually produces three files: `encoder-model.onnx`, `decoder-model.onnx`, and `joint-model.onnx`. Your script seems to assume a combined `decoder_joint-model.onnx`, which might not be what NeMo produces by default. It's better to export them separately and combine them in the runtime logic or ensure NeMo is configured to export them as a single graph.
+### ✅ What We Know Works
 
-### ✨ Improvements
+1. **Vocabulary System**:
+   - NeMo's `blank_as_pad=True` moves blank token to index 29
+   - Model outputs 30 logits total
+   - Character mappings remain consistent: 'a'→2, 'z'→27
+   - Export correctly preserves 30-token architecture
 
-1.  **Feature Vector Padding:** In `PersonalizedSwipeFeaturizer`, `FINAL_FEATURE_COUNT` is hardcoded to 37, and the generated vector is padded with zeros to match. This works, but it's brittle. It's better to make the model's `feat_in` parameter match the actual number of features you generate (`len(self.FEATURE_NAMES)`). This eliminates unused zero inputs and makes the feature engineering process easier to modify.
+2. **Feature Engineering**:
+   - 37D features work well (kinematics + spatial + temporal)
+   - Adaptive resampling (56-96 frames) improves robustness
+   - Coordinates already in [-1,1] range (no conversion needed)
 
-2.  **Explicit Transpose:** Your `PersonalizedRNNTModel.forward` method transposes the input from `(Batch, Time, Features)` to `(Batch, Features, Time)` to match the Conformer's expectation. This is fine, but for clarity, you could add a `torch.nn.Permute(0, 2, 1)` layer as the very first layer in your `encoder` module to make this data shape transformation an explicit part of the model architecture.
+3. **Training Process**:
+   - Checkpoint resuming works despite "not end of epoch" warnings
+   - Val WER 0.232 indicates reasonable progress
+   - Default CONFIG settings are production-ready
+
+4. **ONNX Export**:
+   - Successfully exports encoder, decoder, and joint networks
+   - Stateful RNN-T architecture maintains decoder state between frames
+   - Web inference feasible with onnxruntime-web
+
+### ⚠️ Areas of Concern
+
+1. **Word Length Filtering**:
+   - **CRITICAL**: Currently excluding words < 4 chars in training
+   - Validation excludes words < 7 chars
+   - Real-world WER likely much worse than reported 0.232
+   - Missing common words: "the", "and", "for", "you", "but", etc.
+
+2. **Augmentation Not Active**:
+   - Data augmentation disabled by default (`enabled: False`)
+   - No command-line argument parsing implemented
+   - Profiles not actually loaded despite being defined
+
+3. **Sampling Profile Issues**:
+   - Hardcoded sampling config instead of using profiles
+   - `load_sampling_profile()` function exists but never called
+   - Missing CLI integration for profile selection
+
+## Uncertainties & Open Questions
+
+### 🤔 Things We're Not Sure About
+
+1. **ONNX Export Naming**:
+   - Script expects `decoder_joint-model.onnx` but NeMo might produce separate files
+   - Need to verify actual export output structure
+   - Might need to handle encoder/decoder/joint as three separate models
+
+2. **Decoder State Management**:
+   - Exact tensor shapes for LSTM states in ONNX unclear
+   - Initial state initialization strategy not verified
+   - State propagation between beam search hypotheses needs testing
+
+3. **Web Performance**:
+   - Unknown if 37D features × 96 frames runs smoothly in browser
+   - WASM vs WebGL backend performance not benchmarked
+   - Mobile browser compatibility untested
+
+4. **Training Optimizations**:
+   - `torch.compile()` speedup potential (30-200% claimed)
+   - GPU utilization not profiled (might be data-loading bottleneck)
+   - NVIDIA DALI integration complexity vs benefit unclear
+
+## Next Steps for Implementation
+
+### 🎯 Immediate Priorities
+
+1. **Fix Word Length Filtering**:
+```python
+# In CONFIG, change:
+"min_word_length": 1,  # Was 4 - include ALL words
+# In validation:
+"min_word_length": 1,  # Was 7 - measure real performance
+```
+
+2. **Add CLI Argument Parsing**:
+```python
+parser = argparse.ArgumentParser()
+parser.add_argument('--augment', action='store_true', help='Enable data augmentation')
+parser.add_argument('--profile', type=str, choices=list(SAMPLING_PROFILES.keys()))
+parser.add_argument('--checkpoint', type=str, help='Resume from specific checkpoint')
+args = parser.parse_args()
+
+# Then apply:
+if args.augment:
+    cfg.augmentation.enabled = True
+if args.profile:
+    profile = load_sampling_profile(args.profile)
+    cfg.sampling.update(profile)
+```
+
+3. **Enable Augmentation for Rare Words**:
+```bash
+# Run with augmentation:
+python train_transducer_personalized.py --augment --profile rare_words
+```
+
+### 🚀 Performance Improvements
+
+1. **Add torch.compile() (Easiest)**:
+```python
+# Before trainer creation:
+if torch.__version__ >= '2.0.0':
+    print("Compiling model with torch.compile()...")
+    model = torch.compile(model)
+```
+
+2. **Profile GPU Utilization**:
+```python
+# Add to trainer:
+profiler = "simple"  # Shows where time is spent
+trainer = pl.Trainer(..., profiler=profiler)
+```
+
+### 🌐 Web Deployment Path
+
+1. **Verify ONNX Export Structure**:
+```bash
+# After export, check what files exist:
+ls onnx_models/
+# Should see: encoder.onnx, decoder.onnx, joint.onnx (or decoder_joint.onnx)
+```
+
+2. **Test Stateful Decoding**:
+   - Implement JavaScript preprocessor (port `PersonalizedSwipeFeaturizer`)
+   - Handle decoder state initialization and propagation
+   - Implement greedy decoding first, then beam search
+
+3. **Optimize for Browser**:
+   - Consider quantization (int8) for smaller model size
+   - Test WebGL backend for GPU acceleration
+   - Implement progressive model loading
+
+## Critical Implementation Notes
+
+### ⚠️ Must Remember
+
+1. **Blank Token Position**: Always use blank_id=29 in decoders
+2. **Feature Order**: JavaScript features MUST match Python FEATURE_NAMES order exactly
+3. **Coordinate System**: Input already in [-1,1], don't apply `*2-1` transform
+4. **Checkpoint Resume**: Use `last.ckpt` for best optimizer state preservation
+
+### 🐛 Known Issues
+
+1. **Checkpoint Warning**: "Not end of epoch" is cosmetic, training continues fine
+2. **Validation WER**: Currently biased (excludes short words), true WER unknown
+3. **Export Scripts**: Multiple versions exist, use latest `export_onnx_stateful.py`
+
+## Architecture Decisions & Rationale
+
+### Why These Choices Work
+
+1. **Conformer > LSTM**: Better at capturing both local and global patterns in swipes
+2. **RNN-T > CTC**: Models output dependencies, 40-50% WER reduction
+3. **Adaptive Resampling**: Handles varying swipe speeds naturally
+4. **Weighted Sampling**: Critical for rare word performance
+
+### Trade-offs Made
+
+1. **Batch Size 1000**: Maximizes GPU usage but might cause OOM on smaller GPUs
+2. **bf16 Precision**: Faster training but slightly less accurate than fp32
+3. **37D Features**: Rich representation but increases inference compute
+
+## For the Next Developer
+
+### Quick Start
+```bash
+# Resume training with improvements:
+python new/train_transducer_personalized.py \
+    --augment \
+    --profile balanced_all_lengths \
+    --checkpoint last.ckpt
+
+# Monitor progress:
+tensorboard --logdir rnnt_checkpoints_*
+```
+
+### Key Files to Understand
+1. `new/train_transducer_personalized.py` - Main training logic
+2. `new/sampling_profiles.py` - Word sampling strategies
+3. `new/data_augmentation.py` - Augmentation pipeline (currently unused)
+4. `new/export_onnx_stateful.py` - Latest ONNX export
+
+### What Needs Work
+1. **CLI Integration**: Add proper argument parsing
+2. **Profile System**: Actually use the sampling profiles
+3. **Validation Metrics**: Fix word length filtering for accurate WER
+4. **Web Demo**: Port preprocessing to JavaScript, implement decoder
+5. **Documentation**: Update after each major change
+
+### Questions to Investigate
+1. Does torch.compile() actually speed up Conformer models?
+2. What's the real WER when including all word lengths?
+3. Can we reduce features from 37D without losing accuracy?
+4. How much does augmentation help on rare words?
+5. Is beam search necessary or does greedy work well enough?
+
+---
+
+*This document reflects the current understanding as of January 2025. Update as new findings emerge.*
 
 -----
 

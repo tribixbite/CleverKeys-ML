@@ -17,7 +17,7 @@ class RNNTDecoder {
     /**
      * Initialize ONNX sessions with the stateful models
      */
-    async initialize(encoderPath = 'encoder.onnx', decoderPath = 'decoder.onnx', jointPath = 'joint.onnx') {
+    async initialize(encoderPath = 'models/encoder.onnx', decoderPath = 'models/decoder.onnx', jointPath = 'models/joint.onnx') {
         const sessionOptions = {
             executionProviders: ['wasm'],
             graphOptimizationLevel: 'all',
@@ -51,7 +51,7 @@ class RNNTDecoder {
     /**
      * Load runtime metadata with decoder configuration
      */
-    async loadRuntimeMeta(metaPath = 'runtime_meta.json') {
+    async loadRuntimeMeta(metaPath = 'models/runtime_meta.json') {
         try {
             const response = await fetch(metaPath);
             this.runtimeMeta = await response.json();
