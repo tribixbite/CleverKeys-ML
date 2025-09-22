@@ -1,0 +1,340 @@
+/* Dark Theme Color Palette */
+:root {
+    --dark-bg: #0a0a0f;
+    --dark-surface: #141420;
+    --dark-key: #1a1a2e;
+    --dark-key-hover: #252540;
+    --neon-blue: #00d4ff;
+    --neon-purple: #b300ff;
+    --neon-pink: #ff00d4;
+    --neon-green: #00ff88;
+}
+
+/* Animations */
+@keyframes glow {
+    0%, 100% { box-shadow: 0 0 20px rgba(0, 212, 255, 0.5); }
+    50% { box-shadow: 0 0 30px rgba(179, 0, 255, 0.8); }
+}
+
+@keyframes pulse-neon {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* Base Styles */
+body {
+    background: linear-gradient(to bottom right, var(--dark-bg), #111827, var(--dark-bg));
+    color: white;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    min-height: 100vh;
+    overflow: hidden;
+}
+
+/* Neon Effects */
+.neon-trail {
+    filter: drop-shadow(0 0 6px currentColor) drop-shadow(0 0 12px currentColor);
+}
+
+.neon-text {
+    background: linear-gradient(to right, var(--neon-blue), var(--neon-purple));
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+/* Header */
+.header-container {
+    background: rgba(20, 20, 32, 0.8);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* Status Bar */
+.status-bar {
+    background: rgba(20, 20, 32, 0.6);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.status-indicator {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    transition: all 0.3s;
+}
+
+.status-ready {
+    background-color: var(--neon-green);
+    box-shadow: 0 0 10px var(--neon-green);
+}
+
+.status-loading {
+    background-color: #fbbf24;
+    box-shadow: 0 0 10px #fbbf24;
+}
+
+.status-error {
+    background-color: #ef4444;
+    box-shadow: 0 0 10px #ef4444;
+}
+
+/* Buttons */
+.control-btn {
+    padding: 6px 16px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: #d1d5db;
+    font-size: 14px;
+    transition: all 0.2s;
+    cursor: pointer;
+}
+
+.control-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: var(--neon-blue);
+    transform: translateY(-1px);
+}
+
+/* Input Display */
+.input-display {
+    background: rgba(20, 20, 32, 0.4);
+    backdrop-filter: blur(8px);
+    padding: 12px 16px;
+    min-height: 60px;
+}
+
+/* Suggestions */
+.suggestions-container {
+    background: rgba(20, 20, 32, 0.4);
+    backdrop-filter: blur(8px);
+    padding: 12px 16px;
+    min-height: 60px;
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.suggestion-btn {
+    padding: 8px 16px;
+    border-radius: 20px;
+    background: linear-gradient(135deg, rgba(0, 212, 255, 0.15), rgba(179, 0, 255, 0.15));
+    border: 1px solid rgba(0, 212, 255, 0.3);
+    color: white;
+    transition: all 0.2s;
+    cursor: pointer;
+}
+
+.suggestion-btn:hover {
+    background: linear-gradient(135deg, rgba(0, 212, 255, 0.25), rgba(179, 0, 255, 0.25));
+    transform: scale(1.05);
+    box-shadow: 0 4px 15px rgba(0, 212, 255, 0.3);
+}
+
+/* Keyboard Container */
+.keyboard-container {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 30;
+}
+
+.keyboard-wrapper {
+    max-width: 768px;
+    margin: 0 auto;
+}
+
+.keyboard-surface {
+    background: rgba(20, 20, 32, 0.95);
+    backdrop-filter: blur(12px);
+    border-radius: 24px 24px 0 0;
+    padding: 12px;
+    box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.5);
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* Keyboard Keys */
+.keyboard-row {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 4px;
+    justify-content: center;
+}
+
+.key {
+    flex: 1;
+    height: 48px;
+    background: var(--dark-key);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 8px;
+    color: white;
+    font-size: 20px;
+    font-weight: 300;
+    transition: all 0.1s;
+    cursor: pointer;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    position: relative;
+}
+
+.key:hover {
+    background: var(--dark-key-hover);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 212, 255, 0.2);
+}
+
+.key:active, .key-active {
+    background: linear-gradient(135deg, var(--neon-blue), var(--neon-purple)) !important;
+    box-shadow: 0 0 20px rgba(0, 212, 255, 0.8), inset 0 0 20px rgba(179, 0, 255, 0.3);
+    transform: scale(0.95);
+}
+
+/* Special Keys */
+.key-special {
+    background: #1f2937;
+    color: #9ca3af;
+    font-size: 14px;
+    min-width: 56px;
+}
+
+.key-shift {
+    width: 56px;
+}
+
+.key-backspace {
+    width: 56px;
+}
+
+.key-space {
+    flex: 4;
+    font-size: 14px;
+}
+
+.key-return {
+    min-width: 80px;
+    background: linear-gradient(135deg, rgba(179, 0, 255, 0.2), rgba(0, 212, 255, 0.2));
+    border-color: rgba(179, 0, 255, 0.3);
+}
+
+.key-return:hover {
+    background: linear-gradient(135deg, rgba(179, 0, 255, 0.3), rgba(0, 212, 255, 0.3));
+}
+
+/* Swipe Canvas */
+#swipeCanvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 40;
+}
+
+/* Trail Effect */
+.trail-dot {
+    position: absolute;
+    width: 8px;
+    height: 8px;
+    background: radial-gradient(circle, rgba(0, 212, 255, 0.8) 0%, transparent 70%);
+    border-radius: 50%;
+    pointer-events: none;
+    transform: translate(-50%, -50%);
+    animation: fade-out 0.5s ease-out forwards;
+}
+
+@keyframes fade-out {
+    to {
+        opacity: 0;
+        transform: translate(-50%, -50%) scale(0.5);
+    }
+}
+
+/* Debug Output */
+.debug-output {
+    background: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(8px);
+    padding: 8px;
+    max-height: 128px;
+    overflow: auto;
+    font-family: 'Courier New', monospace;
+    font-size: 12px;
+    color: var(--neon-blue);
+}
+
+/* Loading Spinner */
+.loading-spinner {
+    border: 3px solid rgba(0, 212, 255, 0.1);
+    border-top: 3px solid var(--neon-blue);
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    animation: spin 1s linear infinite;
+}
+
+/* Responsive Design */
+@media (max-height: 600px) {
+    .key {
+        height: 40px !important;
+    }
+}
+
+@media (max-height: 500px) {
+    .key {
+        height: 32px !important;
+    }
+}
+
+@media (max-width: 768px) {
+    .keyboard-container {
+        border-radius: 0 !important;
+        padding-bottom: env(safe-area-inset-bottom);
+    }
+    .keyboard-surface {
+        border-radius: 16px 16px 0 0 !important;
+    }
+}
+
+/* iOS Safe Area */
+@supports (padding: max(0px)) {
+    .keyboard-container {
+        padding-bottom: max(env(safe-area-inset-bottom), 8px);
+    }
+}
+
+/* Disable text selection on keyboard */
+.keyboard-area {
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+}
+
+/* Model selector dropdown */
+.model-select {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: #d1d5db;
+    padding: 6px 12px;
+    border-radius: 8px;
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.model-select:hover {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: var(--neon-blue);
+}
+
+.model-select:focus {
+    outline: none;
+    border-color: var(--neon-purple);
+    box-shadow: 0 0 0 2px rgba(179, 0, 255, 0.2);
+}
