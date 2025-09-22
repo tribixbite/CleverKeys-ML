@@ -152,13 +152,13 @@ CONFIG: Dict[str, Any] = {
         "strategy": "inverse_sqrt_freq",  # Can also apply sampling to validation to focus evaluation on challenging cases.
         "freq_power": 0.75,
         "length_power": 1.3,
-        "min_word_length": 1,
+        "min_word_length": 2,
         "rare_frequency_threshold": 40,
         "rare_word_boost": 6.0,
         "max_weight_factor": 28.0,
         "batch_size_factor": 0.35,  # Use a smaller batch size for validation.
         "limit_batches": 0.15,  # To speed up validation, run on a random 15% subset of the validation set each time.
-        "check_interval": 0.33,  # Run validation 3 times per training epoch.
+        "check_interval": 0.5,  # Run validation 3 times per training epoch.
         "max_samples": 1500,  # Limit the number of validation samples used.
         "log_error_batches": 3,  # Print mispredictions from the first 3 validation batches for qualitative analysis.
     },

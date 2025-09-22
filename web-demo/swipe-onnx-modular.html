@@ -150,22 +150,21 @@
             setupCanvas();
 
             // Initialize components
-            featureExtractor = new SwipeFeatureExtractor();
-            await featureExtractor.loadMetadata('models/rnnt/runtime_meta.json');
+            featureExtractor = new SwipeFeatureExtractorCorrected();
 
             // Load models
             try {
                 updateStatus('Loading models...');
 
                 // Initialize RNN-T decoder
-                rnntDecoder = new ONNXRNNTDecoder();
+                rnntDecoder = new RNNTDecoder();
                 await rnntDecoder.initialize(
                     'models/rnnt/encoder.onnx',
                     'models/rnnt/decoder.onnx',
                     'models/rnnt/joint.onnx',
                     'models/rnnt/runtime_meta.json'
                 );
-                rnntDecoder.setFeatureExtractor(featureExtractor);
+                // Feature extractor is used directly, not passed to decoder
 
                 // Initialize CTC decoder
                 ctcDecoder = new CTCDecoder();
@@ -368,8 +367,9 @@
                 const startTime = performance.now();
 
                 if (currentModelType === 'rnnt') {
-                    // Process with RNN-T model
-                    result = await rnntDecoder.decode(swipePath, 'greedy');
+                    // Process with RNN-T model - extract features and decode
+                    const featureData = featureExtractor.process(swipePath);
+                    result = await rnntDecoder.beamSearch(featureData.features);
                     console.log('RNN-T result:', result);
                 } else {
                     // Process with CTC model
