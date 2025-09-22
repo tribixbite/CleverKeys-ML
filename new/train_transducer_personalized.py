@@ -1211,6 +1211,7 @@ def main() -> None:
         save_top_k=3,
         filename="epoch={epoch:02d}-wer={val_wer:.3f}",
         save_last=True,
+        save_on_train_epoch_end=True,  # Save at epoch end to avoid resumption warnings
     )
     callbacks = [
         checkpoint_callback,
