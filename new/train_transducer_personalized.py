@@ -1193,11 +1193,15 @@ def main() -> None:
     )
 
     # Optional: torch.compile for speedup (PyTorch 2.x)
+    # Disable dynamo guards for NeMo models to avoid guard check failures
     try:
         if hasattr(torch, "compile"):
             print("Compiling model with torch.compile()...")
-            # Mode can be tuned; keep defaults for broad compatibility
-            model = torch.compile(model)  # type: ignore[arg-type]
+            # Disable guards for better compatibility with NeMo models
+            import torch._dynamo
+            torch._dynamo.config.suppress_errors = True
+            torch._dynamo.config.cache_size_limit = 256
+            model = torch.compile(model, disable=False)  # type: ignore[arg-type]
     except Exception as exc:
         print(
             f"torch.compile unavailable or failed ({exc}); continuing without compile."
