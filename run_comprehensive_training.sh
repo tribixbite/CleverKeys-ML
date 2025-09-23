@@ -2,6 +2,18 @@
 # Comprehensive multi-profile training for complete word coverage
 # Designed to run for days, cycling through different sampling strategies
 
+# Ensure uv is in PATH
+export PATH="$HOME/.local/bin:$PATH"
+
+# Determine Python command to use
+if command -v uv &> /dev/null; then
+    PYTHON_CMD="uv run python"
+    echo "Using uv for Python execution"
+else
+    PYTHON_CMD="python"
+    echo "uv not found, using system python"
+fi
+
 # Parse command line arguments
 DRY_RUN=false
 FAST_DEV_RUN=false
@@ -167,7 +179,7 @@ run_single_training() {
 
     if [ "$DRY_RUN" = true ]; then
         log_message "DRY RUN: Would execute:"
-        log_message "  timeout 6h uv run python new/train_transducer_personalized.py \\"
+        log_message "  timeout 6h $PYTHON_CMD new/train_transducer_personalized.py \\"
         log_message "    $checkpoint_arg \\"
         log_message "    --profile $profile \\"
         log_message "    --val-profile $val_profile \\"
@@ -185,7 +197,7 @@ run_single_training() {
     fi
 
     # Run with timeout and memory monitoring
-    timeout 6h $env_prefix uv run python new/train_transducer_personalized.py \
+    timeout 6h $env_prefix $PYTHON_CMD new/train_transducer_personalized.py \
         $checkpoint_arg \
         --profile "$profile" \
         --val-profile "$val_profile" \
