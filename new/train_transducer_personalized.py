@@ -622,6 +622,20 @@ class PersonalizedSwipeDataset(Dataset):
             )
         return prepared
 
+    def state_dict(self) -> Dict[str, Any]:
+        """Return state dict for dataloader resumption."""
+        return {
+            'manifest_path': self.manifest_path,
+            'sample_count': len(self.samples),
+            'epoch': getattr(self, '_epoch', 0)
+        }
+
+    def load_state_dict(self, state: Dict[str, Any]) -> None:
+        """Load state dict for dataloader resumption."""
+        if state.get('manifest_path') != self.manifest_path:
+            print(f"Warning: Manifest path mismatch during resume")
+        self._epoch = state.get('epoch', 0)
+
 
 # ---------------------------------------------------------------------------
 # Distillation-ready RNNT model
@@ -922,7 +936,9 @@ def build_dataloaders(cfg: DictConfig, vocab: Dict[str, int]):
             replacement=False,
         )
 
-    val_workers = max(0, cfg.training.num_workers // 2)
+    # Use more workers for validation to avoid bottleneck
+    # Use same number of workers as training or at least 4
+    val_workers = max(4, cfg.training.num_workers)
     val_batch_size = max(
         1, int(cfg.training.batch_size * cfg.validation.get("batch_size_factor", 0.5))
     )
@@ -1080,6 +1096,9 @@ def load_sampling_profile(profile_name: Optional[str]) -> Optional[Dict[str, Any
 
 
 def main() -> None:
+    # Ensure torch is available in function scope
+    import torch
+
     cfg = DictConfig(CONFIG)
 
     # --- CLI Arguments ---
@@ -1192,20 +1211,22 @@ def main() -> None:
         else None,
     )
 
-    # Optional: torch.compile for speedup (PyTorch 2.x)
-    # Disable dynamo guards for NeMo models to avoid guard check failures
-    try:
-        if hasattr(torch, "compile"):
-            print("Compiling model with torch.compile()...")
-            # Disable guards for better compatibility with NeMo models
-            import torch._dynamo
-            torch._dynamo.config.suppress_errors = True
-            torch._dynamo.config.cache_size_limit = 256
-            model = torch.compile(model, disable=False)  # type: ignore[arg-type]
-    except Exception as exc:
-        print(
-            f"torch.compile unavailable or failed ({exc}); continuing without compile."
-        )
+    # Note: torch.compile is disabled for NeMo models as they use custom CUDA operations
+    # and complex dynamic structures that are incompatible with torch.compile.
+    # NeMo models already have optimized CUDA kernels for key operations.
+    if False:  # Keep disabled for NeMo models
+        try:
+            if hasattr(torch, "compile"):
+                print("Compiling model with torch.compile()...")
+                # Disable guards for better compatibility with NeMo models
+                import torch._dynamo
+                torch._dynamo.config.suppress_errors = True
+                torch._dynamo.config.cache_size_limit = 256
+                model = torch.compile(model, disable=False)  # type: ignore[arg-type]
+        except Exception as exc:
+            print(
+                f"torch.compile unavailable or failed ({exc}); continuing without compile."
+            )
 
     # --- Callbacks ---
     checkpoint_callback = AnnounceCheckpoint(

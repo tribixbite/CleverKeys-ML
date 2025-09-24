@@ -190,14 +190,13 @@ run_single_training() {
     fi
 
     # Set environment variable for fast_dev_run
-    local env_prefix=""
     if [ "$FAST_DEV_RUN" = true ]; then
-        env_prefix="FAST_DEV_RUN=1"
+        export FAST_DEV_RUN=1
         log_message "Running in FAST_DEV_RUN mode (single batch test)"
     fi
 
     # Run with timeout and memory monitoring
-    timeout 6h $env_prefix $PYTHON_CMD new/train_transducer_personalized.py \
+    timeout 6h $PYTHON_CMD new/train_transducer_personalized.py \
         $checkpoint_arg \
         --profile "$profile" \
         --val-profile "$val_profile" \
