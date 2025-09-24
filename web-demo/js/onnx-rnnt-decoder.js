@@ -278,8 +278,8 @@ class RNNTDecoder {
 
                 // Expand beam with non-blank tokens
                 for (const [tokenId, prob] of topKTokens) {
-                    if (tokenId === this.blankId) {
-                        // Keep hypothesis unchanged with blank emission
+                    if (tokenId === this.blankId || tokenId === 0) {
+                        // Keep hypothesis unchanged with blank emission (both blank_id and token 0)
                         nextBeam.push({
                             tokens: hyp.tokens,
                             score: hyp.score + Math.log(prob + 1e-10),
