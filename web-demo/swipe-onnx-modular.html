@@ -200,12 +200,57 @@
 
             resizeCanvas();
             window.addEventListener('resize', resizeCanvas);
+        }
 
-            // Setup swipe drawing
-            ctx.strokeStyle = '#00d4ff';
-            ctx.lineWidth = 3;
-            ctx.lineCap = 'round';
-            ctx.lineJoin = 'round';
+        // Enhanced neon trail drawing
+        function drawNeonTrail() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            if (swipePath.length < 2) return;
+
+            const totalPoints = swipePath.length;
+            const rect = document.querySelector('.keyboard-surface').getBoundingClientRect();
+
+            // Draw shadow/glow layer first
+            ctx.shadowBlur = 20;
+            ctx.shadowColor = 'rgba(179, 0, 255, 0.6)';
+
+            // Draw multiple passes for enhanced glow
+            for (let pass = 0; pass < 2; pass++) {
+                ctx.beginPath();
+                ctx.lineCap = 'round';
+                ctx.lineJoin = 'round';
+
+                for (let i = 0; i < totalPoints - 1; i++) {
+                    const progress = i / totalPoints;
+
+                    // Convert normalized coordinates to canvas coordinates
+                    const x1 = (swipePath[i].x + 1) * rect.width / 2;
+                    const y1 = (swipePath[i].y + 1) * rect.height / 2;
+                    const x2 = (swipePath[i + 1].x + 1) * rect.width / 2;
+                    const y2 = (swipePath[i + 1].y + 1) * rect.height / 2;
+
+                    // Create gradient that transitions from cyan to purple
+                    const gradient = ctx.createLinearGradient(x1, y1, x2, y2);
+
+                    // Fade out older parts of the trail
+                    const opacity = 0.3 + (progress * 0.7);
+
+                    gradient.addColorStop(0, `rgba(0, 212, 255, ${opacity})`);
+                    gradient.addColorStop(1, `rgba(179, 0, 255, ${opacity})`);
+
+                    ctx.strokeStyle = gradient;
+                    ctx.lineWidth = pass === 0 ? 8 : 4; // Thicker for glow, thinner for core
+
+                    ctx.beginPath();
+                    ctx.moveTo(x1, y1);
+                    ctx.lineTo(x2, y2);
+                    ctx.stroke();
+                }
+            }
+
+            // Reset shadow for next draw
+            ctx.shadowBlur = 0;
         }
 
         function setupEventHandlers() {
@@ -301,13 +346,6 @@
                 const point = getCoordinates(e);
                 swipePath.push(point);
 
-                // Start drawing
-                ctx.beginPath();
-                const rect = keyboard.getBoundingClientRect();
-                const x = (point.x + 1) * rect.width / 2;
-                const y = (point.y + 1) * rect.height / 2;
-                ctx.moveTo(x, y);
-
                 e.preventDefault();
             };
 
@@ -318,20 +356,8 @@
                 const point = getCoordinates(e);
                 swipePath.push(point);
 
-                // Draw trail
-                const rect = keyboard.getBoundingClientRect();
-                const x = (point.x + 1) * rect.width / 2;
-                const y = (point.y + 1) * rect.height / 2;
-                ctx.lineTo(x, y);
-                ctx.stroke();
-
-                // Add visual trail dot
-                const dot = document.createElement('div');
-                dot.className = 'trail-dot';
-                dot.style.left = `${x}px`;
-                dot.style.top = `${y}px`;
-                keyboard.appendChild(dot);
-                setTimeout(() => dot.remove(), 500);
+                // Draw enhanced neon trail
+                drawNeonTrail();
 
                 e.preventDefault();
             };

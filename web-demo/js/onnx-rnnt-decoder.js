@@ -354,7 +354,19 @@ class RNNTDecoder {
             const chars = " 'abcdefghijklmnopqrstuvwxyz";
             return tokens.map(t => t < chars.length ? chars[t] : '').join('');
         }
-        return tokens.map(t => this.runtimeMeta.tokens[t] || '').join('');
+
+        // Filter out blank tokens and special tokens, then map to actual characters
+        return tokens
+            .filter(t => t !== this.blankId && t !== 0) // Skip blank and <blank> tokens
+            .map(t => {
+                const token = this.runtimeMeta.tokens[t];
+                // Skip special tokens like <blank>, <unk>
+                if (token && token.startsWith('<') && token.endsWith('>')) {
+                    return '';
+                }
+                return token || '';
+            })
+            .join('');
     }
 }
 

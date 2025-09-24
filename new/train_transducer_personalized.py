@@ -1211,22 +1211,8 @@ def main() -> None:
         else None,
     )
 
-    # Note: torch.compile is disabled for NeMo models as they use custom CUDA operations
-    # and complex dynamic structures that are incompatible with torch.compile.
-    # NeMo models already have optimized CUDA kernels for key operations.
-    if False:  # Keep disabled for NeMo models
-        try:
-            if hasattr(torch, "compile"):
-                print("Compiling model with torch.compile()...")
-                # Disable guards for better compatibility with NeMo models
-                import torch._dynamo
-                torch._dynamo.config.suppress_errors = True
-                torch._dynamo.config.cache_size_limit = 256
-                model = torch.compile(model, disable=False)  # type: ignore[arg-type]
-        except Exception as exc:
-            print(
-                f"torch.compile unavailable or failed ({exc}); continuing without compile."
-            )
+    # Note: torch.compile will be attempted later if not resuming from checkpoint
+    # Compilation must happen after checkpoint loading to avoid state dict mismatch
 
     # --- Callbacks ---
     checkpoint_callback = AnnounceCheckpoint(
@@ -1282,6 +1268,73 @@ def main() -> None:
         limit_val_batches=cfg.validation.limit_batches,
         fast_dev_run=bool(int(os.environ.get("FAST_DEV_RUN", "0"))),
     )
+
+    # Try torch.compile ONLY when not resuming (to avoid state dict mismatch)
+    # When resuming, the model state will be loaded inside trainer.fit
+    if not resume_from and not os.environ.get("DISABLE_COMPILE"):
+        try:
+            if hasattr(torch, "compile") and hasattr(torch, "_dynamo"):
+                import torch._dynamo
+
+                # Configure dynamo for better NeMo compatibility
+                torch._dynamo.config.suppress_errors = True
+                torch._dynamo.config.cache_size_limit = 256
+                torch._dynamo.config.capture_scalar_outputs = True
+                torch._dynamo.config.guard_nn_modules = False
+
+                # Try different approaches based on what works
+                compile_success = False
+
+                # Approach 1: Try to compile just the encoder (most compute-intensive part)
+                try:
+                    print("Attempting to compile encoder with torch.compile...")
+                    model.encoder = torch.compile(
+                        model.encoder,
+                        mode="reduce-overhead",  # or "default" or "max-autotune"
+                        backend="inductor",
+                        fullgraph=False,
+                        dynamic=True
+                    )
+                    compile_success = True
+                    print("✓ Successfully compiled encoder")
+                except Exception as e:
+                    print(f"Could not compile encoder: {e}")
+
+                # Approach 2: Try to compile the joint network
+                try:
+                    print("Attempting to compile joint network...")
+                    model.joint = torch.compile(
+                        model.joint,
+                        mode="reduce-overhead",
+                        fullgraph=False,
+                        dynamic=True
+                    )
+                    compile_success = True
+                    print("✓ Successfully compiled joint network")
+                except Exception as e:
+                    print(f"Could not compile joint: {e}")
+
+                # Approach 3: If component compilation failed, try whole model with max compatibility
+                if not compile_success:
+                    try:
+                        print("Attempting to compile full model with compatibility mode...")
+                        model = torch.compile(
+                            model,
+                            mode="default",  # Most compatible mode
+                            fullgraph=False,  # Allow graph breaks
+                            dynamic=True,  # Handle dynamic shapes
+                            backend="inductor",
+                            disable=False
+                        )  # type: ignore[arg-type]
+                        print("✓ Successfully compiled full model")
+                    except Exception as e:
+                        print(f"Could not compile model: {e}")
+                        print("Continuing without torch.compile optimizations")
+
+        except ImportError:
+            print("torch.compile not available (requires PyTorch 2.0+)")
+    elif resume_from:
+        print("Skipping torch.compile when resuming from checkpoint (avoids state dict issues)")
 
     print(f"Starting trainer... Attempting to resume from: {resume_from}")
     trainer.fit(
