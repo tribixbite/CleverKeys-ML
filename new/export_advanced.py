@@ -87,12 +87,42 @@ def export_pte(model, output_dir, quantize_int8=False):
 def generate_runtime_meta(model, vocab, output_dir):
     """Generates the runtime_meta.json file needed by frontends."""
     print(f"Generating runtime_meta.json in {output_dir}...")
+    
+    # Get the vocabulary from the model's config
+    labels = model.cfg.labels
+    vocab_size = len(labels)
+    blank_id = vocab_size - 1 # The blank token is the last one
+
+    # Create char_to_id and id_to_char mappings
+    char_to_id = {label: i for i, label in enumerate(labels)}
+    id_to_char = {i: label for i, label in enumerate(labels)}
+
+    # Derive decoder config if available
+    decoder_cfg = getattr(model, 'decoder', None)
+    hidden_size = 320
+    num_layers = 2
+    encoder_dim = 256
+    decoder_dim = 320
+    try:
+        if decoder_cfg is not None and hasattr(decoder_cfg, 'hidden_size'):
+            hidden_size = int(decoder_cfg.hidden_size)
+        if decoder_cfg is not None and hasattr(decoder_cfg, 'num_layers'):
+            num_layers = int(decoder_cfg.num_layers)
+    except Exception:
+        pass
+
     meta = {
-        "vocab_size": len(vocab),
-        "blank_id": model.decoder.blank_idx, # Critical for decoding
-        "tokens": list(vocab.keys()),
-        "char_to_id": vocab,
-        "id_to_char": {v: k for k, v in vocab.items()},
+        "vocab_size": vocab_size,
+        "blank_id": blank_id,
+        "tokens": labels,
+        "char_to_id": char_to_id,
+        "id_to_char": id_to_char,
+        "decoder_config": {
+            "num_layers": num_layers,
+            "hidden_size": hidden_size,
+            "encoder_dim": encoder_dim,
+            "decoder_dim": decoder_dim,
+        },
     }
     with open(output_dir / "runtime_meta.json", "w") as f:
         json.dump(meta, f, indent=4)

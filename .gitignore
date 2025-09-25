@@ -28,3 +28,4 @@ __pycache__/*.*
 .specstory/.what-is-this.md
 .specstory/
 *Zone.Identifier
+**/node_modules/

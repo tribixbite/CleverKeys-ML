@@ -13,7 +13,7 @@
 
     <!-- JavaScript Modules -->
     <script src="js/feature-extractor-corrected.js"></script>
-    <script src="js/onnx-rnnt-decoder.js"></script>
+    <script src="js/onnx-rnnt-decoder-fixed.js"></script>
     <script src="js/ctc-decoder.js"></script>
 </head>
 <body>
@@ -160,10 +160,9 @@
                 // Initialize RNN-T decoder
                 rnntDecoder = new RNNTDecoder();
                 await rnntDecoder.initialize(
-                    'models/rnnt/encoder.onnx',
-                    'models/rnnt/decoder.onnx',
-                    'models/rnnt/joint.onnx',
-                    'models/rnnt/runtime_meta.json'
+                    'models/rnnt_new/encoder.onnx',
+                    'models/rnnt_new/decoder_joint.onnx',
+                    'models/rnnt_new/runtime_meta.json'
                 );
                 // Feature extractor is used directly, not passed to decoder
 
@@ -330,9 +329,9 @@
                 const clientX = e.touches ? e.touches[0].clientX : e.clientX;
                 const clientY = e.touches ? e.touches[0].clientY : e.clientY;
 
-                // Convert to normalized coordinates [-1, 1]
-                const x = ((clientX - rect.left) / rect.width) * 2 - 1;
-                const y = ((clientY - rect.top) / rect.height) * 2 - 1;
+                // Keep coordinates in [0, 1] to match training
+                const x = (clientX - rect.left) / rect.width;
+                const y = (clientY - rect.top) / rect.height;
 
                 return { x, y, t: Date.now() };
             };
@@ -404,7 +403,7 @@
                 if (currentModelType === 'rnnt') {
                     // Process with RNN-T model - extract features and decode
                     const featureData = featureExtractor.process(swipePath);
-                    result = await rnntDecoder.beamSearch(featureData.features);
+                    result = await rnntDecoder.greedyDecode(featureData);
                     console.log('RNN-T result:', result);
                 } else {
                     // Process with CTC model (not available)
