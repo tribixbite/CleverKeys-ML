@@ -1,4 +1,5 @@
 checkpoints*/
+*.nemo
 logs*/
 data/
 _pycache_/

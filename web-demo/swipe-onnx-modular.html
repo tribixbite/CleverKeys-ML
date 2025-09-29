@@ -329,9 +329,11 @@
                 const clientX = e.touches ? e.touches[0].clientX : e.clientX;
                 const clientY = e.touches ? e.touches[0].clientY : e.clientY;
 
-                // Keep coordinates in [0, 1] to match training
-                const x = (clientX - rect.left) / rect.width;
-                const y = (clientY - rect.top) / rect.height;
+                // Convert to normalized coordinates in [-1, 1]
+                const x01 = (clientX - rect.left) / rect.width;
+                const y01 = (clientY - rect.top) / rect.height;
+                const x = x01 * 2 - 1;
+                const y = y01 * 2 - 1;
 
                 return { x, y, t: Date.now() };
             };
@@ -357,6 +359,15 @@
 
                 // Draw enhanced neon trail
                 drawNeonTrail();
+
+                // Debug: show first few coords
+                if (debugMode) {
+                    const coordsPreview = swipePath.slice(-10).map(p => ({x: Number(p.x.toFixed(3)), y: Number(p.y.toFixed(3))}));
+                    document.getElementById('debugText').textContent = JSON.stringify({
+                        last: coordsPreview[coordsPreview.length-1],
+                        last10: coordsPreview
+                    }, null, 2);
+                }
 
                 e.preventDefault();
             };

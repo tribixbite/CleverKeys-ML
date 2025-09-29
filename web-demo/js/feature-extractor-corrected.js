@@ -6,7 +6,7 @@
 class SwipeFeatureExtractorCorrected {
     constructor() {
         this.featureDim = 37;
-        // Build key centers in [0, 1] coordinates matching training
+        // Build key centers in [-1, 1] coordinates matching training
         this.keyCenters = this.buildKeyCenters();
     }
 
@@ -25,9 +25,11 @@ class SwipeFeatureExtractorCorrected {
             const rowStr = layout[row];
             for (let col = 0; col < rowStr.length; col++) {
                 const char = rowStr[col];
-                // Calculate position in [0, 1]
-                const x = (col + 0.5) / 10.0;  // 10 keys max width
-                const y = (row + 0.5) / 3.0;   // 3 rows
+                // Calculate position in [0, 1], then convert to [-1, 1]
+                const x01 = (col + 0.5) / 10.0;  // 10 keys max width
+                const y01 = (row + 0.5) / 3.0;   // 3 rows
+                const x = x01 * 2.0 - 1.0;
+                const y = y01 * 2.0 - 1.0;
                 centers.push({ char, x, y });
             }
         }
@@ -35,8 +37,8 @@ class SwipeFeatureExtractorCorrected {
     }
 
     /**
-     * Normalize points to [0, 1] coordinate system used in training.
-     * If points appear in [-1, 1], map to [0, 1]. If already [0, 1], clamp.
+     * Normalize points to [-1, 1] coordinate system used in training.
+     * If points appear in [0, 1], map to [-1, 1]. Otherwise clamp to [-1, 1].
      */
     normalizePoints(points) {
         if (!points || points.length === 0) {
@@ -44,23 +46,23 @@ class SwipeFeatureExtractorCorrected {
         }
         const startTime = points[0].t || 0;
         
-        // Heuristic: if coordinates appear in [-1,1], convert to [0,1]; else assume already [0,1]
+        // Heuristic: if coordinates appear in [0,1], convert to [-1,1]; else assume already [-1,1]
         let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
         for (const p of points) {
             if (typeof p.x === 'number') { if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x; }
             if (typeof p.y === 'number') { if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y; }
         }
-        const likelyMinus1to1 = (minX >= -1 && maxX <= 1 && (minX < 0 || maxX > 1));
+        const likely01 = (minX >= 0 && maxX <= 1 && minY >= 0 && maxY <= 1);
 
         return points.map((pt, idx) => {
             let x = pt.x ?? 0.0;
             let y = pt.y ?? 0.0;
-            if (likelyMinus1to1) {
-                x = (x + 1.0) * 0.5;
-                y = (y + 1.0) * 0.5;
+            if (likely01) {
+                x = x * 2.0 - 1.0;
+                y = y * 2.0 - 1.0;
             }
-            const centeredX = Math.max(0.0, Math.min(1.0, x));
-            const centeredY = Math.max(0.0, Math.min(1.0, y));
+            const centeredX = Math.max(-1.0, Math.min(1.0, x));
+            const centeredY = Math.max(-1.0, Math.min(1.0, y));
             const t = (pt.t || idx * 10.0) - startTime;
             return { x: centeredX, y: centeredY, t };
         });

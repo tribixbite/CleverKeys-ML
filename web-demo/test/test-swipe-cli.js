@@ -89,7 +89,8 @@ async function main() {
     // Greedy decode using decoder_joint
     const blankId = meta.blank_id ?? 29;
     const vocabSize = meta.vocab_size ?? 30;
-    let lastToken = blankId;
+    // Some RNNT exports expect first predictor input to be 0 ('<blank>' label) rather than blankId
+    let lastToken = 0;
     let tokens = [];
     let h = new ort.Tensor('float32', new Float32Array(2 * 1 * 320).fill(0), [2, 1, 320]);
     let c = new ort.Tensor('float32', new Float32Array(2 * 1 * 320).fill(0), [2, 1, 320]);
