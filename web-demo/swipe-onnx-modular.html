@@ -335,7 +335,7 @@
                 const clientX = e.touches ? e.touches[0].clientX : e.clientX;
                 const clientY = e.touches ? e.touches[0].clientY : e.clientY;
 
-                // Convert to normalized coordinates in [-1, 1]
+                // Collect coordinates in [-1, 1]; featurizer will convert to [0,1] if needed
                 const x01 = (clientX - rect.left) / rect.width;
                 const y01 = (clientY - rect.top) / rect.height;
                 const x = x01 * 2 - 1;
