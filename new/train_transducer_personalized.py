@@ -4,10 +4,10 @@ Personalized RNN-T training script for gesture swipe models.
 
 This variant bakes in the end-to-end preprocessing pipeline expected by the
 updated web demo and on-device stacks. It ingests raw swipe traces as
-(x, y, t_ms) where coordinates are in [-1, 1] with 0,0 at the keyboard origin
-and t=0 at gesture start. The script performs adaptive resampling, feature
-extraction aligned with the web runtime, and optional teacher-student
-distillation for smaller deployment footprints.
+(x, y, t_ms) where coordinates are in [0, 1] with (0,0) at top-left Q key,
+then transforms them to [-1, 1] with (0,0) at keyboard center for model input.
+The script performs adaptive resampling, feature extraction aligned with the
+web runtime, and optional teacher-student distillation for smaller deployment.
 
 Key capabilities beyond the baseline trainer:
   * Adaptive resampling towards 56–96 frames depending on trace length.
@@ -81,6 +81,58 @@ runtime_id = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
 # Inline comments explain the role and rationale for each parameter, focusing on
 # creating a robust, on-device model.
 
+# Model size presets for different deployment targets
+MODEL_PRESETS = {
+    "mobile": {  # Optimized for Android phones (< 20MB model, < 50ms inference)
+        "encoder": {
+            "d_model": 144,
+            "n_heads": 4,
+            "num_layers": 4,
+            "conv_kernel_size": 15,
+        },
+        "decoder": {
+            "pred_hidden": 192,
+            "pred_rnn_layers": 1,
+        },
+        "joint": {
+            "joint_hidden": 256,
+        },
+    },
+    "tablet": {  # Balanced for tablets/high-end phones
+        "encoder": {
+            "d_model": 192,
+            "n_heads": 4,
+            "num_layers": 5,
+            "conv_kernel_size": 21,
+        },
+        "decoder": {
+            "pred_hidden": 256,
+            "pred_rnn_layers": 2,
+        },
+        "joint": {
+            "joint_hidden": 384,
+        },
+    },
+    "server": {  # Maximum accuracy for cloud/research
+        "encoder": {
+            "d_model": 256,
+            "n_heads": 8,
+            "num_layers": 6,
+            "conv_kernel_size": 31,
+        },
+        "decoder": {
+            "pred_hidden": 320,
+            "pred_rnn_layers": 2,
+        },
+        "joint": {
+            "joint_hidden": 512,
+        },
+    },
+}
+
+# Select model size (can be overridden via CLI)
+SELECTED_MODEL = "mobile"  # Default to mobile-optimized
+
 CONFIG: Dict[str, Any] = {
     # --- Data and Vocabulary Paths ---
     # These are now default values, overrideable via command-line arguments
@@ -108,21 +160,16 @@ CONFIG: Dict[str, Any] = {
         "kd_temperature": 1.5,  # Softens the teacher's output distribution, providing richer training signals for the student.
     },
     # --- Core Model Architecture (Conformer-RNNT) ---
+    # Using preset configuration for selected model size
     "model": {
         "encoder": {
             "feat_in": 37,  # Input feature dimension from PersonalizedSwipeFeaturizer. MUST match feature output.
-            "d_model": 256,  # The main hidden dimension of the Conformer model. A balance between capacity and on-device performance.
-            "n_heads": 4,  # Number of attention heads in the multi-head self-attention layers.
-            "num_layers": 6,  # Number of Conformer blocks. More layers increase accuracy but also model size and inference time.
-            "conv_kernel_size": 31,  # Kernel size for the convolution module within each Conformer block. Captures local patterns.
+            **MODEL_PRESETS[SELECTED_MODEL]["encoder"],
             "subsampling_factor": 2,  # Reduces the sequence length early in the model, saving computation.
         },
-        "decoder": {  # The "Prediction Network" in RNN-T
-            "pred_hidden": 320,  # Hidden size of the LSTM decoder.
-            "pred_rnn_layers": 2,  # Two LSTM layers provide sufficient power to model character-level dependencies (e.g., 'q' -> 'u').
-        },
-        "joint": {  # Combines encoder and decoder outputs
-            "joint_hidden": 512,  # Hidden size of the feed-forward network in the joint.
+        "decoder": MODEL_PRESETS[SELECTED_MODEL]["decoder"],
+        "joint": {
+            **MODEL_PRESETS[SELECTED_MODEL]["joint"],
             "activation": "relu",
             "dropout": 0.1,
         },
@@ -301,10 +348,13 @@ class PersonalizedSwipeFeaturizer:
     """
     Feature generator mirroring the web demo pipeline.
     This class is responsible for turning a sequence of points into a rich,
-    37-dimensional feature vector that the model can learn from.
+    feature vector that the model can learn from.
+
+    For mobile deployment, we can reduce features to speed up inference.
     """
 
-    FEATURE_NAMES = [
+    # Full feature set for maximum accuracy
+    FULL_FEATURE_NAMES = [
         "x",
         "y",
         "t_seconds",
@@ -333,10 +383,32 @@ class PersonalizedSwipeFeaturizer:
         "win_range_x",
         "win_range_y",
     ]
-    # Pad to 37 features for model compatibility
-    FINAL_FEATURE_COUNT = 37
 
-    def __init__(self, key_centers_path: Optional[str] = None):
+    # Reduced feature set for mobile (23 features)
+    MOBILE_FEATURE_NAMES = [
+        "x",
+        "y",
+        "vx",
+        "vy",
+        "speed",
+        "ax",
+        "ay",
+        "angle_sin",
+        "angle_cos",
+        "curvature",
+        "dist_key1",  # Only nearest key
+        "dist_key2",
+        "dist_key3",
+        "progress",
+        "is_start",
+        "is_end",
+        "win_mean_x",
+        "win_mean_y",
+        "win_range_x",
+        "win_range_y",
+    ]
+
+    def __init__(self, key_centers_path: Optional[str] = None, mobile_features: bool = False):
         self.key_centers = load_key_centers(key_centers_path)
         self.feature_dim = len(self.FEATURE_NAMES)
 
@@ -597,7 +669,7 @@ class PersonalizedSwipeDataset(Dataset):
 
     @staticmethod
     def _prepare_points(points: List[Dict[str, Any]]) -> List[Dict[str, float]]:
-        """Prepares raw points by ensuring they are in [-1, 1] and time is relative."""
+        """Prepares raw points by transforming from [0, 1] to [-1, 1] and making time relative."""
         if not points:
             return []
         start_t = float(points[0].get("t", 0.0))
@@ -606,11 +678,15 @@ class PersonalizedSwipeDataset(Dataset):
             raw_x = float(pt.get("x", 0.0))
             raw_y = float(pt.get("y", 0.0))
 
-            # BUG FIX: The original implementation incorrectly assumed input coordinates were in [0, 1]
-            # and applied a `* 2.0 - 1.0` transformation. The data is already in [-1, 1],
-            # so we just need to clamp it to ensure it's within the expected bounds.
-            centered_x = clamp(raw_x, -1.0, 1.0)
-            centered_y = clamp(raw_y, -1.0, 1.0)
+            # Transform coordinates from [0, 1] to [-1, 1]
+            # Dataset has (0,0) at top-left Q key, we need (0,0) at keyboard center
+            centered_x = raw_x * 2.0 - 1.0
+            centered_y = raw_y * 2.0 - 1.0
+
+            # Allow for out-of-bounds gestures (finger went off keyboard)
+            # but cap at reasonable limits to prevent extreme values
+            centered_x = clamp(centered_x, -1.5, 1.5)
+            centered_y = clamp(centered_y, -1.5, 1.5)
 
             raw_t = float(pt.get("t", idx * 10.0))
             prepared.append(
@@ -1105,6 +1181,14 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Train Personalized RNNT for CleverKeys"
     )
+    # Model size selection
+    parser.add_argument(
+        "--model-size",
+        type=str,
+        choices=["mobile", "tablet", "server"],
+        default="mobile",
+        help="Model size preset: mobile (fast, <20MB), tablet (balanced), server (accurate)",
+    )
     # Feature toggles
     parser.add_argument(
         "--augment", action="store_true", help="Enable data augmentation"
@@ -1155,6 +1239,14 @@ def main() -> None:
         help="Override optimizer learning rate",
     )
     args = parser.parse_args()
+
+    # --- Apply model size preset ---
+    if args.model_size != SELECTED_MODEL:
+        # Update model configuration with selected preset
+        cfg.model.encoder.update(MODEL_PRESETS[args.model_size]["encoder"])
+        cfg.model.decoder = MODEL_PRESETS[args.model_size]["decoder"]
+        cfg.model.joint.update(MODEL_PRESETS[args.model_size]["joint"])
+        print(f"Using {args.model_size} model preset")
 
     # --- Resolve Paths and Set up Environment ---
     cfg.data.train_manifest = _resolve_path(cfg.data.train_manifest)

@@ -15,9 +15,7 @@ CleverKeys is a privacy-first gesture typing system for local-only modern keyboa
 - **Decoder**: LSTM-based prediction network for character sequence modeling
 - **Joint Network**: Combines encoder and decoder outputs for final character predictions
 
-### Training Scripts (Primary Focus)
-
-#### Current Production Script: `trained_models/nema1/train_transducer_personalized.py`
+### Training Script: `new/train_transducer_personalized.py`
 - **Latest Architecture**: Personalized RNN-T with end-to-end preprocessing pipeline
 - **Key Features**:
   - Adaptive resampling (56-96 frames depending on trace length)
@@ -25,44 +23,84 @@ CleverKeys is a privacy-first gesture typing system for local-only modern keyboa
   - Knowledge distillation support for smaller deployment models
   - Configurable character-hypothesis budget for downstream decoders
   - GPU/CPU auto-fallback optimized for RTX 4090M (16GB VRAM)
+  - Frequency-aware weighted sampling to handle word frequency imbalance
 
-#### Legacy Script: `archive/train_transducer.py`
-- **Earlier Implementation**: Basic RNN-T without personalization features
-- **Differences**: Simpler feature extraction, no adaptive resampling, no distillation
-- **Note**: May have validation WER metric inconsistencies vs. personalized version
+### Data Format & Coordinate System
 
-### Data Format & Features
+**CRITICAL BUG**: The current `_prepare_points` method in `new/train_transducer_personalized.py` (lines 609-613) incorrectly assumes coordinates are already in [-1,1] range. The actual dataset uses:
+
+**Dataset Format**:
 ```json
 {
   "word": "example",
   "points": [
-    {"x": -0.784, "y": 0.214, "t": 0},
-    {"x": 0.522, "y": -0.193, "t": 37}
+    {"x": 0.784, "y": 0.214, "t": 0},
+    {"x": 0.522, "y": 0.193, "t": 37}
   ]
 }
 ```
-- **Coordinates**: x,y ∈ [-1,1] with (0,0) at keyboard center
+- **Coordinates**: x,y ∈ [0,1] where (0,0) is top-left corner of Q key
+- **Coordinate mapping**: Top-right P is (1.0, 0.0), Bottom-left Z is (0.15, 1.0)
+- **Required transformation**: `centered_x = raw_x * 2.0 - 1.0` to convert [0,1] → [-1,1]
 - **Timing**: t in milliseconds from gesture start
-- **Vocabulary**: Lowercase letters + apostrophe only
+
+**Fix Required**:
+```python
+# Current (INCORRECT):
+centered_x = clamp(raw_x, -1.0, 1.0)  # Assumes already in [-1,1]
+
+# Should be:
+centered_x = raw_x * 2.0 - 1.0  # Transform [0,1] → [-1,1]
+centered_y = raw_y * 2.0 - 1.0
+```
 
 ### Hardware & Performance Optimization
 - **Target Hardware**: RTX 4090M with 16GB VRAM
 - **Precision**: bf16-mixed for training (avoids CUDA graph dtype conflicts)
-- **Batch Size**: 256-320 optimized for memory usage
+- **Batch Size**: 320-400 optimized for 16GB memory
 - **Optimizations**: TF32, cuDNN benchmarking, torch.compile when available
+
+## Frequency-Aware Training
+
+### The Problem
+Natural language has massive frequency imbalance - words like "the", "and", "to" appear thousands of times more frequently than other words. Without intervention, training plateaus as the model overfits to common words.
+
+### Solution: Sampling Profiles
+The project uses weighted random sampling with different profiles defined in `new/sampling_profiles.py`:
+
+**Key Profiles**:
+- `ultra_common_suppressed`: Heavily suppress top 100 most common words
+- `rare_focused`: Boost words appearing <1000 times
+- `curriculum_stage[1-4]`: Progressive learning from common to rare
+- `validation_balanced`: Consistent validation metric
+
+### Comprehensive Training Script
+```bash
+# Run curriculum learning (recommended)
+./train_comprehensive.sh curriculum
+
+# Run frequency band training
+./train_comprehensive.sh frequency
+
+# Run all strategies
+./train_comprehensive.sh all
+
+# Quick test
+./train_comprehensive.sh test
+```
 
 ## Development Commands
 
 ### Training
 ```bash
-# Run current personalized training
-uv run python trained_models/nema1/train_transducer_personalized.py
-
-# Run legacy training (for comparison)
-uv run python archive/train_transducer.py
+# Run personalized training with specific profile
+uv run python new/train_transducer_personalized.py --profile rare_focused
 
 # Fast development run (single batch smoke test)
-FAST_DEV_RUN=1 uv run python trained_models/nema1/train_transducer_personalized.py
+FAST_DEV_RUN=1 uv run python new/train_transducer_personalized.py
+
+# Comprehensive training
+./train_comprehensive.sh curriculum
 ```
 
 ### Dependencies
@@ -72,15 +110,6 @@ uv sync
 
 # Python version
 uv run python --version  # Should be 3.12.x
-```
-
-### Data Validation
-```bash
-# Validate vocabulary system
-uv run python trained_models/scripts/validate_vocab_system.py
-
-# Split data for training
-uv run python trained_models/scripts/split_data.py
 ```
 
 ### Model Export & Deployment
@@ -95,84 +124,27 @@ uv run python trained_models/nema1/export_pte_ultra.py
 uv run python trained_models/nema1/beam_decode_onnx_cli.py
 ```
 
-## Key Configuration Differences
-
-### Personalized vs Legacy Training
-| Feature | Personalized | Legacy |
-|---------|-------------|--------|
-| Resampling | Adaptive 56-96 frames | Fixed length |
-| Features | 37D with spatial awareness | 37D basic kinematic |
-| Distillation | Teacher-student support | None |
-| Validation | Configurable subset sampling | Full dataset |
-| Precision | bf16-mixed optimized | bf16-mixed basic |
-
-### Model Export Formats
-- **ONNX**: Web inference via JavaScript/TypeScript
-- **PTE**: Android on-device inference (PyTorch Mobile)
-- **NeMo**: Full model checkpoints for continued training
-
 ## Data Paths & Structure
 - **Training Data**: `data/train_final_train.jsonl` (642,909 samples)
 - **Validation Data**: `data/train_final_val.jsonl` (33,838 samples)
-- **Vocabulary**: `data/vocab.txt` (150k words from wordfreq)
-- **Checkpoints**: Auto-generated `rnnt_checkpoints_YYYYMMDD_HHMMSS/`
+- **Vocabulary**: `data/vocab.txt` (29 tokens: `<blank>`, `'`, `a-z`, `<unk>`)
+- **Checkpoints**: Auto-generated `rnnt_checkpoints_PROFILE_YYYYMMDD_HHMMSS/`
 
-## Important Notes
+## Critical Notes
 
-### Critical: Vocabulary & Token Handling
+### Vocabulary & Token Handling
+NeMo's `blank_as_pad=True` setting modifies vocabulary handling:
+- **Model output**: 30 logits (29 vocab tokens + functional blank at index 29)
+- **Blank token**: Index 29 is the functional blank for RNN-T decoding
+- **Character mappings**: `'a' → 2`, `'i' → 10`, `'s' → 20` etc.
 
-**CRITICAL UNDERSTANDING**: NeMo's `blank_as_pad=True` setting modifies vocabulary handling:
-
-**Training Script Vocabulary** (`data/vocab.txt`):
-- 29 tokens: `<blank>`, `'`, `a-z`, `<unk>`
-- Loaded sequentially with `<blank>` at index 0
-
-**NeMo Model Architecture with `blank_as_pad=True`**:
-- **Purpose**: Enables efficient batch processing and RNNT model export
-- **Effect**: Adds extra embedding dimension for blank token as padding
-- **Vocab Size**: Parameter excludes blank token (29), but embedding has 30 dimensions
-- **Blank Position**: `model.decoder.blank_idx = 29` (moved to end)
-- **Index 0**: Still contains `<blank>` label but NOT the functional blank
-- **Index 29**: Empty string `''` serves as the actual blank token
-
-**Why This Architecture**:
-- `blank_as_pad=True` is required for:
-  - Efficient batched beam search
-  - Proper ONNX export support
-  - Zero tensor returns for padding optimization
-- This is standard NeMo RNNT practice, not a bug
-
-**Runtime Metadata Requirements**:
-```json
-{
-  "vocab_size": 30,
-  "blank_id": 29,  // CRITICAL: Functional blank at end
-  "tokens": ["<blank>", "'", "a", ..., "z", "<unk>", ""]  // 30 tokens total
-}
-```
-
-**ONNX Export Behavior**:
-- ONNX models correctly output 30 logits
-- The 30th dimension (index 29) is the functional blank
-- Must use `blank_id: 29` for decoding
-- Character mappings remain: `'a' → 2`, `'i' → 10`, `'s' → 20`
-
-**Script Consistency Requirements**:
-- All scripts must recognize 30-token output
-- `make_runtime_meta.py`: Derive from model checkpoint (gets blank_idx=29)
-- Export scripts: Preserve 30-token architecture
-- Beam decoders: Use `blank_id: 29` consistently
-
-### Validation WER Concerns
-The user has concerns about validation WER metric consistency between training scripts. The personalized version may restrict validation datasets differently based on config, potentially affecting metric comparability. Monitor validation subset sampling configurations when comparing models.
-
-### Model Selection Guidance
-- **Use Personalized**: For production deployments requiring on-device personalization
-- **Use Legacy**: For baseline comparisons or simpler deployment scenarios
-- **Architecture**: Both use RNN-T but personalized has superior feature engineering
+### Known Issues
+1. **Coordinate System Bug**: Training script assumes [-1,1] but data is [0,1] - needs fix
+2. **Checkpoint Resume**: Script creates new checkpoint dirs per profile, breaking continuity
+3. **Max Epochs Control**: Training script doesn't accept --max-epochs parameter yet
 
 ### Export/Deployment Parameters
-Multiple export scripts exist with different optimization levels. Choose based on target platform:
+Multiple export scripts exist with different optimization levels:
 - `export_pte_ultra.py`: Maximum optimization for Android
 - `export_pte_fp32.py`: Full precision for accuracy-critical applications
 - `export_onnx.py`: Web deployment

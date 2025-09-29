@@ -1,198 +1,262 @@
 #!/usr/bin/env python3
 """
-Sampling Profiles for CleverKeys RNNT Training
+Sampling profiles for frequency-aware training.
 
-This file contains different sampling strategies for training the swipe gesture model.
-Each profile targets different word characteristics to improve model performance on
-specific types of words.
-
-The sampling system uses weighted random sampling to adjust the frequency of training
-examples based on word properties like frequency, length, and rarity.
+These profiles address the massive frequency imbalance in natural language where
+common words like "the", "and", "to" appear thousands of times more frequently
+than other words, which would cause training to plateau without intervention.
 """
 
 SAMPLING_PROFILES = {
-    # 1. BASE RANDOM - Uniform sampling (original behavior before sampling config)
-    "base_random": {
-        "strategy": "none",  # Disables weighted sampling
-        "description": "Uniform random sampling - baseline for comparing with legacy checkpoints"
+    # === FREQUENCY-BASED PROFILES ===
+
+    "ultra_common_suppressed": {
+        # Heavily suppress the most common words (top 100 by frequency)
+        # to prevent them from dominating training
+        "strategy": "inverse_sqrt_freq",
+        "freq_power": 0.9,  # Strong inverse weighting
+        "length_power": 0.0,  # Ignore word length
+        "max_frequency": 100000,  # Focus on words that appear < 100k times
+        "rare_frequency_threshold": 10000,
+        "rare_word_boost": 0.5,  # Actually suppress "rare" (which are still common)
+        "max_weight_factor": 5.0,
+        "min_word_length": 1,
+        "description": "Suppress ultra-common words (the, and, to, etc.)"
     },
 
-    # 2. RARE WORDS - Focus on low-frequency words
-    "rare_words": {
+    "common_balanced": {
+        # Balance common words (rank 100-1000) with moderate suppression
         "strategy": "inverse_sqrt_freq",
-        "freq_power": 0.7,  # Strong inverse frequency weighting
-        "rare_frequency_threshold": 50,  # Words appearing ≤50 times
-        "rare_word_boost": 5.0,  # 5x boost for rare words
-        "max_weight_factor": 15.0,
-        "min_word_length": 3,  # Skip very short words
-        "description": "Heavily samples rare and uncommon words to improve tail distribution"
-    },
-
-    # 3. LONG WORDS - Focus on longer words (8+ characters)
-    "long_words": {
-        "strategy": "inverse_sqrt_freq",
-        "freq_power": 0.3,  # Moderate frequency weighting
-        "length_power": 1.5,  # Strong length weighting
-        "min_word_length": 8,  # Only words 8+ chars
-        "max_weight_factor": 20.0,
-        "description": "Targets longer words which are harder to swipe accurately"
-    },
-
-    # 4. SHORT COMMON - Focus on short common words (3-5 chars, high frequency)
-    "short_common": {
-        "strategy": "inverse_sqrt_freq",
-        "freq_power": -0.3,  # POSITIVE weight for common words
-        "min_word_length": 3,
-        "max_word_length": 5,
-        "max_frequency": 10000,  # Only common words
+        "freq_power": 0.6,
+        "length_power": 0.2,
+        "min_frequency": 1000,  # Skip ultra-rare
+        "max_frequency": 50000,  # Skip ultra-common
+        "rare_frequency_threshold": 5000,
+        "rare_word_boost": 1.5,
         "max_weight_factor": 8.0,
-        "description": "Short frequent words that are critical for fluent typing"
+        "min_word_length": 2,
+        "description": "Balance common words (rank 100-1000)"
     },
 
-    # 5. MEDIUM BALANCED - Medium length words (5-8 chars) with balanced frequency
-    "medium_balanced": {
-        "strategy": "inverse_sqrt_freq",
-        "freq_power": 0.4,
-        "length_power": 0.3,
-        "min_word_length": 5,
-        "max_word_length": 8,
-        "rare_frequency_threshold": 100,
-        "rare_word_boost": 2.0,
-        "max_weight_factor": 10.0,
-        "description": "Balanced sampling for medium-length words"
-    },
-
-    # 6. VERY RARE - Ultra-rare words and proper nouns
-    "very_rare": {
-        "strategy": "inverse_sqrt_freq",
-        "freq_power": 0.9,  # Very strong inverse frequency
-        "rare_frequency_threshold": 10,  # Words appearing ≤10 times
-        "rare_word_boost": 10.0,  # 10x boost
-        "min_word_length": 4,
-        "max_weight_factor": 30.0,
-        "description": "Extreme focus on very rare words, proper nouns, specialized terms"
-    },
-
-    # 7. HIGH CONFUSION - Words that often get confused (similar swipe paths)
-    "high_confusion": {
+    "medium_frequency": {
+        # Focus on medium frequency words (rank 1000-10000)
         "strategy": "inverse_sqrt_freq",
         "freq_power": 0.5,
-        "length_power": 0.6,
-        "min_word_length": 4,
-        "max_word_length": 7,  # Mid-length words have most confusion
+        "length_power": 0.3,
+        "min_frequency": 100,
+        "max_frequency": 5000,
+        "rare_frequency_threshold": 500,
+        "rare_word_boost": 2.0,
+        "max_weight_factor": 10.0,
+        "min_word_length": 3,
+        "description": "Focus on medium frequency words"
+    },
+
+    "rare_focused": {
+        # Heavily boost rare words (rank 10000+)
+        "strategy": "inverse_sqrt_freq",
+        "freq_power": 0.7,
+        "length_power": 0.5,
+        "max_frequency": 1000,  # Only words appearing < 1000 times
+        "rare_frequency_threshold": 100,
+        "rare_word_boost": 4.0,
+        "max_weight_factor": 15.0,
+        "min_word_length": 2,
+        "description": "Boost rare words heavily"
+    },
+
+    "ultra_rare_boost": {
+        # Extreme boost for the rarest words
+        "strategy": "inverse_sqrt_freq",
+        "freq_power": 0.9,
+        "length_power": 0.7,
+        "max_frequency": 100,  # Only words appearing < 100 times
+        "rare_frequency_threshold": 50,
+        "rare_word_boost": 8.0,
+        "max_weight_factor": 20.0,
+        "min_word_length": 3,
+        "description": "Extreme boost for ultra-rare words"
+    },
+
+    # === LENGTH-BASED PROFILES ===
+
+    "short_words": {
+        # Focus on 2-4 character words
+        "strategy": "inverse_sqrt_freq",
+        "freq_power": 0.4,
+        "length_power": -0.5,  # Negative to boost short words
+        "rare_frequency_threshold": 1000,
+        "rare_word_boost": 2.0,
+        "max_weight_factor": 10.0,
+        "min_word_length": 2,
+        "max_word_length": 4,
+        "description": "Focus on short words (2-4 chars)"
+    },
+
+    "medium_words": {
+        # Focus on 5-7 character words
+        "strategy": "inverse_sqrt_freq",
+        "freq_power": 0.5,
+        "length_power": 0.0,
+        "rare_frequency_threshold": 500,
+        "rare_word_boost": 2.5,
+        "max_weight_factor": 10.0,
+        "min_word_length": 5,
+        "max_word_length": 7,
+        "description": "Focus on medium words (5-7 chars)"
+    },
+
+    "long_words": {
+        # Focus on 8+ character words
+        "strategy": "inverse_sqrt_freq",
+        "freq_power": 0.6,
+        "length_power": 0.8,
         "rare_frequency_threshold": 200,
         "rare_word_boost": 3.0,
         "max_weight_factor": 12.0,
-        "description": "Words prone to confusion due to similar swipe patterns"
+        "min_word_length": 8,
+        "description": "Focus on long words (8+ chars)"
     },
 
-    # 8. PRODUCTION (Current Settings) - What's currently in use
-    "production_current": {
-        "strategy": "inverse_sqrt_freq",
-        "freq_power": 0.55,
-        "length_power": 0.8,
-        "rare_frequency_threshold": 25,
-        "rare_word_boost": 3.5,
-        "max_weight_factor": 12.0,
-        "min_word_length": 4,
-        "max_frequency": 3000,
-        "description": "Current production settings from train_transducer_personalized.py"
+    # === BALANCED PROFILES ===
+
+    "uniform": {
+        # No weighting - uniform sampling
+        "strategy": "none",
+        "description": "Uniform sampling (no weighting)"
     },
 
-    # VALIDATION PROFILES
-    "validation_current": {
-        "strategy": "inverse_sqrt_freq",
-        "freq_power": 0.75,
-        "length_power": 1.3,
-        "min_word_length": 7,
-        "rare_frequency_threshold": 40,
-        "rare_word_boost": 6.0,
-        "max_weight_factor": 28.0,
-        "batch_size_factor": 0.35,
-        "limit_batches": 0.15,
-        "max_samples": 1500,
-        "description": "Current validation settings - harder subset for robust evaluation"
-    },
-
-    "validation_balanced": {
+    "sqrt_balanced": {
+        # Moderate sqrt-based balancing
         "strategy": "inverse_sqrt_freq",
         "freq_power": 0.5,
-        "length_power": 0.5,
-        "min_word_length": 3,
+        "length_power": 0.0,
+        "rare_frequency_threshold": 0,  # No special rare word handling
+        "rare_word_boost": 1.0,
+        "max_weight_factor": 10.0,
+        "min_word_length": 1,
+        "description": "Square root frequency balancing"
+    },
+
+    "production_balanced": {
+        # Well-tested production settings
+        "strategy": "inverse_sqrt_freq",
+        "freq_power": 0.55,
+        "length_power": 0.3,
+        "rare_frequency_threshold": 100,
+        "rare_word_boost": 2.5,
+        "max_weight_factor": 12.0,
+        "min_word_length": 2,
+        "description": "Production-tested balanced settings"
+    },
+
+    # === CURRICULUM STAGES ===
+
+    "curriculum_stage1": {
+        # Stage 1: Master common patterns first
+        "strategy": "inverse_sqrt_freq",
+        "freq_power": 0.3,  # Mild suppression of ultra-common
+        "length_power": 0.0,
+        "min_frequency": 1000,  # Skip rare words initially
+        "rare_frequency_threshold": 10000,
+        "rare_word_boost": 1.2,
         "max_weight_factor": 5.0,
-        "limit_batches": 0.3,
-        "max_samples": 3000,
-        "description": "More balanced validation for comparing across checkpoints"
+        "min_word_length": 2,
+        "max_word_length": 6,
+        "description": "Stage 1: Common patterns (words length 2-6, freq > 1000)"
+    },
+
+    "curriculum_stage2": {
+        # Stage 2: Expand to medium frequency
+        "strategy": "inverse_sqrt_freq",
+        "freq_power": 0.5,
+        "length_power": 0.2,
+        "min_frequency": 100,
+        "max_frequency": 10000,
+        "rare_frequency_threshold": 500,
+        "rare_word_boost": 2.0,
+        "max_weight_factor": 10.0,
+        "min_word_length": 3,
+        "description": "Stage 2: Medium frequency expansion"
+    },
+
+    "curriculum_stage3": {
+        # Stage 3: Include rare words
+        "strategy": "inverse_sqrt_freq",
+        "freq_power": 0.7,
+        "length_power": 0.4,
+        "max_frequency": 1000,
+        "rare_frequency_threshold": 100,
+        "rare_word_boost": 3.5,
+        "max_weight_factor": 15.0,
+        "min_word_length": 2,
+        "description": "Stage 3: Include rare words"
+    },
+
+    "curriculum_stage4": {
+        # Stage 4: Final balanced training
+        "strategy": "inverse_sqrt_freq",
+        "freq_power": 0.6,
+        "length_power": 0.3,
+        "rare_frequency_threshold": 200,
+        "rare_word_boost": 2.5,
+        "max_weight_factor": 12.0,
+        "min_word_length": 1,
+        "description": "Stage 4: Final balanced refinement"
+    },
+
+    # === VALIDATION PROFILES ===
+
+    "validation_balanced": {
+        # Balanced validation sampling
+        "strategy": "inverse_sqrt_freq",
+        "freq_power": 0.5,
+        "length_power": 0.0,
+        "rare_frequency_threshold": 0,
+        "rare_word_boost": 1.0,
+        "max_weight_factor": 5.0,
+        "min_word_length": 1,
+        "description": "Balanced validation sampling"
+    },
+
+    "validation_challenging": {
+        # Focus validation on challenging cases
+        "strategy": "inverse_sqrt_freq",
+        "freq_power": 0.7,
+        "length_power": 0.5,
+        "rare_frequency_threshold": 100,
+        "rare_word_boost": 3.0,
+        "max_weight_factor": 10.0,
+        "min_word_length": 3,
+        "description": "Focus on challenging validation cases"
     }
 }
-
-# Analysis of what to prioritize given current greedy decoding output
-PRIORITY_RECOMMENDATIONS = """
-Based on the current system using greedy decoding (which will be replaced by beam search):
-
-1. **HIGHEST PRIORITY - Rare Words Profile**:
-   - Greedy decoding particularly struggles with rare words
-   - Beam search will help, but training on more rare examples is critical
-
-2. **HIGH PRIORITY - Long Words Profile**:
-   - Longer swipes accumulate more uncertainty
-   - Greedy can't recover from early mistakes in long words
-
-3. **MEDIUM PRIORITY - High Confusion Profile**:
-   - Words with similar swipe patterns need more training examples
-   - Beam search will explore alternatives, but model needs better discrimination
-
-4. **LOWER PRIORITY - Short Common**:
-   - These likely already work well
-   - But important for user experience since they're typed frequently
-
-For comparing with older checkpoints before sampling config:
-- Use "base_random" profile to match original training distribution
-- This allows fair WER comparison across checkpoint epochs
-
-Current production settings seem well-tuned but could benefit from:
-- Slightly higher freq_power (0.6-0.65) to focus more on rare words
-- Consider separate models for common vs rare word specialists
-"""
 
 
 def get_profile(name: str) -> dict:
     """Get a sampling profile by name."""
     if name not in SAMPLING_PROFILES:
-        raise ValueError(f"Unknown profile: {name}. Available: {list(SAMPLING_PROFILES.keys())}")
+        available = ", ".join(sorted(SAMPLING_PROFILES.keys()))
+        raise ValueError(
+            f"Unknown profile '{name}'. Available profiles: {available}"
+        )
     return SAMPLING_PROFILES[name].copy()
 
 
-def print_profile_comparison():
-    """Print a comparison table of all profiles."""
-    print("\nSampling Profile Comparison")
-    print("=" * 100)
+def list_profiles() -> list:
+    """List all available profile names."""
+    return sorted(SAMPLING_PROFILES.keys())
 
-    params = ["strategy", "freq_power", "length_power", "min_word_length",
-              "max_word_length", "rare_frequency_threshold", "rare_word_boost",
-              "max_weight_factor", "max_frequency"]
 
-    print(f"{'Profile':<20}", end="")
-    for param in params:
-        print(f"{param[:8]:<9}", end="")
-    print()
-    print("-" * 100)
-
-    for name, profile in SAMPLING_PROFILES.items():
-        if "validation" in name:
-            continue  # Skip validation profiles in main comparison
-        print(f"{name:<20}", end="")
-        for param in params:
-            value = profile.get(param, "-")
-            if isinstance(value, float):
-                print(f"{value:<9.2f}", end="")
-            elif value is None:
-                print(f"{'None':<9}", end="")
-            else:
-                print(f"{str(value):<9}", end="")
-        print()
+def get_profile_description(name: str) -> str:
+    """Get description for a profile."""
+    profile = get_profile(name)
+    return profile.get("description", "No description available")
 
 
 if __name__ == "__main__":
-    print_profile_comparison()
-    print("\n" + PRIORITY_RECOMMENDATIONS)
+    print("Available sampling profiles:")
+    print("=" * 60)
+    for name in list_profiles():
+        desc = get_profile_description(name)
+        print(f"  {name:25s} - {desc}")
