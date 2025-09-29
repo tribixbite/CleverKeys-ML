@@ -37,18 +37,37 @@ class SwipeVocabularyBuilder:
         count = 0
         
         for w in wordfreq.top_n_list('en', max_words):
-            clean = w.replace("'", '').replace('-', '').lower()
+            clean = w.replace("'", "'").replace('-', '').lower()
             
             # Filter criteria
-            if not re.fullmatch(r'[a-z]{2,20}', clean):
+            if not re.fullmatch(r"[a-z']{2,20}", clean):
                 continue
             if len(clean) < 2:
+                continue
+            # Disallow 3+ repeated characters (e.g., 'aaaaaa', 'coool')
+            if re.search(r"(.)\1\1", clean):
                 continue
                 
             freq = wordfreq.word_frequency(w, 'en')
             
-            # Quality threshold - adjust based on validation
-            if clean not in valid_words and freq < 5e-8:
+            # Length-dependent frequency thresholds to drop obscure entries
+            L = len(clean)
+            if L <= 2 and freq < 1e-5: 
+                continue
+            if L == 3 and freq < 1e-6:
+                continue
+            if L == 4 and freq < 1e-7:
+                continue
+            if L == 5 and freq < 5e-8:
+                continue
+            if L in (6,7) and freq < 1e-8:
+                continue
+            if L == 8 and freq < 5e-9:
+                continue
+            if L >= 9 and freq < 1e-9:
+                continue
+            # If not in nltk words and very rare, drop
+            if clean not in valid_words and freq < 1e-8:
                 continue
                 
             self.word_freq[clean] = freq

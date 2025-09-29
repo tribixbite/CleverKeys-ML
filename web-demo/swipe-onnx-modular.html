@@ -164,6 +164,12 @@
                     'models/rnnt_new/decoder_joint.onnx',
                     'models/rnnt_new/runtime_meta.json'
                 );
+                // Load lexicon for beam search
+                try {
+                    await rnntDecoder.loadLexicon('words.txt', 'word_frequencies_aligned.json');
+                } catch (e) {
+                    console.warn('Lexicon load failed, beam search will be limited:', e);
+                }
                 // Feature extractor is used directly, not passed to decoder
 
                 // Initialize CTC decoder (commented out - model not available)
@@ -414,7 +420,12 @@
                 if (currentModelType === 'rnnt') {
                     // Process with RNN-T model - extract features and decode
                     const featureData = featureExtractor.process(swipePath);
-                    result = await rnntDecoder.greedyDecode(featureData);
+                    // Prefer beam search with lexicon if available
+                    if (rnntDecoder.lexicon) {
+                        result = await rnntDecoder.beamSearch(featureData, { beamSize: 32, topK: 12, symbolsPerStep: 10, maxSymbols: 28 });
+                    } else {
+                        result = await rnntDecoder.greedyDecode(featureData);
+                    }
                     console.log('RNN-T result:', result);
                 } else {
                     // Process with CTC model (not available)

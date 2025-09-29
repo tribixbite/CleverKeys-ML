@@ -215,8 +215,50 @@ tensorboard --logdir rnnt_checkpoints_*
 1. **CLI Integration**: Add proper argument parsing
 2. **Profile System**: Actually use the sampling profiles
 3. **Validation Metrics**: Fix word length filtering for accurate WER
-4. **Web Demo**: Port preprocessing to JavaScript, implement decoder
+4. **Web Demo**: Port preprocessing to JavaScript, implement decoder + lexicon beam search
 5. **Documentation**: Update after each major change
+
+## Beam Search Decoder (Web)
+
+This demo now includes a full lexicon‑constrained RNNT beam search in JavaScript:
+
+- Loads `web-demo/words.txt` and `web-demo/word_frequencies_aligned.json` (log frequencies aligned with words.txt order) and builds a trie of valid words.
+- Filters the word list client‑side to remove unsuitable entries for gesture prediction:
+  - Allowed chars: `[a-z']`, length 2–20.
+  - No triple repeated characters (regex `(.)\1\1`).
+  - Minimum frequency per length (e.g., 2‑char ≥1e‑5, 3‑char ≥1e‑6, 4‑char ≥1e‑7, 5‑char ≥5e‑8, 6–7‑char ≥1e‑8, 8‑char ≥5e‑9, ≥9‑char ≥1e‑9).
+- Uses RNNT inner‑loop decoding (multiple symbols per encoder frame until blank) and constrains expansions to trie children.
+- Adds a log‑prior bonus for completed words to favor lexicon endpoints.
+
+The modular page (`swipe-onnx-modular.html`) now calls `rnntDecoder.loadLexicon(...)` at init and prefers `beamSearch()` over greedy when a lexicon is available.
+
+## Wordlist Generation and Filtering
+
+For high‑quality suggestions, regenerate the word list with stricter filtering:
+
+1. Update `vocab/wordlist_gen/gen_words.py` (already patched):
+   - Accept only `[a-z']{2,20}`.
+   - Reject words with 3+ repeated chars.
+   - Apply length‑dependent frequency thresholds (2‑char ≥1e‑5, 3‑char ≥1e‑6, 4‑char ≥1e‑7, 5‑char ≥5e‑8, 6–7‑char ≥1e‑8, 8‑char ≥5e‑9, ≥9‑char ≥1e‑9).
+   - If not in NLTK `words` corpus and `freq < 1e‑8`, drop.
+
+2. Generate and combine:
+```bash
+cd vocab
+uv run --with wordfreq --with nltk wordlist_gen/gen_words.py
+python combine_wordlists.py
+```
+
+3. Copy `vocab/wordlist_gen/combined_wordlist.txt` into `web-demo/words.txt` (or adjust the URL in `loadLexicon`).
+
+This substantially reduces low‑value entries (e.g., `aaaaaa`, `khuzestan`, `khwaja`) and improves beam search quality for gesture input.
+
+## RNNT Implementation Notes
+
+- Use `meta.blank_id` (blank at end, typically 29). Initial predictor token can be blank; some exports accept `0` for the very first step.
+- Encoder input: `[B, F, T]` with `F=37`. Encoder output may be `[B, 256, T]` or `[B, T, 256]`.
+- Slice encoder frames to `[1, 256, 1]` and run decoder‑joint per hypothesis.
+- RNNT inner loop per frame is essential; continue emitting symbols until a blank is predicted.
 
 ### Questions to Investigate
 1. Does torch.compile() actually speed up Conformer models?
