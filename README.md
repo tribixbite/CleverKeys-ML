@@ -90,7 +90,13 @@ Sampling profiles are defined in `new/sampling_profiles.py`. The runner supports
 
 - Vocabulary metadata: `scripts/make_runtime_meta.py` → `exports/runtime_meta.json`
 - Validate vocabulary metadata: `uv run python trained_models/scripts/validate_vocab_system.py exports/runtime_meta.json`
-- ONNX export scripts: `new/export_onnx_stateful.py`, `new/export_advanced.py`
+- Canonical ONNX exporter (stateful pair): `new/export_stateful_pair.py`
+  - Example (auto‑discover best .ckpt under date base):
+    - `CKS_RUN_BASE=9292025script uv run python new/export_stateful_pair.py --outdir web-demo/models/best_latest --force-cpu`
+  - Example (explicit checkpoint):
+    - `uv run python new/export_stateful_pair.py --checkpoint 9292025script/.../epoch=74-wer=0.192.ckpt --outdir web-demo/models/best_latest --force-cpu`
+  - Outputs: `encoder.onnx`, `decoder_joint.onnx`, `runtime_meta.json`
+  - Note: Exporter pads tokens if `blank_id >= len(tokens)` to keep `runtime_meta.json` consistent.
 
 ## Notes
 

@@ -88,11 +88,13 @@ This summary captures the current, working end-to-end training and export pipeli
 - **`exports/runtime_meta.json`**: Generated metadata with derived IDs and character mappings
 - **`web-demo/runtime_meta.json`**: Copy for web deployment
 
-### 2. Export Script Updates
-- **`trained_models/nema1/export_rnnt_step.py`**:
-  - Added `--vocab` parameter for automatic blank_id derivation
-  - Replaces hardcoded `blank_id=0` with derived value
-  - Uses `torch.tensor([blank_id])` for start token
+### 2. Export Script Updates (Canonical)
+- **`new/export_stateful_pair.py`** (canonical web exporter):
+  - Produces `encoder.onnx`, `decoder_joint.onnx`, and `runtime_meta.json`
+  - `--force-cpu` avoids CUDA init paths during export
+  - Uses `model.joint.vocabulary` when available for token order; falls back to `cfg.labels`
+  - If `blank_id >= len(tokens)`, pads tokens with `""` to keep indices valid (warns)
+  - Auto‑discovers highest‑epoch `.ckpt` under `$CKS_RUN_BASE` if `--checkpoint` is omitted
 
 ### 3. Vocabulary Utilities
 - **`scripts/vocab_utils.py`**: Core filtering and normalization utilities
@@ -164,9 +166,16 @@ $ uv run python scripts/validate_vocab_system.py
 python scripts/make_runtime_meta.py trained_models/data/vocab.txt --output exports/runtime_meta.json --pretty
 ```
 
-### Export with Derived blank_id
+### Export for Web (stateful pair)
 ```bash
-python trained_models/nema1/export_rnnt_step.py --nemo_model model.nemo --vocab trained_models/data/vocab.txt
+# Auto‑discover best .ckpt under the date base
+CKS_RUN_BASE=9292025script \
+python new/export_stateful_pair.py --outdir web-demo/models/best_latest --force-cpu
+
+# Or explicit checkpoint
+python new/export_stateful_pair.py \
+  --checkpoint 9292025script/.../epoch=74-wer=val_wer=0.192.ckpt \
+  --outdir web-demo/models/best_latest --force-cpu
 ```
 
 ### Web Integration
@@ -209,10 +218,10 @@ python scripts/vocab_utils.py validate --dictionary vocab/final_vocab.txt --meta
 - Preserves contractions: `"don't"`, `"it's"`, `"won't"`
 
 ### Vocabulary IDs (derived at export)
-- NeMo with `blank_as_pad=True` keeps a single functional blank and places it at the end in practice.
+- NeMo with `blank_as_pad=True` keeps a single functional blank and often places it at the end.
 - Always use the IDs from `runtime_meta.json` (do not hardcode). Typical mapping for 30 tokens:
   - `<blank>` index 29, `<unk>` index 28, `'` index 1, `a` index 2 … `z` index 27.
-  - For some archives, vocabulary may serialize with 29 tokens; the exporter pads the list with `""` to ensure `blank_id` is valid.
+  - For some archives, vocabulary may serialize with 29 tokens while `blank_id=29`; the exporter pads with `""` so indices align.
 
 ### Coverage Expectations
 - **Target**: 95%+ of dictionary words preserved

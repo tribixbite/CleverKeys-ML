@@ -6,32 +6,8 @@
 class SwipeFeatureExtractorCorrected {
     constructor() {
         this.featureDim = 37;
-        // Build key centers in [0, 1] coordinates matching training
-        this.keyCenters = this.buildKeyCenters();
-    }
-
-    /**
-     * Build keyboard key centers in [-1, 1] coordinates
-     */
-    buildKeyCenters() {
-        const layout = [
-            "qwertyuiop",
-            "asdfghjkl",
-            "zxcvbnm"
-        ];
-
-        const centers = [];
-        for (let row = 0; row < layout.length; row++) {
-            const rowStr = layout[row];
-            for (let col = 0; col < rowStr.length; col++) {
-                const char = rowStr[col];
-                // Calculate position in [0, 1]
-                const x = (col + 0.5) / 10.0;  // 10 keys max width
-                const y = (row + 0.5) / 3.0;   // 3 rows
-                centers.push({ char, x, y });
-            }
-        }
-        return centers;
+        this.keyCenters = [];
+        this.verbose = false;
     }
 
     /**
@@ -44,27 +20,24 @@ class SwipeFeatureExtractorCorrected {
             return [];
         }
         const startTime = points[0].t || 0;
-        
-        // Heuristic: if coordinates appear in [-1,1], convert to [0,1]; else assume already [0,1]
-        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-        for (const p of points) {
-            if (typeof p.x === 'number') { if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x; }
-            if (typeof p.y === 'number') { if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y; }
-        }
-        const likelyMinus1to1 = (minX < -0.05 || maxX > 1.05 || minY < -0.05 || maxY > 1.05);
 
-        return points.map((pt, idx) => {
-            let x = pt.x ?? 0.0;
-            let y = pt.y ?? 0.0;
-            if (likelyMinus1to1) {
-                x = (x + 1.0) * 0.5;
-                y = (y + 1.0) * 0.5;
-            }
-            const centeredX = x; // Do not clamp; preserve slight out-of-bounds per dataset spec
-            const centeredY = y;
-            const t = (pt.t || idx * 10.0) - startTime;
-            return { x: centeredX, y: centeredY, t };
+        const normed = points.map((pt, idx) => {
+            return {
+                x: pt.x ?? 0.0,
+                y: pt.y ?? 0.0,
+                t: (pt.t || idx * 10.0) - startTime
+            };
         });
+
+        if (this.verbose) {
+            const xs = normed.map(p => p.x), ys = normed.map(p => p.y);
+            const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
+            console.log('[FE] normalizePoints: input range x=[%d,%d] y=[%d,%d] n=%d',
+                +minX.toFixed?.(3) || minX, +maxX.toFixed?.(3) || maxX,
+                +minY.toFixed?.(3) || minY, +maxY.toFixed?.(3) || maxY,
+                normed.length);
+        }
+        return normed;
     }
 
     /**
@@ -121,7 +94,7 @@ class SwipeFeatureExtractorCorrected {
             const dt = Math.max((curr.t - prev.t) / 1000.0, 1e-6);
             vx = (x - prev.x) / dt;
             vy = (y - prev.y) / dt;
-            speed = Math.sqrt(vx * vx + vy * vy);
+            speed = Math.hypot(vx, vy);
         }
 
         let ax = 0, ay = 0, acc = 0;
@@ -132,7 +105,7 @@ class SwipeFeatureExtractorCorrected {
             const vy_prev = (prev.y - prev2.y) / dt2;
             ax = (vx - vx_prev) / dt1;
             ay = (vy - vy_prev) / dt1;
-            acc = Math.sqrt(ax * ax + ay * ay);
+            acc = Math.hypot(ax, ay);
         }
 
         const angle = prev ? Math.atan2(vy, vx) : 0.0;
@@ -144,10 +117,8 @@ class SwipeFeatureExtractorCorrected {
             while (curvature < -Math.PI) curvature += 2 * Math.PI;
         }
 
-        const keyDistances = this.keyCenters
-            .map(key => Math.sqrt((x - key.x) ** 2 + (y - key.y) ** 2))
-            .sort((a, b) => a - b)
-            .slice(0, 5);
+        const keyDistances = this.keyCenters.map(key => Math.hypot(x - key.x, y - key.y))
+            .sort((a, b) => a - b).slice(0, 5);
         while (keyDistances.length < 5) keyDistances.push(1.0);
 
         const progress = idx / Math.max(total - 1, 1);
@@ -169,15 +140,57 @@ class SwipeFeatureExtractorCorrected {
             win_range_y = Math.max(...ys) - Math.min(...ys);
         }
 
-        const angleSin = prev ? Math.sin(angle) : 0.0;
-        const angleCos = prev ? Math.cos(angle) : 0.0;
-        const features = [
-            x, y, t_seconds, vx, vy, speed, ax, ay, acc, angle, angleSin, angleCos, curvature,
-            ...keyDistances, progress, is_start, is_end,
-            win_mean_x, win_std_x, win_mean_y, win_std_y, win_range_x, win_range_y
+        // Match the Python feature dictionary and ordering
+        const featureDict = {
+            "x": x,
+            "y": y,
+            "t_seconds": t_seconds,
+            "vx": vx,
+            "vy": vy,
+            "speed": speed,
+            "ax": ax,
+            "ay": ay,
+            "acc": acc,
+            "angle": angle,
+            "angle_sin": Math.sin(angle),
+            "angle_cos": Math.cos(angle),
+            "curvature": curvature,
+            "dist_key1": keyDistances[0],
+            "dist_key2": keyDistances[1],
+            "dist_key3": keyDistances[2],
+            "dist_key4": keyDistances[3],
+            "dist_key5": keyDistances[4],
+            "progress": progress,
+            "is_start": is_start,
+            "is_end": is_end,
+            "win_mean_x": win_mean_x,
+            "win_std_x": win_std_x,
+            "win_mean_y": win_mean_y,
+            "win_std_y": win_std_y,
+            "win_range_x": win_range_x,
+            "win_range_y": win_range_y,
+        };
+
+        // This order MUST match PersonalizedSwipeFeaturizer.FULL_FEATURE_NAMES
+        const featureNames = [
+            "x", "y", "t_seconds", "vx", "vy", "speed", "ax", "ay", "acc", "angle",
+            "angle_sin", "angle_cos", "curvature", "dist_key1", "dist_key2", "dist_key3",
+            "dist_key4", "dist_key5", "progress", "is_start", "is_end", "win_mean_x",
+            "win_std_x", "win_mean_y", "win_std_y", "win_range_x", "win_range_y"
         ];
-        while (features.length < this.featureDim) features.push(0.0);
-        return features.slice(0, this.featureDim);
+
+        const featureVector = featureNames.map(name => featureDict[name] || 0.0);
+
+        // Pad to final dimension, matching training
+        while (featureVector.length < this.featureDim) {
+            featureVector.push(0.0);
+        }
+
+        if (this.verbose) {
+            const nearest = this.keyCenters.map(k => ({ char: k.char, dist: Math.hypot(x - k.x, y - k.y) })).sort((a,b)=>a.dist-b.dist)[0]?.char || '?';
+            console.log('[FE] t#%d x=%.3f y=%.3f vx=%.3f vy=%.3f speed=%.3f near=%s', idx, x, y, vx, vy, speed, nearest);
+        }
+        return featureVector.slice(0, this.featureDim);
     }
 
     /**
@@ -187,8 +200,9 @@ class SwipeFeatureExtractorCorrected {
      */
     process(rawPoints) {
         const normalizedPoints = this.normalizePoints(rawPoints);
-        // Use original (normalized) points to match training featurizer (no resampling)
-        const pts = normalizedPoints;
+        // Adaptive resampling to match training (56–96 frames typical)
+        const target = this.getResampleTarget(normalizedPoints.length);
+        const pts = this.resamplePoints(normalizedPoints, target);
         const featureMatrix = pts.map((_, idx) => this.extractPointFeatures(pts, idx));
 
         const numFrames = featureMatrix.length;
@@ -197,7 +211,7 @@ class SwipeFeatureExtractorCorrected {
             flatFeatures.set(featureMatrix[t], t * this.featureDim);
         }
 
-        return {
+        const result = {
             features: flatFeatures,
             featureMatrix: featureMatrix,
             numFrames: numFrames,
@@ -205,6 +219,11 @@ class SwipeFeatureExtractorCorrected {
             duration: normalizedPoints.length > 0 ?
                 normalizedPoints[normalizedPoints.length - 1].t - normalizedPoints[0].t : 0
         };
+        if (this.verbose) {
+            console.log('[FE] frames=%d featDim=%d duration_ms=%d', numFrames, this.featureDim, result.duration|0);
+            if (numFrames > 0) console.log('[FE] firstFrame=', featureMatrix[0].map(v=>+v.toFixed(4)));
+        }
+        return result;
     }
 }
 

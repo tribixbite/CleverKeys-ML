@@ -33,7 +33,7 @@ for arg in "$@"; do
 done
 
 # ============ Configuration ============
-export CKS_RUN_BASE="./9292025script/20251002"
+: "${CKS_RUN_BASE:=./9292025script/20251002}"
 BATCH_SIZE=400          # Conservative to prevent OOM
 NUM_WORKERS=2           # Low worker count
 EPOCHS_PER_PROFILE=10   # Train each profile for 10 epochs before switching
@@ -199,6 +199,14 @@ run_single_training() {
         log_message "    --num-workers $NUM_WORKERS"
         sleep 1  # Small delay to simulate execution
         return 0
+    fi
+
+    # If compile is requested and resume should be ignored, drop the checkpoint to allow compile on cold start
+    if [ "${ENABLE_COMPILE:-0}" = "1" ] && [ "${IGNORE_RESUME:-0}" = "1" ]; then
+        if [ -n "$checkpoint_arg" ]; then
+            log_message "ENABLE_COMPILE+IGNORE_RESUME set – starting cold (no ckpt) to enable torch.compile"
+        fi
+        checkpoint_arg=""
     fi
 
     # Set environment variable for fast_dev_run

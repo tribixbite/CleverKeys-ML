@@ -92,7 +92,7 @@
                         </div>
 
                         <!-- Second Row: A-L -->
-                        <div class="keyboard-row" style="padding: 0 20px;">
+                        <div class="keyboard-row">
                             <button class="key" data-key="a">A</button>
                             <button class="key" data-key="s">S</button>
                             <button class="key" data-key="d">D</button>
@@ -152,24 +152,25 @@
 
             // Initialize components
             featureExtractor = new SwipeFeatureExtractorCorrected();
+            rnntDecoder = new RNNTDecoder();
 
             // Load models
             try {
                 updateStatus('Loading models...');
 
+                // Load shared keyboard geometry
+                const keyCenters = await fetch('js/key-centers.json').then(r => r.json());
+                featureExtractor.keyCenters = keyCenters;
+                rnntDecoder.keyCenters = keyCenters;
+
                 // Initialize RNN-T decoder
-                rnntDecoder = new RNNTDecoder();
                 await rnntDecoder.initialize(
-                    'models/rnnt_new/encoder.onnx',
-                    'models/rnnt_new/decoder_joint.onnx',
-                    'models/rnnt_new/runtime_meta.json'
+                    'models/best_latest/encoder.onnx',
+                    'models/best_latest/decoder_joint.onnx',
+                    'models/best_latest/runtime_meta.json'
                 );
-                // Load lexicon for beam search
-                try {
-                    await rnntDecoder.loadLexicon('words.txt', 'word_frequencies_aligned.json');
-                } catch (e) {
-                    console.warn('Lexicon load failed, beam search will be limited:', e);
-                }
+                // Load lexicon for beam search (required)
+                await rnntDecoder.loadLexicon('words.txt', 'word_frequencies_aligned.json');
                 // Feature extractor is used directly, not passed to decoder
 
                 // Initialize CTC decoder (commented out - model not available)
@@ -335,7 +336,7 @@
                 const clientX = e.touches ? e.touches[0].clientX : e.clientX;
                 const clientY = e.touches ? e.touches[0].clientY : e.clientY;
 
-                // Collect coordinates in [-1, 1]; featurizer will convert to [0,1] if needed
+                // Collect coordinates in [-1, 1]
                 const x01 = (clientX - rect.left) / rect.width;
                 const y01 = (clientY - rect.top) / rect.height;
                 const x = x01 * 2 - 1;
@@ -418,14 +419,9 @@
                 const startTime = performance.now();
 
                 if (currentModelType === 'rnnt') {
-                    // Process with RNN-T model - extract features and decode
-                    const featureData = featureExtractor.process(swipePath);
-                    // Prefer beam search with lexicon if available
-                    if (rnntDecoder.lexicon) {
-                        result = await rnntDecoder.beamSearch(featureData, { beamSize: 32, topK: 12, symbolsPerStep: 10, maxSymbols: 28 });
-                    } else {
-                        result = await rnntDecoder.greedyDecode(featureData);
-                    }
+                // Process with RNN-T model - extract features and decode via beam search
+                const featureData = featureExtractor.process(swipePath);
+                result = await rnntDecoder.beamSearch(featureData, { beamSize: 32, topK: 12, symbolsPerStep: 10, maxSymbols: 28 });
                     console.log('RNN-T result:', result);
                 } else {
                     // Process with CTC model (not available)
@@ -506,15 +502,25 @@
         }
 
         async function testSwipe() {
-            // Simulate a swipe for "hello"
-            const testPath = [
-                {x: -0.784, y: 0.214, t: 0},    // h
-                {x: -0.522, y: -0.193, t: 37},   // e
-                {x: 0.307, y: 0.193, t: 74},     // l
-                {x: 0.307, y: 0.193, t: 111},    // l
-                {x: 0.522, y: -0.193, t: 148}    // o
-            ];
-
+            // Build a synthetic swipe for "hello" using the canonical key centers
+            if (!rnntDecoder || !rnntDecoder.keyCenters || rnntDecoder.keyCenters.length === 0) {
+                console.error("Cannot run test: key centers not loaded");
+                return;
+            }
+            const letters = ['h', 'e', 'l', 'l', 'o'];
+            const lookup = (ch) => rnntDecoder.keyCenters.find(k => k.char === ch);
+            let t = 0;
+            const testPath = [];
+            for (const ch of letters) {
+                const kc = lookup(ch);
+                if (!kc) {
+                    console.error(`Cannot find key center for character: ${ch}`);
+                    continue;
+                }
+                testPath.push({ x: kc.x, y: kc.y, t });
+                t += 40; // Simulate time between points
+            }
+            if (window.DEBUG_VERBOSE) console.log('[TEST] hello path points=', testPath);
             await processSwipe(testPath);
         }
     </script>

@@ -139,15 +139,15 @@ ls onnx_models/
 
 1. **NeMo warnings**: Cosine scheduler messages in FAST_DEV_RUN are expected
 2. **CUDA Graphs**: Disabled by default for stability; can enable with `cuda-python`
-3. **Export Scripts**: Use `trained_models/nema1/export_stateful_pair.py` for web (pair ONNX + runtime_meta)
+3. **Export Scripts**: Use `new/export_stateful_pair.py` for web (pair ONNX + runtime_meta)
 
 ## ONNX Export + Web Use (definitive)
 
 ### Export (stateful pair)
 ```bash
-python trained_models/nema1/export_stateful_pair.py \\
+python new/export_stateful_pair.py \\
   --checkpoint rnnt_checkpoints_<profile>_<date>/conformer_rnnt_final.nemo \\
-  --outdir web-demo/models/rnnt_new_latest
+  --outdir web-demo/models/best_latest --force-cpu
 
 # Outputs:
 #  - encoder.onnx  (inputs: audio_signal[B,F,T], length[B]; outputs: outputs[B,256,T], encoded_lengths[B])
@@ -157,10 +157,11 @@ python trained_models/nema1/export_stateful_pair.py \\
 
 ### Web decoding quick start
 ```js
-// 1) Load sessions
-const enc = await ort.InferenceSession.create('models/rnnt_new_latest/encoder.onnx');
-const dec = await ort.InferenceSession.create('models/rnnt_new_latest/decoder_joint.onnx');
-const meta = await (await fetch('models/rnnt_new_latest/runtime_meta.json')).json();
+// 1) Load sessions and lexicon (required for beam search)
+const enc = await ort.InferenceSession.create('models/best_latest/encoder.onnx');
+const dec = await ort.InferenceSession.create('models/best_latest/decoder_joint.onnx');
+const meta = await (await fetch('models/best_latest/runtime_meta.json')).json();
+await decoder.loadLexicon('words.txt', 'word_frequencies_aligned.json');
 
 // 2) Featurize (features: Float32Array[T*37]) and transpose to [B,F,T]
 const T = numFrames, F = 37;
@@ -175,7 +176,7 @@ const encOut = await enc.run({
 const encoded = encOut.outputs; // dims [1,256,T'] (or [1,T',256])
 const Tprime = Number(encOut.encoded_lengths.data[0]);
 
-// 4) RNNT greedy/beam inner loop
+// 4) RNNT beam search loop (stateful)
 let h = new ort.Tensor('float32', new Float32Array(2*1*320), [2,1,320]);
 let c = new ort.Tensor('float32', new Float32Array(2*1*320), [2,1,320]);
 let last = meta.blank_id; // typical start

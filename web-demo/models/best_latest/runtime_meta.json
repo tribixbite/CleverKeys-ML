@@ -96,5 +96,10 @@
     "27": "z",
     "28": "<unk>",
     "29": ""
+  },
+  "decoder_config": {
+    "num_layers": 1,
+    "hidden_size": 192,
+    "encoder_dim": 144
   }
 }
