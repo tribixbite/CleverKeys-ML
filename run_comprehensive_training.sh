@@ -1,4 +1,5 @@
 #!/bin/bash
+set -euo pipefail
 # Comprehensive multi-profile training for complete word coverage
 # Designed to run for days, cycling through different sampling strategies
 
@@ -32,6 +33,7 @@ for arg in "$@"; do
 done
 
 # ============ Configuration ============
+export CKS_RUN_BASE="./9292025script/20251002"
 BATCH_SIZE=400          # Conservative to prevent OOM
 NUM_WORKERS=2           # Low worker count
 EPOCHS_PER_PROFILE=10   # Train each profile for 10 epochs before switching
@@ -77,7 +79,8 @@ declare -A VALIDATION_PROFILES=(
 export PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:512
 export OMP_NUM_THREADS=4
 
-LOG_DIR="./training_logs"
+LOG_DIR="$CKS_RUN_BASE/training_logs"
+mkdir -p "$CKS_RUN_BASE" "$LOG_DIR"
 mkdir -p $LOG_DIR
 MAIN_LOG="$LOG_DIR/comprehensive_training_$(date +%Y%m%d_%H%M%S).log"
 METRICS_LOG="$LOG_DIR/metrics_$(date +%Y%m%d_%H%M%S).csv"
@@ -91,15 +94,15 @@ log_message() {
 }
 
 get_latest_checkpoint() {
-    find . -path "*/lightning_logs/*/checkpoints/epoch=*.ckpt" -type f 2>/dev/null |
+    find "$CKS_RUN_BASE" -path "*/lightning_logs/*/checkpoints/epoch=*.ckpt" -type f 2>/dev/null |
     xargs ls -t 2>/dev/null | head -1
 }
 
 get_best_checkpoint() {
     # Find checkpoint with lowest WER
-    find . -path "*/lightning_logs/*/checkpoints/epoch=*wer=*.ckpt" -type f 2>/dev/null |
+    find "$CKS_RUN_BASE" -path "*/lightning_logs/*/checkpoints/epoch=*wer=*.ckpt" -type f 2>/dev/null |
     sed 's/.*wer=val_wer=//' | sed 's/.ckpt//' |
-    sort -n | head -1 | xargs -I {} find . -name "*wer=val_wer={}.ckpt" | head -1
+    sort -n | head -1 | xargs -I {} find "$CKS_RUN_BASE" -name "*wer=val_wer={}.ckpt" | head -1
 }
 
 extract_wer_from_checkpoint() {
@@ -151,9 +154,11 @@ if torch.cuda.is_available():
 print('Python/CUDA cleanup complete')
 " 2>/dev/null || true
 
-    # System cache drop (requires sudo)
-    sync
-    echo 3 > /proc/sys/vm/drop_caches 2>/dev/null || true
+    # System cache drop (skip if not permitted)
+    sync || true
+    if [ -w /proc/sys/vm/drop_caches ]; then
+        echo 3 > /proc/sys/vm/drop_caches || true
+    fi
 
     sleep 5
 }
@@ -196,15 +201,19 @@ run_single_training() {
     fi
 
     # Run with timeout and memory monitoring
-    timeout 6h $PYTHON_CMD new/train_transducer_personalized.py \
-        $checkpoint_arg \
-        --profile "$profile" \
-        --val-profile "$val_profile" \
-        --batch-size $BATCH_SIZE \
-        --num-workers $NUM_WORKERS \
-        2>&1 | tee -a $MAIN_LOG
+    # Compose command with stability env and max-epochs target
+    local cmd="CKS_RUN_BASE=\"$CKS_RUN_BASE\" DISABLE_COMPILE=1 TORCHDYNAMO_DISABLE=1 TORCHINDUCTOR_CUDAGRAPHS=0 $PYTHON_CMD new/train_transducer_personalized.py \\
+        $checkpoint_arg \\
+        --profile \"$profile\" \\
+        --val-profile \"$val_profile\" \\
+        --batch-size $BATCH_SIZE \\
+        --num-workers $NUM_WORKERS \\
+        --max-epochs $target_epochs"
 
-    local exit_code=$?
+    set +e
+    eval timeout 6h $cmd 2>&1 | tee -a $MAIN_LOG
+    local exit_code=${PIPESTATUS[0]}
+    set -e
 
     # Handle exit codes
     case $exit_code in

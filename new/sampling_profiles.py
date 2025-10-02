@@ -232,6 +232,46 @@ SAMPLING_PROFILES = {
     }
 }
 
+# === ALIASES FOR COMPREHENSIVE RUNNER ===
+# Map runner profile names to existing profiles so orchestration scripts work out of the box.
+ALIASES = {
+    "short_common": {
+        **SAMPLING_PROFILES["short_words"],
+        "min_frequency": 1000,
+        "description": "Alias: short words with common-bias",
+    },
+    "medium_balanced": {
+        **SAMPLING_PROFILES["medium_words"],
+        "description": "Alias: medium words (balanced)",
+    },
+    "base_random": {
+        **SAMPLING_PROFILES["uniform"],
+        "description": "Alias: uniform sampling",
+    },
+    "rare_words": {
+        **SAMPLING_PROFILES["rare_focused"],
+        "description": "Alias: rare-focused",
+    },
+    "very_rare": {
+        **SAMPLING_PROFILES["ultra_rare_boost"],
+        "description": "Alias: ultra-rare boost",
+    },
+    "high_confusion": {
+        **SAMPLING_PROFILES["production_balanced"],
+        "description": "Alias: high confusion ≈ production balanced",
+    },
+    "production_current": {
+        **SAMPLING_PROFILES["production_balanced"],
+        "description": "Alias: production current",
+    },
+    "validation_current": {
+        **SAMPLING_PROFILES["validation_balanced"],
+        "description": "Alias: validation current",
+    },
+}
+
+SAMPLING_PROFILES.update(ALIASES)
+
 
 def get_profile(name: str) -> dict:
     """Get a sampling profile by name."""

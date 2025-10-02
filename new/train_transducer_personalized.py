@@ -138,9 +138,9 @@ CONFIG: Dict[str, Any] = {
     # These are now default values, overrideable via command-line arguments
     # for better portability and experiment management.
     "data": {
-        "train_manifest": "/home/will/git/swype/cleverkeys/data/train_final_train.jsonl",
-        "val_manifest": "/home/will/git/swype/cleverkeys/data/train_final_val.jsonl",
-        "vocab_path": "/home/will/git/swype/cleverkeys/data/vocab.txt",
+        "train_manifest": "data/train_final_train.jsonl",
+        "val_manifest": "data/train_final_val.jsonl",
+        "vocab_path": "data/vocab.txt",
         "key_centers_path": None,  # Optional: Path to a JSON file defining keyboard layout for featurization.
         "max_trace_len": 256,  # Safety limit to prevent excessively long traces from consuming too much memory.
     },
@@ -149,7 +149,7 @@ CONFIG: Dict[str, Any] = {
         "batch_size": 1000,  # Maximize GPU utilization on a 16GB+ card. Larger batches provide more stable gradients.
         "num_workers": 10,  # Use multiple workers to pre-fetch data and keep the GPU saturated. Set based on CPU cores.
         "learning_rate": 2e-4,  # A conservative learning rate for the AdamW optimizer, good for stable convergence.
-        "max_epochs": 220,  # Total number of training epochs.
+        "max_epochs": 500,  # Total number of training epochs (increased for multi-day training).
         "gradient_accumulation": 1,  # Accumulate gradients over multiple batches. Useful for simulating larger batch sizes on smaller GPUs.
         "accelerator": "gpu",  # Use 'gpu' if available, will auto-fallback to 'cpu'.
         "devices": 1,  # Number of GPUs to use.
@@ -252,11 +252,16 @@ def _has_usable_cuda() -> bool:
 
 
 def _resolve_path(path_str: str) -> str:
-    """Resolves a path relative to the script's directory if not absolute."""
+    """Resolve a path relative to CWD first, then script directory, if not absolute."""
     path = Path(path_str)
-    if not path.is_absolute():
-        path = (SCRIPT_DIR / path).resolve()
-    return str(path)
+    if path.is_absolute():
+        return str(path)
+    # Prefer current working directory
+    candidate = (Path.cwd() / path).resolve()
+    if candidate.exists() or not (SCRIPT_DIR / path).exists():
+        return str(candidate)
+    # Fallback to script directory
+    return str((SCRIPT_DIR / path).resolve())
 
 
 def clamp(value: float, minimum: float, maximum: float) -> float:
@@ -410,6 +415,12 @@ class PersonalizedSwipeFeaturizer:
 
     def __init__(self, key_centers_path: Optional[str] = None, mobile_features: bool = False):
         self.key_centers = load_key_centers(key_centers_path)
+        # Select feature names based on target footprint
+        self.FEATURE_NAMES = (
+            self.MOBILE_FEATURE_NAMES if mobile_features else self.FULL_FEATURE_NAMES
+        )
+        # Expected final feature width for the model
+        self.FINAL_FEATURE_COUNT = 37
         self.feature_dim = len(self.FEATURE_NAMES)
 
     def __call__(self, points: Iterable[Dict[str, float]]) -> np.ndarray:
@@ -826,26 +837,9 @@ class PersonalizedRNNTModel(nemo_asr.models.EncDecRNNTModel):
             loss_value = loss_value + kd_loss
 
         # --- Logging ---
-        logs = {
-            "train_loss": loss_value,
-            "learning_rate": self._optimizer.param_groups[0]["lr"],
-        }
+        logs = {"train_loss": loss_value, "learning_rate": self._optimizer.param_groups[0]["lr"]}
         if kd_loss is not None:
             logs["kd_loss"] = kd_loss.detach()
-
-        # Log training WER periodically
-        if (batch_idx + 1) % self.trainer.log_every_n_steps == 0:
-            with torch.cuda.amp.autocast(enabled=False):  # Use fp32 for metrics
-                self.wer.update(
-                    predictions=encoded,
-                    predictions_lengths=encoded_len,
-                    targets=transcript,
-                    targets_lengths=transcript_len,
-                )
-                _, scores, words = self.wer.compute()
-                self.wer.reset()
-                logs["training_batch_wer"] = scores.float() / words
-
         self.log_dict(logs)
         return {"loss": loss_value}
 
@@ -909,6 +903,25 @@ class AnnounceCheckpoint(ModelCheckpoint):
             print(f"\033[1;32m[saved checkpoint]\033[0m {filepath}")
 
 
+class PeriodicNeMoSaver(pl.Callback):
+    """Save NeMo checkpoint every N epochs for robustness against system restarts."""
+
+    def __init__(self, save_interval: int = 50, save_dir: str = None):
+        self.save_interval = save_interval
+        self.save_dir = save_dir or "./rnnt_checkpoints"
+        Path(self.save_dir).mkdir(parents=True, exist_ok=True)
+
+    def on_train_epoch_end(self, trainer, pl_module):
+        epoch = trainer.current_epoch
+        if (epoch + 1) % self.save_interval == 0:
+            nemo_path = Path(self.save_dir) / f"model_epoch{epoch+1}.nemo"
+            try:
+                pl_module.save_to(str(nemo_path))
+                print(f"\033[1;32m✓ Saved NeMo checkpoint at epoch {epoch+1}:\033[0m {nemo_path}")
+            except Exception as e:
+                print(f"Warning: Could not save NeMo at epoch {epoch+1}: {e}")
+
+
 class ValidationErrorLogger(pl.Callback):
     """Callback to log mispredictions during validation."""
 
@@ -942,7 +955,10 @@ def load_vocab(vocab_path: str) -> Dict[str, int]:
 
 def build_dataloaders(cfg: DictConfig, vocab: Dict[str, int]):
     """Builds and configures the training and validation DataLoaders."""
-    featurizer = PersonalizedSwipeFeaturizer(cfg.data.get("key_centers_path"))
+    featurizer = PersonalizedSwipeFeaturizer(
+        cfg.data.get("key_centers_path"),
+        mobile_features=bool(cfg.model.get("mobile_features", False)),
+    )
 
     augmenter = None
     if AUGMENTATION_AVAILABLE and cfg.augmentation.get("enabled", False):
@@ -997,7 +1013,7 @@ def build_dataloaders(cfg: DictConfig, vocab: Dict[str, int]):
         pin_memory=_has_usable_cuda(),
         drop_last=True,
         persistent_workers=cfg.training.num_workers > 0,
-        prefetch_factor=4 if cfg.training.num_workers > 0 else 2,
+        prefetch_factor=(4 if cfg.training.num_workers > 0 else None),
     )
 
     val_sampler = None
@@ -1117,41 +1133,36 @@ def build_model_config(cfg: DictConfig, labels: List[str]) -> DictConfig:
 
 
 def find_latest_checkpoint(prefer_checkpoint: Optional[str] = None) -> Optional[str]:
-    """Finds the best checkpoint to resume from, prioritizing recency and epoch."""
-    if prefer_checkpoint and Path(prefer_checkpoint).exists():
+    """Finds the best .ckpt checkpoint to resume from under the run base."""
+    if prefer_checkpoint and Path(prefer_checkpoint).exists() and prefer_checkpoint.endswith(".ckpt"):
         print(f"Using specified checkpoint: {prefer_checkpoint}")
         return prefer_checkpoint
 
-    # Search multiple common locations for checkpoints
-    project_root = Path("/home/will/git/swype/cleverkeys")
-    base_dirs = {SCRIPT_DIR.resolve(), Path.cwd().resolve(), project_root}
-    patterns = ["rnnt_checkpoints_*/**/*.ckpt", "rnnt_logs_*/**/*.ckpt"]
-    candidates = {
-        p for base in base_dirs for pattern in patterns for p in base.glob(pattern)
-    }
+    run_base = Path(os.environ.get("CKS_RUN_BASE", "./9292025script")).resolve()
+    base_dirs = {run_base}
+    patterns = [
+        "rnnt_checkpoints_*/**/*.ckpt",
+        "**/checkpoints/*.ckpt",
+    ]
+    candidates = {p for base in base_dirs for pattern in patterns for p in base.glob(pattern)}
     if not candidates:
         return None
 
     date_pattern = re.compile(r"(\d{8}_\d{6})")
     epoch_pattern = re.compile(r"epoch=(\d+)")
 
-    best_path, best_key = None, ("0", -1)  # (date_str, epoch)
-
+    best_path, best_key = None, ("0", -1)
     for path in candidates:
         date_match = date_pattern.search(str(path))
         date_str = date_match.group(1) if date_match else "0"
-
         epoch_match = epoch_pattern.search(path.name)
         epoch = int(epoch_match.group(1)) if epoch_match else -1
-
         if date_str > best_key[0] or (date_str == best_key[0] and epoch > best_key[1]):
             best_key = (date_str, epoch)
             best_path = path
 
     if best_path:
-        print(
-            f"Resuming from best checkpoint: {best_path.name} (run: {best_key[0]}, epoch: {best_key[1]})"
-        )
+        print(f"Resuming from best checkpoint: {best_path}")
         return str(best_path)
     return None
 
@@ -1227,6 +1238,27 @@ def main() -> None:
         help="Resume from specific checkpoint path",
     )
     parser.add_argument(
+        "--train-manifest",
+        type=str,
+        dest="train_manifest",
+        default=None,
+        help="Path to training JSONL manifest",
+    )
+    parser.add_argument(
+        "--val-manifest",
+        type=str,
+        dest="val_manifest",
+        default=None,
+        help="Path to validation JSONL manifest",
+    )
+    parser.add_argument(
+        "--vocab-path",
+        type=str,
+        dest="vocab_path",
+        default=None,
+        help="Path to vocab.txt",
+    )
+    parser.add_argument(
         "--batch-size", type=int, default=None, help="Override training batch size"
     )
     parser.add_argument(
@@ -1238,6 +1270,12 @@ def main() -> None:
         default=None,
         help="Override optimizer learning rate",
     )
+    parser.add_argument(
+        "--max-epochs",
+        type=int,
+        default=None,
+        help="Override maximum training epochs",
+    )
     args = parser.parse_args()
 
     # --- Apply model size preset ---
@@ -1247,11 +1285,18 @@ def main() -> None:
         cfg.model.decoder = MODEL_PRESETS[args.model_size]["decoder"]
         cfg.model.joint.update(MODEL_PRESETS[args.model_size]["joint"])
         print(f"Using {args.model_size} model preset")
+    cfg.model["mobile_features"] = bool(args.model_size == "mobile")
 
     # --- Resolve Paths and Set up Environment ---
     cfg.data.train_manifest = _resolve_path(cfg.data.train_manifest)
     cfg.data.val_manifest = _resolve_path(cfg.data.val_manifest)
     cfg.data.vocab_path = _resolve_path(cfg.data.vocab_path)
+    if args.train_manifest:
+        cfg.data.train_manifest = _resolve_path(args.train_manifest)
+    if args.val_manifest:
+        cfg.data.val_manifest = _resolve_path(args.val_manifest)
+    if args.vocab_path:
+        cfg.data.vocab_path = _resolve_path(args.vocab_path)
 
     if not _has_usable_cuda():
         cfg.training.accelerator, cfg.training.precision, cfg.training.num_workers = (
@@ -1276,6 +1321,9 @@ def main() -> None:
         cfg.training.num_workers = int(args.num_workers)
     if args.learning_rate is not None and args.learning_rate > 0:
         cfg.training.learning_rate = float(args.learning_rate)
+    if args.max_epochs is not None and args.max_epochs > 0:
+        cfg.training.max_epochs = int(args.max_epochs)
+        print(f"Overriding max_epochs to {args.max_epochs}")
 
     # Load sampling profiles for training/validation when provided
     if args.profile:
@@ -1294,6 +1342,22 @@ def main() -> None:
     train_loader, val_loader = build_dataloaders(cfg, vocab)
     nemo_cfg = build_model_config(cfg, list(vocab.keys()))
 
+    # --- Scheduler max_steps computation ---
+    try:
+        steps_per_epoch = len(train_loader)
+        accum = int(cfg.training.get("gradient_accumulation", 1)) or 1
+        optim_steps_per_epoch = (steps_per_epoch + accum - 1) // accum
+        # In FAST_DEV_RUN, cap to 1 to match Lightning behavior
+        if bool(int(os.environ.get("FAST_DEV_RUN", "0"))):
+            max_steps = 1
+        else:
+            max_steps = max(optim_steps_per_epoch * int(cfg.training.max_epochs), 1)
+        if "optim" in nemo_cfg and "sched" in nemo_cfg.optim:
+            nemo_cfg.optim.sched["max_steps"] = int(max_steps)
+    except Exception:
+        # Fall back silently if any attribute missing
+        pass
+
     model = PersonalizedRNNTModel(
         cfg=nemo_cfg,
         kd_lambda=cfg.training.kd_lambda,
@@ -1305,6 +1369,11 @@ def main() -> None:
 
     # Note: torch.compile will be attempted later if not resuming from checkpoint
     # Compilation must happen after checkpoint loading to avoid state dict mismatch
+
+    # Prepare run directories and callbacks
+    profile_tag = args.profile if args.profile else "default"
+    run_base = os.environ.get("CKS_RUN_BASE", "./9292025script")
+    root_dir = f"{run_base}/rnnt_checkpoints_{profile_tag}_{runtime_id}"
 
     # --- Callbacks ---
     checkpoint_callback = AnnounceCheckpoint(
@@ -1319,6 +1388,10 @@ def main() -> None:
         checkpoint_callback,
         ValidationErrorLogger(
             max_batches=int(cfg.validation.get("log_error_batches", 1))
+        ),
+        PeriodicNeMoSaver(
+            save_interval=50,  # Save NeMo every 50 epochs
+            save_dir=root_dir,
         ),
     ]
     if UNFREEZING_AVAILABLE and cfg.unfreezing.get("enabled", False):
@@ -1344,8 +1417,6 @@ def main() -> None:
     prefer_ckpt = _resolve_path(args.checkpoint) if args.checkpoint else None
     resume_from = find_latest_checkpoint(prefer_ckpt)
 
-    profile_tag = args.profile if args.profile else "default"
-    root_dir = f"./rnnt_checkpoints_{profile_tag}_{runtime_id}"
     trainer = pl.Trainer(
         accelerator=cfg.training.accelerator,
         devices=cfg.training.devices,
