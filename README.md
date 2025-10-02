@@ -1,74 +1,98 @@
-# CleverKeys - privacy-first gesture typing system for local-only modern keyboards.
+# CleverKeys — Privacy‑First Gesture Typing
 
-no data leaves your device.
+Local‑only swipe recognition. No data leaves your device.
 
-A production-ready swipe gesture recognition system using Transformer models with CTC loss for keyboard input prediction.
+Conformer‑RNNT model (NeMo) with personalized swipe featurization, resumable multi‑profile training, and date‑scoped artifact management.
 
 ## Setup
 
-This project uses `uv` for dependency management. Make sure you have `uv` installed:
+This project uses `uv` for Python dependency management.
 
-```bash
-# Install uv if you haven't already
-curl -LsSf https://astral.sh/uv/install.sh | sh
+- Install uv (if needed):
+  - `curl -LsSf https://astral.sh/uv/install.sh | sh`
+- Install project deps:
+  - `uv sync`
+
+## Data Format
+
+Training data is JSONL with normalized points in [0,1] and timestamps (ms):
+
+```
+{"word":"example","points":[{"x":0.12,"y":0.44,"t":0},{"x":0.15,"y":0.47,"t":12} ...]}
 ```
 
-## Installation
+## Architecture
 
-All dependencies are already configured in `pyproject.toml`. To install them:
+- Conformer‑RNNT (NeMo): presets via `--model-size {mobile,tablet,server}`
+- Personalized 37‑D swipe features and adaptive resampling (~56–96 frames)
+- CosineAnnealing scheduler with computed `max_steps` and warmup
+- Knowledge distillation optional (teacher model)
 
-```bash
-# Dependencies are automatically installed when running with uv
-uv sync
+## Training Options
+
+We provide two runners for long‑running, resumable workflows. Artifacts are scoped by date under `./9292025script/<yyyymmdd>/`.
+
+- Comprehensive cycles (multi‑profile):
+  - `./run_comprehensive_training.sh`
+  - Force a single validation profile for apples‑to‑apples WER: `FORCE_VAL_PROFILE=validation_balanced ./run_comprehensive_training.sh`
+  - Enable compile experiments later: `ENABLE_COMPILE=1 ./run_comprehensive_training.sh`
+
+- Curriculum strategy (4×100 epochs = 400 total):
+  - `./train_comprehensive.sh curriculum`
+
+All artifacts for today’s date (2025‑10‑02) are under `./9292025script/20251002`:
+
+- Checkpoints: `rnnt_checkpoints_<profile>_<timestamp>/lightning_logs/.../checkpoints/*.ckpt`
+- Periodic NeMo exports: `rnnt_checkpoints_<profile>_<timestamp>/*.nemo`
+- Logs/metrics: `training_logs/` and `metrics_*.csv`
+- Resume state: `training_state.json` (curriculum runner)
+
+## Direct Trainer
+
+Use when you need one‑off experiments (debugging, small runs):
+
+```
+CKS_RUN_BASE=./9292025script/20251002 \
+uv run python new/train_transducer_personalized.py \
+  --profile sqrt_balanced --val-profile validation_balanced \
+  --batch-size 320 --num-workers 8 --max-epochs 100 \
+  --train-manifest data/train_final_train.jsonl \
+  --val-manifest data/train_final_val.jsonl \
+  --vocab-path data/vocab.txt
 ```
 
-## Training
+Common env toggles (the runners set these for stability):
 
-To run the training script:
+- `DISABLE_COMPILE=1 TORCHDYNAMO_DISABLE=1 TORCHINDUCTOR_CUDAGRAPHS=0`
 
-```bash
-uv run python train.py
-```
+## Profiles & Aliases
 
-### Configuration
+Sampling profiles are defined in `new/sampling_profiles.py`. The runner supports aliases:
 
-Before training, update the paths in the `CONFIG` dictionary at the top of `train.py`:
+- `short_common` → `short_words` (+ high‑frequency bias)
+- `medium_balanced` → `medium_words`
+- `base_random` → `uniform`
+- `rare_words` → `rare_focused`
+- `very_rare` → `ultra_rare_boost`
+- `high_confusion` → `production_balanced`
+- `production_current` → `production_balanced`
+- `validation_current` → `validation_balanced`
 
-- `train_data_path`: Path to your training data (JSONL format)
-- `val_data_path`: Path to your validation data (JSONL format) 
-- `vocab_path`: Path to your vocabulary file (text file with one word per line)
+## Monitoring & Metrics
 
-### Data Format
+- TensorBoard: `uv run tensorboard --logdir 9292025script`
+- Per‑profile CSV metrics written by the comprehensive runner:
+  - `scripts/metrics_aggregate.py --base ./9292025script/20251002`
+    - Prints per‑profile best WER, latest WER, and overall best.
+  - Set `FORCE_VAL_PROFILE=validation_balanced` during training to compare profiles fairly.
 
-The training data should be in JSONL format with each line containing:
-```json
-{
-  "word": "example",
-  "points": [
-    {"x": 0.1, "y": 0.2, "t": 0.0},
-    {"x": 0.15, "y": 0.25, "t": 0.1},
-    ...
-  ]
-}
-```
+## Export & Runtime Metadata
 
-## Model Architecture
+- Vocabulary metadata: `scripts/make_runtime_meta.py` → `exports/runtime_meta.json`
+- Validate vocabulary metadata: `uv run python trained_models/scripts/validate_vocab_system.py exports/runtime_meta.json`
+- ONNX export scripts: `new/export_onnx_stateful.py`, `new/export_advanced.py`
 
-- **Base Model**: Transformer Encoder with CTC loss
-- **Features**: Kinematic features (position, velocity, acceleration) + spatial features (nearest keys)
-- **Decoding**: pyctcdecode with KenLM language model for improved accuracy
+## Notes
 
-## Output
-
-The training script will:
-1. Save checkpoints to `checkpoints/`
-2. Log training metrics to `logs/` (viewable with TensorBoard)
-3. Export models to `exports/` in both TorchScript and ONNX formats
-
-## Dependencies
-
-- PyTorch 2.8.0+ with CUDA support
-- TensorBoard for training visualization
-- Hugging Face Hub for language model downloads
-- pyctcdecode + kenlm for CTC decoding
-- NumPy, tqdm for utilities
+- The runners default to disabling `torch.compile` and CUDA graphs for NeMo stability. You can opt‑in with `ENABLE_COMPILE=1`.
+- To start fresh any day, set a new date folder under `./9292025script/<yyyymmdd>`.

@@ -1,8 +1,7 @@
 # CleverKeys RNN-T Implementation Guide
 
-**Last Updated**: January 2025
-**Status**: Active Development
-**Current Val WER**: 0.232
+Last Updated: 2025-10-02
+Status: Active Development (resumable multi-profile training online)
 
 ## Overview
 
@@ -11,38 +10,38 @@ This document contains implementation details for the CleverKeys RNN-T swipe ges
 ## Architecture Summary
 
 ### Core Model: Conformer-RNNT
-- **Encoder**: 6-layer Conformer with multi-head attention (4 heads), d_model=256
-- **Decoder**: 2-layer LSTM prediction network, hidden_size=320
-- **Joint Network**: Feed-forward network combining encoder/decoder outputs, hidden_size=512
-- **Vocabulary**: 30 tokens (including blank at index 29)
-- **Features**: 37-dimensional vector per frame
+- Presets via `--model-size {mobile,tablet,server}`
+  - Mobile (default): 4 layers, d_model=144, 4 heads, joint=256
+  - Tablet: 5 layers, d_model=192, 4 heads, joint=384
+  - Server: 6 layers, d_model=256, 8 heads, joint=512
+- Decoder: LSTM prednet (`pred_rnn_layers` per preset), joint hidden per preset
+- Vocabulary: provided by vocab file (blank-as-pad); use runtime_meta for IDs
+- Features: 37-D swipe features (kinematics + spatial + temporal)
 
-### Training Configuration (Current Production)
-- **Script**: `new/train_transducer_personalized.py`
-- **Batch Size**: 1000 (optimized for RTX 4090M)
-- **Learning Rate**: 2e-4 with cosine annealing
-- **Precision**: bf16-mixed (avoids CUDA graph issues)
-- **Sampling**: Weighted random sampling with rare word boost
+### Training Configuration (Current)
+- Script: `new/train_transducer_personalized.py`
+- Batch size: hardware dependent (auto via runners), overrideable
+- LR: 2e-4 with CosineAnnealing (warmup + computed max_steps)
+- Precision: bf16-mixed (Ampere+), compile/cudagraphs disabled by default in runners
+- Sampling: profile-driven weighted sampling; profile aliases supported for orchestration
 
 ## Confirmed Findings
 
 ### ✅ What We Know Works
 
 1. **Vocabulary System**:
-   - NeMo's `blank_as_pad=True` moves blank token to index 29
-   - Model outputs 30 logits total
-   - Character mappings remain consistent: 'a'→2, 'z'→27
-   - Export correctly preserves 30-token architecture
+   - `blank_as_pad=True` (blank treated as pad); derive IDs from runtime metadata
+   - Export preserves all token IDs; do not hardcode blank or unk IDs in decoders
 
 2. **Feature Engineering**:
-   - 37D features work well (kinematics + spatial + temporal)
-   - Adaptive resampling (56-96 frames) improves robustness
-   - Coordinates already in [-1,1] range (no conversion needed)
+   - 37D features (x/y/kinematics/spatial windows) and adaptive resampling (≈56–96 frames)
+   - Dataset coordinates are normalized to keyboard size in [0,1], with slight out‑of‑bounds permitted.
+   - JS featurizer mirrors Python exactly; do not clamp.
 
 3. **Training Process**:
-   - Checkpoint resuming works despite "not end of epoch" warnings
-   - Val WER 0.232 indicates reasonable progress
-   - Default CONFIG settings are production-ready
+   - Resumable both per-profile (comprehensive runner) and per-strategy (curriculum runner)
+   - WER embedded in checkpoint filenames; per-profile WER tracked to CSV
+   - Default config stable; batch/num_workers should match hardware
 
 4. **ONNX Export**:
    - Successfully exports encoder, decoder, and joint networks
@@ -51,30 +50,22 @@ This document contains implementation details for the CleverKeys RNN-T swipe ges
 
 ### ⚠️ Areas of Concern
 
-1. **Word Length Filtering**:
-   - **CRITICAL**: Currently excluding words < 4 chars in training
-   - Validation excludes words < 7 chars
-   - Real-world WER likely much worse than reported 0.232
-   - Missing common words: "the", "and", "for", "you", "but", etc.
+1. **Sampling/Validation Balance**:
+   - Profiles can bias WER by focusing on specific slices (rare-vs-common)
+   - Compare WER across apples-to-apples subsets; rely on CSV metrics per profile
 
-2. **Augmentation Not Active**:
-   - Data augmentation disabled by default (`enabled: False`)
-   - No command-line argument parsing implemented
-   - Profiles not actually loaded despite being defined
+2. **Augmentation Defaults**:
+   - Augmentation is optional/off by default; enable with `--augment` when needed
 
-3. **Sampling Profile Issues**:
-   - Hardcoded sampling config instead of using profiles
-   - `load_sampling_profile()` function exists but never called
-   - Missing CLI integration for profile selection
+3. **Profile Selection**:
+   - Use `--profile/--val-profile` or orchestration runners; do not hardcode sampling in code
 
 ## Uncertainties & Open Questions
 
 ### 🤔 Things We're Not Sure About
 
 1. **ONNX Export Naming**:
-   - Script expects `decoder_joint-model.onnx` but NeMo might produce separate files
-   - Need to verify actual export output structure
-   - Might need to handle encoder/decoder/joint as three separate models
+   - Encoder/decoder/joint may be separate ONNX files; verify filenames before web wiring
 
 2. **Decoder State Management**:
    - Exact tensor shapes for LSTM states in ONNX unclear
@@ -87,53 +78,27 @@ This document contains implementation details for the CleverKeys RNN-T swipe ges
    - Mobile browser compatibility untested
 
 4. **Training Optimizations**:
-   - `torch.compile()` speedup potential (30-200% claimed)
-   - GPU utilization not profiled (might be data-loading bottleneck)
-   - NVIDIA DALI integration complexity vs benefit unclear
+   - `torch.compile()` can be enabled later; currently disabled by runners for NeMo stability
+   - Consider profiling dataloading and GPU utilization after stability
 
 ## Next Steps for Implementation
 
 ### 🎯 Immediate Priorities
 
-1. **Fix Word Length Filtering**:
-```python
-# In CONFIG, change:
-"min_word_length": 1,  # Was 4 - include ALL words
-# In validation:
-"min_word_length": 1,  # Was 7 - measure real performance
-```
+1. **Tune Sampling/Validation**:
+   - Adjust per-profile validation settings when comparing WER across profiles
 
-2. **Add CLI Argument Parsing**:
-```python
-parser = argparse.ArgumentParser()
-parser.add_argument('--augment', action='store_true', help='Enable data augmentation')
-parser.add_argument('--profile', type=str, choices=list(SAMPLING_PROFILES.keys()))
-parser.add_argument('--checkpoint', type=str, help='Resume from specific checkpoint')
-args = parser.parse_args()
-
-# Then apply:
-if args.augment:
-    cfg.augmentation.enabled = True
-if args.profile:
-    profile = load_sampling_profile(args.profile)
-    cfg.sampling.update(profile)
-```
+2. **Use CLI + Runners**:
+   - `--augment`, `--profile`, `--val-profile`, `--checkpoint`, and dataset path overrides are available
+   - Prefer `train_comprehensive.sh` / `run_comprehensive_training.sh` for long jobs + resumption
 
 3. **Enable Augmentation for Rare Words**:
-```bash
-# Run with augmentation:
-python train_transducer_personalized.py --augment --profile rare_words
-```
+   - `uv run python new/train_transducer_personalized.py --augment --profile rare_words`
 
 ### 🚀 Performance Improvements
 
-1. **Add torch.compile() (Easiest)**:
-```python
-# Before trainer creation:
-if torch.__version__ >= '2.0.0':
-    print("Compiling model with torch.compile()...")
-    model = torch.compile(model)
-```
+1. **Enable compile later**:
+   - Remove env guards from runner and selectively compile encoder/joint if stable
 
 2. **Profile GPU Utilization**:
 ```python
@@ -165,16 +130,70 @@ ls onnx_models/
 
 ### ⚠️ Must Remember
 
-1. **Blank Token Position**: Always use blank_id=29 in decoders
-2. **Feature Order**: JavaScript features MUST match Python FEATURE_NAMES order exactly
-3. **Coordinate System**: Input already in [-1,1], don't apply `*2-1` transform
-4. **Checkpoint Resume**: Use `last.ckpt` for best optimizer state preservation
+1. **Blank Token Handling**: Use runtime metadata; don’t hardcode indices (blank is typically last)
+2. **Feature Order**: JavaScript features MUST match Python FEATURE_NAMES order exactly (parity tests present)
+3. **Coordinate System**: Use dataset’s [0,1] coordinate frame (slight OOB allowed). Key centers defined in [0,1].
+4. **Checkpoint Resume**: Use `.ckpt` for resumption; `.nemo` for export only
 
 ### 🐛 Known Issues
 
-1. **Checkpoint Warning**: "Not end of epoch" is cosmetic, training continues fine
-2. **Validation WER**: Currently biased (excludes short words), true WER unknown
-3. **Export Scripts**: Multiple versions exist, use latest `export_onnx_stateful.py`
+1. **NeMo warnings**: Cosine scheduler messages in FAST_DEV_RUN are expected
+2. **CUDA Graphs**: Disabled by default for stability; can enable with `cuda-python`
+3. **Export Scripts**: Use `trained_models/nema1/export_stateful_pair.py` for web (pair ONNX + runtime_meta)
+
+## ONNX Export + Web Use (definitive)
+
+### Export (stateful pair)
+```bash
+python trained_models/nema1/export_stateful_pair.py \\
+  --checkpoint rnnt_checkpoints_<profile>_<date>/conformer_rnnt_final.nemo \\
+  --outdir web-demo/models/rnnt_new_latest
+
+# Outputs:
+#  - encoder.onnx  (inputs: audio_signal[B,F,T], length[B]; outputs: outputs[B,256,T], encoded_lengths[B])
+#  - decoder_joint.onnx (inputs: encoder_outputs[B,256,1], targets[B,1], target_length[B], input_states_1[2,B,320], input_states_2[2,B,320]; outputs: outputs[B,V], prednet_lengths, output_states_1, output_states_2)
+#  - runtime_meta.json (tokens, blank_id, char_to_id, id_to_char)
+```
+
+### Web decoding quick start
+```js
+// 1) Load sessions
+const enc = await ort.InferenceSession.create('models/rnnt_new_latest/encoder.onnx');
+const dec = await ort.InferenceSession.create('models/rnnt_new_latest/decoder_joint.onnx');
+const meta = await (await fetch('models/rnnt_new_latest/runtime_meta.json')).json();
+
+// 2) Featurize (features: Float32Array[T*37]) and transpose to [B,F,T]
+const T = numFrames, F = 37;
+const bft = new Float32Array(F*T);
+for (let t=0;t<T;t++) for (let f=0;f<F;f++) bft[f*T+t] = features[t*F+f];
+
+// 3) Run encoder
+const encOut = await enc.run({
+  audio_signal: new ort.Tensor('float32', bft, [1,F,T]),
+  length: new ort.Tensor('int64', BigInt64Array.from([BigInt(T)]), [1])
+});
+const encoded = encOut.outputs; // dims [1,256,T'] (or [1,T',256])
+const Tprime = Number(encOut.encoded_lengths.data[0]);
+
+// 4) RNNT greedy/beam inner loop
+let h = new ort.Tensor('float32', new Float32Array(2*1*320), [2,1,320]);
+let c = new ort.Tensor('float32', new Float32Array(2*1*320), [2,1,320]);
+let last = meta.blank_id; // typical start
+for (let t=0;t<Tprime;t++){
+  // slice enc frame to [1,256,1]
+  const frame = new Float32Array(256);
+  if (encoded.dims[1]===256){ for (let i=0;i<256;i++) frame[i]=encoded.data[i*Tprime+t]; }
+  else { const s=t*256; for (let i=0;i<256;i++) frame[i]=encoded.data[s+i]; }
+  const out = await dec.run({
+    encoder_outputs: new ort.Tensor('float32', frame, [1,256,1]),
+    targets: new ort.Tensor('int32', Int32Array.from([last]), [1,1]),
+    target_length: new ort.Tensor('int32', Int32Array.from([1]), [1]),
+    input_states_1: h, input_states_2: c
+  });
+  const logits = out.outputs.data; h = out.output_states_1; c = out.output_states_2;
+  // argmax non-blank or beam expansion...
+}
+```
 
 ## Architecture Decisions & Rationale
 
@@ -195,28 +214,33 @@ ls onnx_models/
 
 ### Quick Start
 ```bash
-# Resume training with improvements:
-python new/train_transducer_personalized.py \
-    --augment \
-    --profile balanced_all_lengths \
-    --checkpoint last.ckpt
+# Full curriculum (resumable, date-based run base)
+./train_comprehensive.sh curriculum
 
-# Monitor progress:
-tensorboard --logdir rnnt_checkpoints_*
+# Multi-profile cycles (metrics CSV, resumable)
+./run_comprehensive_training.sh
+
+# One-off trainer with overrides (fresh base)
+CKS_RUN_BASE=./9292025script/20251002 uv run python new/train_transducer_personalized.py \
+  --profile sqrt_balanced --val-profile validation_balanced \
+  --batch-size 320 --num-workers 8 --max-epochs 100
+
+# TensorBoard
+uv run tensorboard --logdir 9292025script
 ```
 
 ### Key Files to Understand
-1. `new/train_transducer_personalized.py` - Main training logic
-2. `new/sampling_profiles.py` - Word sampling strategies
-3. `new/data_augmentation.py` - Augmentation pipeline (currently unused)
-4. `new/export_onnx_stateful.py` - Latest ONNX export
+1. `new/train_transducer_personalized.py` - Main training logic (CLI + scheduler)
+2. `new/sampling_profiles.py` - Sampling strategies + aliases for runners
+3. `new/data_augmentation.py` - Optional augmentation pipeline
+4. `new/export_onnx_stateful.py` / `new/export_advanced.py` - ONNX export
+5. `train_comprehensive.sh` / `run_comprehensive_training.sh` - Orchestration (resumable)
 
 ### What Needs Work
-1. **CLI Integration**: Add proper argument parsing
-2. **Profile System**: Actually use the sampling profiles
-3. **Validation Metrics**: Fix word length filtering for accurate WER
-4. **Web Demo**: Port preprocessing to JavaScript, implement decoder + lexicon beam search
-5. **Documentation**: Update after each major change
+1. Per-profile validation balance and cross-profile WER comparison methodology
+2. Optional compile/cudagraph enablement and guard-rails
+3. Web featurizer parity tests + benchmark across backends (WASM/WebGL)
+4. Documentation stays current with pipeline changes
 
 ## Beam Search Decoder (Web)
 

@@ -1,0 +1,8 @@
+{
+    "strategy": "curriculum",
+    "profile": "curriculum_stage4",
+    "checkpoint": "./9292025script/rnnt_checkpoints_curriculum_stage1_20250929_193613/model_epoch100.nemo",
+    "epoch": 100,
+    "timestamp": "2025-09-30T06:32:14-04:00",
+    "batch_size": 320
+}

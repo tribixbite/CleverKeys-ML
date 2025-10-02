@@ -1,14 +1,37 @@
 #!/usr/bin/env python3
 """
-Export encoder.onnx and decoder_joint.onnx from a trained RNNT (.nemo or .ckpt).
+README: CleverKeys RNNT Web Exporter (stateful pair)
 
-Also writes runtime_meta.json with vocab and blank_id for web runtime.
+This exporter produces the ONNX models and runtime metadata needed for the web demo:
+- encoder.onnx (Conformer encoder)
+- decoder_joint.onnx (RNNT predictor + joint)
+- runtime_meta.json (tokens, blank_id, mappings, decoder_config)
+
+USAGE
+- Explicit checkpoint:
+  python trained_models/nema1/export_stateful_pair.py \
+    --checkpoint path/to/model.ckpt|model.nemo \
+    --outdir web-demo/models/latest_pair --force-cpu
+
+- Auto-discover (no --checkpoint provided):
+  The script searches the training run base for the highest-epoch .ckpt
+  and exports from that. The base defaults to $CKS_RUN_BASE or '9292025script'.
+  Example:
+  CKS_RUN_BASE=9292025script \
+  python trained_models/nema1/export_stateful_pair.py --outdir web-demo/models/latest_pair --force-cpu
+
+NOTES
+- Do not hardcode token indices. Always consume blank_id/tokens from runtime_meta.json.
+- If the serialized vocabulary length is shorter than blank_id+1 (observed in some archives),
+  this exporter pads the tokens with an empty string to make blank_id valid. A warning is logged.
 """
 import argparse
 import json
 from pathlib import Path
 import logging
 
+import os
+import re
 from export_common import load_trained_model
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
@@ -48,6 +71,12 @@ def write_runtime_meta(model, out_path: Path):
         raise RuntimeError('Unable to derive tokens for runtime_meta')
     if blank_id is None:
         blank_id = len(tokens) - 1
+    # Ensure tokens array covers blank_id index (NeMo often uses functional blank at end)
+    if blank_id >= len(tokens):
+        log.warning(
+            f"blank_id {blank_id} >= tokens length {len(tokens)}; padding tokens with empty string to align."
+        )
+        tokens = list(tokens) + ['']
 
     # Build mappings
     char_to_id = {tok: i for i, tok in enumerate(tokens)}
@@ -63,16 +92,64 @@ def write_runtime_meta(model, out_path: Path):
     log.info('✓ Wrote %s', out_path)
 
 
+def _find_highest_epoch_checkpoint(search_base: str) -> str:
+    """Find the .ckpt with the highest epoch number under search_base.
+    Falls back to the most recently modified .ckpt/.nemo if epochs not parsable.
+    """
+    epoch_re = re.compile(r"epoch=([0-9]+)")
+    best_ckpt = None
+    best_epoch = -1
+    newest_mtime = -1.0
+    newest_path = None
+    for root, _, files in os.walk(search_base):
+        for f in files:
+            if f.endswith('.ckpt'):
+                path = os.path.join(root, f)
+                m = epoch_re.search(f)
+                if m:
+                    ep = int(m.group(1))
+                    if ep > best_epoch:
+                        best_epoch = ep
+                        best_ckpt = path
+                st = os.stat(path)
+                if st.st_mtime > newest_mtime:
+                    newest_mtime = st.st_mtime
+                    newest_path = path
+            elif f.endswith('.nemo'):
+                # track newest nemo in case no ckpt exists
+                path = os.path.join(root, f)
+                st = os.stat(path)
+                if st.st_mtime > newest_mtime:
+                    newest_mtime = st.st_mtime
+                    newest_path = path
+    if best_ckpt:
+        log.info(f"Auto-discovered highest-epoch checkpoint: {best_ckpt} (epoch={best_epoch})")
+        return best_ckpt
+    if newest_path:
+        log.info(f"Auto-discovered newest archive: {newest_path}")
+        return newest_path
+    raise FileNotFoundError(f"No .ckpt or .nemo found under {search_base}")
+
+
 def main():
     ap = argparse.ArgumentParser(description='Export encoder.onnx and decoder_joint.onnx')
-    ap.add_argument('--checkpoint', required=True, help='Path to .nemo or .ckpt')
+    ap.add_argument('--checkpoint', help='Path to .nemo or .ckpt (auto-discover if omitted)')
     ap.add_argument('--outdir', required=True, help='Output directory')
+    ap.add_argument('--force-cpu', action='store_true', help='Force CPU export (ignore CUDA)')
     args = ap.parse_args()
 
     out_dir = Path(args.outdir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    model = load_trained_model(args.checkpoint)
+    if args.force_cpu:
+        os.environ.setdefault("CUDA_VISIBLE_DEVICES", "")
+
+    ckpt_path = args.checkpoint
+    if not ckpt_path:
+        base = os.environ.get('CKS_RUN_BASE', '9292025script')
+        ckpt_path = _find_highest_epoch_checkpoint(base)
+
+    model = load_trained_model(ckpt_path)
     tmp = out_dir / 'model.onnx'
     log.info('Calling NeMo model.export -> %s', tmp)
     model.export(str(tmp))

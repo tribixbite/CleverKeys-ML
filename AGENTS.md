@@ -1,19 +1,45 @@
-# Repository Guidelines
+# Repository Guidelines (Oct 2025)
 
-## Project Structure & Module Organization
-CleverKeys centers on `train.py`, which packs the end-to-end Conformer + CTC pipeline and the `CONFIG` block contributors should tune for new datasets. Gesture corpora live under `data/` (JSONL) and generated vocabularies in `vocab/`, while export artifacts are staged in `exports/` and archived variants in `exports_sota/` and `archive/`. Supporting references and experiment notes are housed in `docs/`, platform assets in `android/` and `web-demo/`, and reusable helpers in `scripts/` and `trained_models/scripts/`. Logs, checkpoints, and released models stay in `logs*/`, `checkpoints*/`, and `trained_models/`—avoid committing heavyweight outputs unless they are deliberately versioned.
+## Project Structure & Artifacts
+- Training code centers on `new/train_transducer_personalized.py` (Conformer‑RNNT + NeMo) and orchestration runners:
+  - `train_comprehensive.sh` (curriculum strategies, resumable)
+  - `run_comprehensive_training.sh` (multi‑profile cycles, metrics CSV)
+- Data in `data/` (JSONL swipe traces, `vocab.txt`).
+- Sampling profiles in `new/sampling_profiles.py` (with aliases for runners).
+- Export/ONNX in `new/export_*.py`.
+- Artifacts (logs, checkpoints, metrics) are date‑scoped under `./9292025script/<yyyymmdd>/`.
+  - Do not commit these unless intentionally versioned.
 
 ## Build, Test, and Development Commands
-- `uv sync` – install and lock Python dependencies declared in `pyproject.toml`.
-- `uv run python train.py` – launch the main training loop; ensure the `CONFIG` paths reference local data.
-- `uv run python trained_models/scripts/validate_vocab_system.py path/to/runtime_meta.json` – sanity check vocabulary metadata before shipping exports.
-- `uv run tensorboard --logdir logs_final` – inspect training runs (adjust to the log directory used).
+- `uv sync` — install Python deps.
+- Run curriculum (400 total):
+  - `./train_comprehensive.sh curriculum`
+- Run multi‑profile cycles (resumable, metrics CSV):
+  - `./run_comprehensive_training.sh`
+- Fresh date base (today):
+  - Uses `./9292025script/20251002` by default; change the date folder to start fresh.
+- Force a single validation profile to compare across profiles:
+  - `FORCE_VAL_PROFILE=validation_balanced ./run_comprehensive_training.sh`
+- Toggle compile experiments later:
+  - `ENABLE_COMPILE=1 ./run_comprehensive_training.sh`
+- Direct trainer with overrides:
+  - `CKS_RUN_BASE=./9292025script/20251002 uv run python new/train_transducer_personalized.py --profile sqrt_balanced --val-profile validation_balanced --batch-size 320 --num-workers 8 --max-epochs 100`
+- Metrics aggregation:
+  - `uv run python scripts/metrics_aggregate.py --base ./9292025script/20251002`
+- TensorBoard:
+  - `uv run tensorboard --logdir 9292025script`
 
-## Coding Style & Naming Conventions
-Target Python 3.12 with 4-space indentation, descriptive type-hinted APIs, and `logging` over bare prints. Keep modules small and data loaders, models, and decoding utilities in separate files when adding new components. Favor snake_case for functions and variables, PascalCase for classes, and mirror existing filenames such as `swipe_data_utils.py`. Large JSON or binary assets belong outside the core source tree unless required at runtime.
+## Coding Style & Naming
+- Python 3.12, 4‑space indentation, type hints, use `logging`.
+- Keep components small; separate loaders/models/decoding logic.
+- snake_case for functions/variables; PascalCase for classes.
+- Avoid committing large artifacts; keep them under the date‑scoped base.
 
 ## Testing Guidelines
-There is no automated suite today, so add targeted validation alongside features. Prefer fast functional checks (e.g., `validate_vocab_system.py`) and instrumented dry runs that exercise new featurizers or decoders on a trimmed JSONL sample. Document expected word error rate deltas in PRs and commit any helpful analysis notebooks under `docs/` rather than leaving them ad hoc.
+- Prefer fast functional checks and instrumented dry runs (e.g., `FAST_DEV_RUN=1`).
+- Validate vocabulary metadata before shipping: `uv run python trained_models/scripts/validate_vocab_system.py exports/runtime_meta.json`.
+- For WER comparisons, fix a validation profile (env `FORCE_VAL_PROFILE`) and use the metrics aggregator.
 
-## Commit & Pull Request Guidelines
-Follow the conventional prefix style seen in history (`feat:`, `fix:`, `docs:`) and keep commit bodies focused on observable behavior. Pull requests should describe the training or decoding scenario affected, list required data/config updates, and attach before/after metrics or TensorBoard screenshots when model quality changes. Link issues or experiments that motivated the change and call out any artifact uploads or manual steps reviewers must perform.
+## Commit & PR Guidelines
+- Conventional commits (`feat:`, `fix:`, `docs:`). Focus on observable behavior.
+- PRs should detail the training/decoding scenario, required data/config updates, and include WER/metrics or TensorBoard screenshots. Note any manual steps or artifact uploads.

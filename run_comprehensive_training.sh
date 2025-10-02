@@ -95,14 +95,14 @@ log_message() {
 
 get_latest_checkpoint() {
     find "$CKS_RUN_BASE" -path "*/lightning_logs/*/checkpoints/epoch=*.ckpt" -type f 2>/dev/null |
-    xargs ls -t 2>/dev/null | head -1
+    xargs -r ls -t 2>/dev/null | head -1
 }
 
 get_best_checkpoint() {
     # Find checkpoint with lowest WER
     find "$CKS_RUN_BASE" -path "*/lightning_logs/*/checkpoints/epoch=*wer=*.ckpt" -type f 2>/dev/null |
     sed 's/.*wer=val_wer=//' | sed 's/.ckpt//' |
-    sort -n | head -1 | xargs -I {} find "$CKS_RUN_BASE" -name "*wer=val_wer={}.ckpt" | head -1
+    sort -n | head -1 | xargs -r -I {} find "$CKS_RUN_BASE" -name "*wer=val_wer={}.ckpt" | head -1
 }
 
 extract_wer_from_checkpoint() {
@@ -117,7 +117,9 @@ extract_wer_from_checkpoint() {
 get_epoch_from_checkpoint() {
     local checkpoint=$1
     if [[ $checkpoint =~ epoch=epoch=([0-9]+) ]]; then
-        echo "${BASH_REMATCH[1]}"
+        local e="${BASH_REMATCH[1]}"
+        e=$((10#$e))
+        echo "$e"
     else
         echo "0"
     fi
@@ -172,12 +174,17 @@ run_single_training() {
 
     log_message "Training with profile: $profile (validation: $val_profile)"
 
+    # Ignore non-ckpt paths (e.g., accidental filenames)
+    if [ -n "$checkpoint" ] && [[ "$checkpoint" != *.ckpt ]]; then
+        checkpoint=""
+    fi
+
     local checkpoint_arg=""
     # Don't use checkpoint for FAST_DEV_RUN to avoid max_epochs conflict
     if [ "$FAST_DEV_RUN" = true ]; then
         log_message "FAST_DEV_RUN mode - skipping checkpoint resume"
         checkpoint_arg=""
-    elif [ -n "$checkpoint" ] && [ -f "$checkpoint" ]; then
+    elif [ -n "$checkpoint" ] && [ -f "$checkpoint" ] && [[ "$checkpoint" == *.ckpt ]]; then
         checkpoint_arg="--checkpoint $checkpoint"
         log_message "Resuming from: $checkpoint"
     fi
@@ -201,8 +208,12 @@ run_single_training() {
     fi
 
     # Run with timeout and memory monitoring
-    # Compose command with stability env and max-epochs target
-    local cmd="CKS_RUN_BASE=\"$CKS_RUN_BASE\" DISABLE_COMPILE=1 TORCHDYNAMO_DISABLE=1 TORCHINDUCTOR_CUDAGRAPHS=0 $PYTHON_CMD new/train_transducer_personalized.py \\
+    # Compose command with stability env and max-epochs target (toggle via ENABLE_COMPILE)
+    local stability_env="DISABLE_COMPILE=1 TORCHDYNAMO_DISABLE=1 TORCHINDUCTOR_CUDAGRAPHS=0"
+    if [ "${ENABLE_COMPILE:-0}" = "1" ]; then
+        stability_env=""
+    fi
+    local cmd="CKS_RUN_BASE=\"$CKS_RUN_BASE\" $stability_env $PYTHON_CMD new/train_transducer_personalized.py \\
         $checkpoint_arg \\
         --profile \"$profile\" \\
         --val-profile \"$val_profile\" \\
@@ -211,7 +222,7 @@ run_single_training() {
         --max-epochs $target_epochs"
 
     set +e
-    eval timeout 6h $cmd 2>&1 | tee -a $MAIN_LOG
+    timeout 6h bash -lc "$cmd" 2>&1 | tee -a "$MAIN_LOG"
     local exit_code=${PIPESTATUS[0]}
     set -e
 
@@ -265,11 +276,13 @@ run_stage() {
         fi
 
         log_message "───────────────────────────────────"
-        log_message "Profile: $profile (epochs $current_epoch → $((current_epoch + EPOCHS_PER_PROFILE)))"
+        local current_epoch_dec=$((10#$current_epoch))
+        local target_epoch=$((current_epoch_dec + EPOCHS_PER_PROFILE))
+        log_message "Profile: $profile (epochs $current_epoch_dec → $target_epoch)"
         log_message "───────────────────────────────────"
 
         # Run training
-        run_single_training "$profile" "$val_profile" "$checkpoint" $EPOCHS_PER_PROFILE
+        run_single_training "$profile" "$val_profile" "$checkpoint" $target_epoch
 
         if [ $? -ne 0 ]; then
             log_message "Critical error - stopping stage"
