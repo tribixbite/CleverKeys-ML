@@ -11,9 +11,9 @@ class SwipeFeatureExtractorCorrected {
     }
 
     /**
-     * Normalize points to [0, 1] coordinate system used in training.
-     * If incoming coordinates are in [-1,1], convert to [0,1].
-     * This auto-detects ranges robustly (min < -0.05 or max > 1.05 -> treat as [-1,1]).
+     * Transform input points from [0,1] to [-1,1] coordinate system.
+     * The dataset provides coordinates in [0,1] where (0,0) is top-left Q key.
+     * We transform to [-1,1] to match the training pipeline and key centers.
      */
     normalizePoints(points) {
         if (!points || points.length === 0) {
@@ -22,9 +22,15 @@ class SwipeFeatureExtractorCorrected {
         const startTime = points[0].t || 0;
 
         const normed = points.map((pt, idx) => {
+            // Transform from [0,1] to [-1,1] to match Python training
+            const raw_x = pt.x ?? 0.0;
+            const raw_y = pt.y ?? 0.0;
+            const centered_x = raw_x * 2.0 - 1.0;
+            const centered_y = raw_y * 2.0 - 1.0;
+
             return {
-                x: pt.x ?? 0.0,
-                y: pt.y ?? 0.0,
+                x: centered_x,
+                y: centered_y,
                 t: (pt.t || idx * 10.0) - startTime
             };
         });
@@ -195,7 +201,7 @@ class SwipeFeatureExtractorCorrected {
 
     /**
      * Process swipe trace into features matching training pipeline
-     * @param {Array} rawPoints - Raw swipe points in [-1, 1] coordinates
+     * @param {Array} rawPoints - Raw swipe points in [0, 1] coordinates (from dataset)
      * @returns {Object} Features and metadata
      */
     process(rawPoints) {

@@ -230,11 +230,11 @@
                 for (let i = 0; i < totalPoints - 1; i++) {
                     const progress = i / totalPoints;
 
-                    // Convert normalized coordinates to canvas coordinates
-                    const x1 = (swipePath[i].x + 1) * rect.width / 2;
-                    const y1 = (swipePath[i].y + 1) * rect.height / 2;
-                    const x2 = (swipePath[i + 1].x + 1) * rect.width / 2;
-                    const y2 = (swipePath[i + 1].y + 1) * rect.height / 2;
+                    // Convert [0,1] coordinates to canvas coordinates
+                    const x1 = swipePath[i].x * rect.width;
+                    const y1 = swipePath[i].y * rect.height;
+                    const x2 = swipePath[i + 1].x * rect.width;
+                    const y2 = swipePath[i + 1].y * rect.height;
 
                     // Create gradient that transitions from cyan to purple
                     const gradient = ctx.createLinearGradient(x1, y1, x2, y2);
@@ -336,11 +336,9 @@
                 const clientX = e.touches ? e.touches[0].clientX : e.clientX;
                 const clientY = e.touches ? e.touches[0].clientY : e.clientY;
 
-                // Collect coordinates in [-1, 1]
-                const x01 = (clientX - rect.left) / rect.width;
-                const y01 = (clientY - rect.top) / rect.height;
-                const x = x01 * 2 - 1;
-                const y = y01 * 2 - 1;
+                // Collect coordinates in [0, 1] to match dataset format
+                const x = (clientX - rect.left) / rect.width;
+                const y = (clientY - rect.top) / rect.height;
 
                 return { x, y, t: Date.now() };
             };
@@ -517,7 +515,8 @@
                     console.error(`Cannot find key center for character: ${ch}`);
                     continue;
                 }
-                testPath.push({ x: kc.x, y: kc.y, t });
+                // Transform from [-1, 1] key centers to [0, 1] dataset format
+                testPath.push({ x: (kc.x + 1) / 2, y: (kc.y + 1) / 2, t });
                 t += 40; // Simulate time between points
             }
             if (window.DEBUG_VERBOSE) console.log('[TEST] hello path points=', testPath);
