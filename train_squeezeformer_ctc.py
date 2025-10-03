@@ -643,14 +643,17 @@ class GestureCTCModel(pl.LightningModule):
         self.encoder = SqueezeformerEncoder(**encoder_cfg)
 
         # CTC decoder head
+        # Output size must be vocab_size + 1 to include the blank token
         self.decoder = torch.nn.Linear(
             encoder_cfg['d_model'],
-            vocab_size
+            vocab_size + 1  # +1 for CTC blank token
         )
 
         # Loss
+        # CRITICAL FIX: CTC blank token should be at vocab_size (index 27), not vocab_size-1
+        # The vocab has 27 chars (a-z + apostrophe), so blank is at index 27
         self.ctc_loss = torch.nn.CTCLoss(
-            blank=vocab_size - 1,  # Last token is blank
+            blank=vocab_size,  # Blank token is AFTER vocab (index 27)
             reduction='mean',
             zero_infinity=True
         )
@@ -748,7 +751,8 @@ class GestureCTCModel(pl.LightningModule):
             decoded = []
             prev_token = -1
             for token in pred_seq:
-                if token != len(self.vocab) - 1 and token != prev_token:  # Not blank and not duplicate
+                # FIXED: Blank token is at len(self.vocab) (index 27), not len(self.vocab) - 1
+                if token != len(self.vocab) and token != prev_token:  # Not blank and not duplicate
                     decoded.append(token)
                     prev_token = token
             # Convert to string
