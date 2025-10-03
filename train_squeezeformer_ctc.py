@@ -240,7 +240,7 @@ CONFIG = {
     },
     "training": {
         "batch_size": 256,
-        "num_workers": os.cpu_count() or 4,
+        "num_workers": 0,  # Set to 0 to avoid multiprocessing issues
         "learning_rate": 5e-4,
         "max_epochs": 500,
         "accelerator": "gpu" if torch.cuda.is_available() else "cpu",
@@ -355,8 +355,10 @@ class PersonalizedSwipeFeaturizer:
 
         # Acceleration features (2D)
         if idx > 1:
+            p_prev = points[idx - 1]  # Need to define p_prev here too
             p_prev2 = points[idx - 2]
-            dt2 = max((t - p_prev2["t"]) / 1000.0, 1e-6)
+            dt = max((t - p_prev["t"]) / 1000.0, 1e-6)
+            dt2 = max((p_prev["t"] - p_prev2["t"]) / 1000.0, 1e-6)
             vec[4] = (vec[2] - (p_prev["x"] - p_prev2["x"]) / dt2) / dt
             vec[5] = (vec[3] - (p_prev["y"] - p_prev2["y"]) / dt2) / dt
 
@@ -586,7 +588,9 @@ def collate_fn(batch: List[Optional[Dict]]) -> Optional[Dict]:
     )
 
     tokens = torch.nn.utils.rnn.pad_sequence(
-        [item["tokens"] for item in batch], batch_first=True, padding_value=-1
+        [item["tokens"] for item in batch],
+        batch_first=True,
+        padding_value=0,  # <-- FIX: Use a valid index like 0 for padding.
     )
 
     feature_lengths = torch.tensor(
@@ -616,13 +620,13 @@ class GestureCTCModel(pl.LightningModule):
         super().__init__()
         self.save_hyperparameters()
         self.cfg = cfg
-        self.validation_step_outputs = []
+        self.validation_outputs = []
 
         # Build vocab and determine blank ID
         self.vocab = {c: i for i, c in enumerate(cfg.data.vocab)}
         self.char_map = {i: c for c, i in self.vocab.items()}
-        self.blank_id = len(self.vocab)  # CRITICAL: Blank is at the end, index 27
         vocab_size = len(self.vocab)
+        self.blank_id = vocab_size  # CRITICAL FIX: Blank is at index 27, AFTER the 27 characters (0-26).
 
         # Build Squeezeformer encoder from NeMo
         encoder_cfg = OmegaConf.to_container(cfg.model.encoder)
@@ -661,9 +665,16 @@ class GestureCTCModel(pl.LightningModule):
         loss = self.ctc_loss(
             log_probs_t, batch["tokens"], encoded_lengths, batch["token_lengths"]
         )
-        if torch.isnan(loss) or torch.isinf(loss):
+        if torch.isnan(loss.detach()) or torch.isinf(loss.detach()):
             return None
-        self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True)
+        self.log(
+            "train_loss",
+            loss.detach(),
+            prog_bar=True,
+            logger=True,
+            on_step=True,
+            on_epoch=True,
+        )
         return loss
 
     def validation_step(self, batch: Optional[Dict], batch_idx: int):
@@ -680,6 +691,7 @@ class GestureCTCModel(pl.LightningModule):
         decoded_preds, words = [], batch["words"]
         for i in range(predictions.shape[0]):
             pred_seq = predictions[i, : encoded_lengths[i]].cpu().numpy()
+            # CRITICAL FIX: Check for the correct blank_id
             decoded = [
                 token
                 for idx, token in enumerate(pred_seq)
@@ -688,30 +700,40 @@ class GestureCTCModel(pl.LightningModule):
             pred_word = "".join([self.char_map.get(t, "") for t in decoded])
             decoded_preds.append(pred_word)
 
-        correct = sum(1 for pred, true in zip(decoded_preds, words) if pred == true)
-
         if batch_idx < self.cfg.validation.log_predictions:
             for i in range(min(2, len(decoded_preds))):
                 logger.info(f"[Val] REF: '{words[i]:<20}' | PRED: '{decoded_preds[i]}'")
 
-        output = {"correct": correct, "total": len(words), "loss": loss}
-        self.validation_step_outputs.append(output)
-        return output
+        self.validation_outputs.append(
+            {"predictions": decoded_preds, "references": words, "loss": loss}
+        )
+        return {"predictions": decoded_preds, "references": words, "loss": loss}
 
     def on_validation_epoch_end(self):
-        if not self.validation_step_outputs:
+        if not self.validation_outputs:
             return
-        total_correct = sum(o["correct"] for o in self.validation_step_outputs)
-        total_words = sum(o["total"] for o in self.validation_step_outputs)
-        avg_loss = torch.stack([o["loss"] for o in self.validation_step_outputs]).mean()
+        # Aggregate predictions and references from all validation batches
+        all_predictions = []
+        all_references = []
+        for output in self.validation_outputs:
+            all_predictions.extend(output["predictions"])
+            all_references.extend(output["references"])
+
+        # Calculate metrics on the aggregated lists
+        total_words = len(all_references)
+        total_correct = sum(
+            1 for pred, ref in zip(all_predictions, all_references) if pred == ref
+        )
+
+        avg_loss = torch.stack([o["loss"] for o in self.validation_outputs]).mean()
 
         # This is actually Character Error Rate (CER), but we'll call it WER for consistency with the prompt
         wer = 1.0 - (total_correct / max(total_words, 1))
 
-        self.log("val_loss", avg_loss, on_epoch=True, prog_bar=True)
+        self.log("val_loss", avg_loss.detach(), on_epoch=True, prog_bar=True)
         self.log("val_wer", wer, on_epoch=True, prog_bar=True)
         logger.info(f"Validation WER: {wer:.4f}")
-        self.validation_step_outputs.clear()
+        self.validation_outputs.clear()
 
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(
@@ -978,4 +1000,3 @@ if __name__ == "__main__":
     # NOTE: The PersonalizedSwipeFeaturizer is a placeholder.
     # Paste your full 37D feature calculation logic into it.
     main()
-
