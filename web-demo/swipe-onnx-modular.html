@@ -165,6 +165,7 @@
 
                 // Initialize RNN-T decoder
                 await rnntDecoder.initialize(
+                    window.ort,
                     'models/best_latest/encoder.onnx',
                     'models/best_latest/decoder_joint.onnx',
                     'models/best_latest/runtime_meta.json'

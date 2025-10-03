@@ -16,6 +16,7 @@ class RNNTDecoder {
         this.verbose = false;
         this.keyCenters = [];
         this.ort = null;
+        this._predBlankless = true; // predictor uses vocab without RNNT blank
     }
 
     /**
@@ -56,12 +57,18 @@ class RNNTDecoder {
             this.runtimeMeta = meta;
         }
 
-        this.blankId = this.runtimeMeta.blank_id;
+        // Resolve ids: joint blank (RNNT blank) vs predictor BOS ('<blank>' token id if present)
         this.vocabSize = this.runtimeMeta.vocab_size;
-        // BOS/start token: functional RNNT start is usually the '<blank>' label index
         const tokens = this.runtimeMeta.tokens || [];
-        const cid = tokens.indexOf('<blank>');
-        this.bosId = cid >= 0 ? cid : this.blankId;
+        const rnntBlank = (typeof this.runtimeMeta.blank_id === 'number') ? this.runtimeMeta.blank_id : (Array.isArray(tokens) ? tokens.indexOf('<RNNT_BLANK>') : -1);
+        this.blankId = rnntBlank >= 0 ? rnntBlank : (Array.isArray(tokens) ? tokens.length - 1 : 0);
+        // Predictor label mapping from runtime_meta if provided
+        // Follow NeMo greedy: predictor consumes joint-space ids (blank_as_pad=True)
+        this.predMap = null;
+        this._predBlankless = false;
+        this.bosPredId = this.blankId;
+        const bosCandidate = Array.isArray(tokens) ? tokens.indexOf('<blank>') : -1;
+        this.bosId = bosCandidate >= 0 ? bosCandidate : this.blankId;
 
         // Strictly derive predictor state sizes from decoder_joint input metadata first
         const djMeta = this.decoderJointSession.inputMetadata;
@@ -93,6 +100,43 @@ class RNNTDecoder {
         console.log('Encoder loaded. Inputs:', this.encoderSession.inputNames, 'Outputs:', this.encoderSession.outputNames);
         console.log('Decoder/Joint loaded. Inputs:', this.decoderJointSession.inputNames, 'Outputs:', this.decoderJointSession.outputNames);
         console.log('Runtime meta loaded:', this.runtimeMeta);
+    }
+
+    _toPredId(tid) {
+        // Map joint-space token id -> predictor-space id (blank removed)
+        if (!this._predBlankless) return tid;
+        if (tid === this.blankId) return null; // predictor never consumes RNNT blank
+        if (this.predMap && this.predMap.joint2pred) {
+            const v = this.predMap.joint2pred[tid];
+            return (v == null || v < 0) ? null : v;
+        }
+        return tid > this.blankId ? (tid - 1) : tid;
+    }
+    _bosPredId() {
+        // Use 0 as BOS in predictor space when blank is removed
+        return this.bosPredId ?? 0;
+    }
+
+    _pickDecoderOutputs(result) {
+        // Try known names first
+        const names = this.decoderJointSession.outputNames || [];
+        const byName = (k) => result[k];
+        // Candidate logits names by prevalence
+        const logitKeys = ['outputs', 'logits', names[0]].filter(Boolean);
+        let logits = null;
+        for (const k of logitKeys) { if (result[k]) { logits = result[k]; break; } }
+        // Candidate state names
+        const hKeys = ['output_states_1', 'h1', names[1]].filter(Boolean);
+        const cKeys = ['output_states_2', 'c1', names[2]].filter(Boolean);
+        let h = null, c = null;
+        for (const k of hKeys) { if (result[k]) { h = result[k]; break; } }
+        for (const k of cKeys) { if (result[k]) { c = result[k]; break; } }
+        if (!logits) {
+            // As a last resort, pick the first tensor-like value
+            const entries = Object.entries(result);
+            if (entries.length > 0) logits = entries[0][1];
+        }
+        return { logits, h, c };
     }
 
     /**
@@ -214,16 +258,39 @@ class RNNTDecoder {
         }
 
         // 2. Decode Loop
+        const encDims = encoded.dims;
+        const encT = encDims[2] || encodedLength;
+        const encD = encDims[1] || this.encoderDim;
+        const frameAt = (t) => {
+            // Supports encoder output layouts [B,D,T] or [B,T,D]
+            if (encDims.length === 3 && encDims[1] === encD && encDims[2] === encT) {
+                // [B,D,T]: gather with stride T across D
+                const out = new Float32Array(encD);
+                const T = encT;
+                for (let d = 0; d < encD; d++) out[d] = encoded.data[d * T + t];
+                return out;
+            } else if (encDims.length === 3 && encDims[1] === encodedLength) {
+                // [B,T,D]: contiguous slice per time step
+                const D = encDims[2];
+                const start = t * D;
+                return encoded.data.slice(start, start + D);
+            } else {
+                // Fallback assume [B,T,D]
+                const D = this.encoderDim;
+                const start = t * D;
+                return encoded.data.slice(start, start + D);
+            }
+        };
         let decodedTokens = [];
-        let lastToken = this.bosId;
         let state_h = new this.ort.Tensor('float32', new Float32Array(this.predLayers * 1 * this.predHidden).fill(0), [this.predLayers, 1, this.predHidden]);
         let state_c = new this.ort.Tensor('float32', new Float32Array(this.predLayers * 1 * this.predHidden).fill(0), [this.predLayers, 1, this.predHidden]);
 
         for (let t = 0; t < encodedLength; t++) {
-            const start = t * this.encoderDim;
-            const frameVec = encoded.data.slice(start, start + this.encoderDim);
-            const encoderFrame = new this.ort.Tensor('float32', frameVec, [1, this.encoderDim, 1]);
-            const decoderInput = new this.ort.Tensor('int32', Int32Array.from([lastToken]), [1, 1]);
+            const frameVec = frameAt(t);
+            const encoderFrame = new this.ort.Tensor('float32', frameVec, [1, frameVec.length, 1]);
+            // Build cumulative target sequence (B,U)
+            const last = (decodedTokens.length === 0) ? this._bosPredId() : decodedTokens[decodedTokens.length - 1];
+            const decoderInput = new this.ort.Tensor('int32', Int32Array.from([last]), [1, 1]);
             const targetLength = new this.ort.Tensor('int32', Int32Array.from([1]), [1]);
 
             const jointFeeds = {
@@ -239,7 +306,9 @@ class RNNTDecoder {
             let symbolsEmitted = 0;
             while (symbolsEmitted < maxSymbolsPerFrame && decodedTokens.length < maxSymbols) {
                 const jointResults = await this.decoderJointSession.run(jointFeeds);
-                const logits = jointResults.outputs.data;
+                const picked = this._pickDecoderOutputs(jointResults);
+                const logitsTensor = picked.logits;
+                const logits = logitsTensor.data;
 
                 // Argmax
                 let maxVal = -Infinity;
@@ -249,18 +318,21 @@ class RNNTDecoder {
                 }
 
                 // Update recurrent states
-                state_h = jointResults.output_states_1;
-                state_c = jointResults.output_states_2;
+                state_h = picked.h || state_h;
+                state_c = picked.c || state_c;
 
                 if (predictedToken === this.blankId) {
                     // blank: advance to next time step
                     break;
                 } else {
                     decodedTokens.push(predictedToken);
-                    lastToken = predictedToken;
+                    // Append non-blank to history for conditioning
+                    decodedTokens.push(predictedToken);
                     symbolsEmitted += 1;
-                    // Prepare next symbol prediction for same time frame
-                    jointFeeds.targets = new this.ort.Tensor('int32', Int32Array.from([lastToken]), [1, 1]);
+                    // Prepare next symbol prediction for same time frame: extend target sequence
+                    const last2 = decodedTokens[decodedTokens.length - 1];
+                    jointFeeds.targets = new this.ort.Tensor('int32', Int32Array.from([last2]), [1, 1]);
+                    jointFeeds.target_length = new this.ort.Tensor('int32', Int32Array.from([1]), [1]);
                     jointFeeds.input_states_1 = state_h;
                     jointFeeds.input_states_2 = state_c;
                 }
@@ -361,10 +433,29 @@ class RNNTDecoder {
             return idx;
         };
 
+        const encDims2 = encoded.dims;
+        const encT2 = encDims2[2] || encodedLen;
+        const encD2 = encDims2[1] || this.encoderDim;
+        const frameAt2 = (t) => {
+            if (encDims2.length === 3 && encDims2[1] === encD2 && encDims2[2] === encT2) {
+                const out = new Float32Array(encD2);
+                const Tm = encT2;
+                for (let d = 0; d < encD2; d++) out[d] = encoded.data[d * Tm + t];
+                return out;
+            } else if (encDims2.length === 3 && encDims2[1] === encodedLen) {
+                const Dm = encDims2[2];
+                const start = t * Dm;
+                return encoded.data.slice(start, start + Dm);
+            } else {
+                const Dm = this.encoderDim;
+                const start = t * Dm;
+                return encoded.data.slice(start, start + Dm);
+            }
+        };
+
         for (let t = 0; t < encodedLen; t++) {
-            const start = t * this.encoderDim;
-            const frameVec = encoded.data.slice(start, start + this.encoderDim);
-            const encoderFrame = new this.ort.Tensor('float32', frameVec, [1, this.encoderDim, 1]);
+            const frameVec = frameAt2(t);
+            const encoderFrame = new this.ort.Tensor('float32', frameVec, [1, frameVec.length, 1]);
 
             let nextBeam = [];
             for (const hyp of beam) {
@@ -372,10 +463,19 @@ class RNNTDecoder {
                 let h = hyp.h, c = hyp.c, last = hyp.lastToken, node = hyp.node;
                 let emitted = 0;
                 while (emitted < symbolsPerStep && nextBeam.length < beamSize * (topK + 1)) {
+                    // Build cumulative conditioning targets (B,U)
+                    const seqJs = [];
+                    if (hyp.tokens.length === 0) {
+                        seqJs.push(this._bosPredId());
+                    } else {
+                        for (const t of hyp.tokens) { const pid = this._toPredId(t); if (pid != null) seqJs.push(pid); }
+                        if (seqJs.length === 0) seqJs.push(this._bosPredId());
+                    }
+                    const seq = Int32Array.from(seqJs);
                     const feeds = {
                         'encoder_outputs': encoderFrame,
-                        'targets': new this.ort.Tensor('int32', Int32Array.from([last]), [1, 1]),
-                        'target_length': new this.ort.Tensor('int32', Int32Array.from([1]), [1]),
+                        'targets': new this.ort.Tensor('int32', Int32Array.from(seq), [1, seq.length]),
+                        'target_length': new this.ort.Tensor('int32', Int32Array.from([seq.length]), [1]),
                         'input_states_1': h,
                         'input_states_2': c,
                     };
@@ -384,9 +484,9 @@ class RNNTDecoder {
                         console.log('[RNNT] joint feed:', fd);
                     }
                     const out = await this.decoderJointSession.run(feeds);
-                    const logitsT = out.outputs; // expected standard name
-                    h = out.output_states_1; c = out.output_states_2;
-                    const probs = softmax(Array.from(logitsT.data));
+                    const picked = this._pickDecoderOutputs(out);
+                    const probs = softmax(Array.from(picked.logits.data));
+                    h = picked.h || h; c = picked.c || c;
                     // Geometry bias warm-up: strong early, decays to zero by 30% of the sequence
                     let allowedSet = null;
                     if (false && F > 0 && typeof featureData.featureMatrix?.[0]?.[0] === 'number') {
@@ -445,8 +545,9 @@ class RNNTDecoder {
                         })();
                         if (prevChar === ch && segChar !== ch) continue;
                         const child = node.children.get(cid);
+                        const newTokens = hyp.tokens.concat([tid]);
                         nextBeam.push({
-                            tokens: hyp.tokens.concat([tid]),
+                            tokens: newTokens,
                             score: hyp.score + Math.log(p + 1e-12),
                             h, c,
                             lastToken: tid,

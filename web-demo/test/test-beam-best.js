@@ -11,6 +11,7 @@
 const fs = require('fs');
 const path = require('path');
 const ort = require('onnxruntime-node');
+const { performance } = require('perf_hooks');
 const FeatureExtractor = require('../js/feature-extractor-corrected.js');
 const RNNTDecoder = require('../js/onnx-rnnt-decoder-fixed.js');
 
@@ -45,9 +46,11 @@ async function main() {
 
     // --- 1. Set up paths ---
     const baseDir = path.resolve(__dirname, '..');
-    const modelDir = path.join(baseDir, 'models', 'best_latest');
+    // Use best_latest models export
+    const modelDir = path.join(baseDir, 'models', 'correct_9292025');
     const encoderPath = path.join(modelDir, 'encoder.onnx');
     const decoderJointPath = path.join(modelDir, 'decoder_joint.onnx');
+    // Prefer canonical runtime_meta.json (fresh export with predictor mapping)
     const metaPath = path.join(modelDir, 'runtime_meta.json');
     const keyCentersPath = path.join(baseDir, 'js', 'key-centers.json');
     const wordsPath = path.join(baseDir, 'words.txt');
@@ -82,7 +85,7 @@ async function main() {
         const readline = require('readline');
         const fileStream = fs.createReadStream(path.join(baseDir, '..', 'data', 'train_final_train.jsonl'));
         const rl = readline.createInterface({ input: fileStream, crlfDelay: Infinity });
-        
+
         let currentLine = 0;
         let lineFound = false;
         for await (const line of rl) {
@@ -101,25 +104,53 @@ async function main() {
             return;
         }
     } else {
-        // Fallback to synthetic path generation if no line number is given
-        console.log(`📝 Generating synthetic test path for "${wordToTest}"...`);
-        const makeTestPath = (word, centers) => {
-            const pts = [];
-            let t = 0;
-            for (const ch of word) {
-                const kc = centers.find(k => k.char === ch);
-                if (!kc) {
-                    console.error(`Failed to find key center for '${ch}'`);
-                    return [];
-                }
-                // Transform from [-1, 1] key centers to [0, 1] dataset format
-                pts.push({ x: (kc.x + 1) / 2, y: (kc.y + 1) / 2, t });
-                t += 40; // ms
+        // If no specific line is provided, try to find the first dataset example for the word.
+        // If not found quickly, fallback to a synthetic straight-line path via key centers.
+        const datasetPath = path.join(baseDir, '..', 'data', 'train_final_train.jsonl');
+        if (fs.existsSync(datasetPath)) {
+            console.log(`📝 Searching dataset for word "${wordToTest}"...`);
+            const fd = fs.openSync(datasetPath, 'r');
+            const rl = require('readline').createInterface({ input: fs.createReadStream('', { fd }) });
+            let found = false;
+            for await (const line of rl) {
+                if (!line) continue;
+                try {
+                    const rec = JSON.parse(line);
+                    if (rec.word && rec.word.toLowerCase() === wordToTest && Array.isArray(rec.points)) {
+                        swipePath = rec.points;
+                        testWord = rec.word.toLowerCase();
+                        console.log(`   Found dataset example with ${swipePath.length} points.`);
+                        found = true;
+                        break;
+                    }
+                } catch { /* skip */ }
             }
-            return pts;
-        };
-        swipePath = makeTestPath(wordToTest, keyCenters);
-        testWord = wordToTest;
+            rl.close();
+            fs.closeSync(fd);
+            if (!found) {
+                console.log(`   Not found quickly; generating synthetic path for "${wordToTest}"...`);
+            }
+        }
+        if (!swipePath) {
+            console.log(`📝 Generating synthetic test path for "${wordToTest}"...`);
+            const makeTestPath = (word, centers) => {
+                const pts = [];
+                let t = 0;
+                for (const ch of word) {
+                    const kc = centers.find(k => k.char === ch);
+                    if (!kc) {
+                        console.error(`Failed to find key center for '${ch}'`);
+                        return [];
+                    }
+                    // Transform from [-1, 1] key centers to [0, 1] dataset format
+                    pts.push({ x: (kc.x + 1) / 2, y: (kc.y + 1) / 2, t });
+                    t += 40; // ms
+                }
+                return pts;
+            };
+            swipePath = makeTestPath(wordToTest, keyCenters);
+            testWord = wordToTest;
+        }
     }
 
     if (!swipePath || swipePath.length === 0) {
@@ -127,12 +158,74 @@ async function main() {
         return;
     }
 
+    // Optional sanity-only mode: map dataset traces for 'hello' and 'person' to nearest-key sequences
+    if (cfg.sanity || cfg['sanity-only']) {
+        const datasetPath = path.join(baseDir, '..', 'data', 'train_final_train.jsonl');
+        const want = ['hello', 'person'];
+        if (fs.existsSync(datasetPath)) {
+            console.log('🔎 Sanity check: nearest-key sequences for sample traces in dataset');
+            const fd = fs.openSync(datasetPath, 'r');
+            const rl = require('readline').createInterface({ input: fs.createReadStream('', { fd }) });
+            const seen = new Set();
+            for await (const line of rl) {
+                if (seen.size === want.length) break;
+                try {
+                    const rec = JSON.parse(line);
+                    if (rec.word && want.includes(rec.word.toLowerCase()) && !seen.has(rec.word.toLowerCase())) {
+                        const feat = featureExtractor.process(rec.points);
+                        const seq = (() => {
+                            const s = [];
+                            for (const row of feat.featureMatrix) {
+                                const x = row[0], y = row[1];
+                                let best = null;
+                                for (const k of keyCenters) {
+                                    const d = Math.hypot(x - k.x, y - k.y);
+                                    if (!best || d < best.d) best = { ch: k.char, d };
+                                }
+                                const ch = best ? best.ch : '?';
+                                if (s.length === 0 || s[s.length - 1] !== ch) s.push(ch);
+                            }
+                            return s.join('');
+                        })();
+                        console.log(`   ${rec.word.toLowerCase()} -> ${seq}`);
+                        seen.add(rec.word.toLowerCase());
+                    }
+                } catch { /* ignore */ }
+            }
+            rl.close();
+            fs.closeSync(fd);
+        } else {
+            console.warn('Dataset not found for sanity check:', datasetPath);
+        }
+        if (cfg['sanity-only']) return; // exit if only sanity check requested
+    }
+
     // --- 5. Run inference ---
     console.log('🧠 Running inference...');
     const startTime = performance.now();
 
-    // a) Extract features
+    // a) Extract features (normalize -> resample -> features)
     const featureData = featureExtractor.process(swipePath);
+
+    // a.1) Sanity: map resampled frames to nearest keys to inspect trace→key sequence
+    const mapToKeySequence = (feat) => {
+        const seq = [];
+        if (!feat || !Array.isArray(feat.featureMatrix)) return seq;
+        for (let i = 0; i < feat.featureMatrix.length; i++) {
+            const row = feat.featureMatrix[i];
+            const x = row[0], y = row[1];
+            let best = null;
+            for (const k of keyCenters) {
+                const d = Math.hypot(x - k.x, y - k.y);
+                if (!best || d < best.d) best = { ch: k.char, d };
+            }
+            const ch = best ? best.ch : '?';
+            if (seq.length === 0 || seq[seq.length - 1] !== ch) seq.push(ch);
+        }
+        return seq.join('');
+    };
+    const approxKeySeq = mapToKeySequence(featureData);
+    console.log(`🔎 Nearest-key approx sequence: ${approxKeySeq}`);
 
     if (debug) {
         console.log("--- JavaScript Features ---");
@@ -146,13 +239,13 @@ async function main() {
     }
 
 
-    // b) Run beam search
+    // b) Run beam search (character-level RNNT; emits 0+ chars per frame until blank)
     const results = await rnntDecoder.beamSearch(featureData, {
-        beamSize: 32,
-        topK: 12,
-        symbolsPerStep: 3,
-        maxSymbols: 24,
-        lengthPenalty: 0.6
+        beamSize: 64,
+        topK: 20,
+        symbolsPerStep: 8,
+        maxSymbols: 30,
+        lengthPenalty: 1.2
     });
 
     const processingTime = performance.now() - startTime;
@@ -169,6 +262,9 @@ async function main() {
         console.log(`\x1b[32m✓ SUCCESS: Prediction matches expected output ("${testWord}").\x1b[0m`);
     } else {
         console.log(`\x1b[31m✗ FAILURE: Prediction does not match. Expected "${testWord}".\x1b[0m`);
+        console.log(`   Greedy fallback for reference:`);
+        const greedy = await rnntDecoder.greedyDecode(featureData, 24);
+        console.log(`   Greedy top: "${greedy[0]?.text || ''}"`);
     }
 
     console.log('\nTop 10 Hypotheses:');

@@ -25,8 +25,11 @@ class SwipeFeatureExtractorCorrected {
             // Transform from [0,1] to [-1,1] to match Python training
             const raw_x = pt.x ?? 0.0;
             const raw_y = pt.y ?? 0.0;
-            const centered_x = raw_x * 2.0 - 1.0;
-            const centered_y = raw_y * 2.0 - 1.0;
+            // Match Python: clamp to [-1, 1] after mapping
+            const cx = raw_x * 2.0 - 1.0;
+            const cy = raw_y * 2.0 - 1.0;
+            const centered_x = Math.max(-1.0, Math.min(1.0, cx));
+            const centered_y = Math.max(-1.0, Math.min(1.0, cy));
 
             return {
                 x: centered_x,
@@ -48,13 +51,16 @@ class SwipeFeatureExtractorCorrected {
 
     /**
      * Determine adaptive resample target based on trace length
+     * Uses linear interpolation for smooth transition like Python training
      */
     getResampleTarget(length) {
         const shortTarget = 56, longTarget = 96, shortThresh = 48, longThresh = 112;
+        if (length <= 1) return length;
         if (length <= shortThresh) return shortTarget;
         if (length >= longThresh) return longTarget;
+        // Linearly interpolate between short and long targets for intermediate lengths
         const progress = (length - shortThresh) / (longThresh - shortThresh);
-        return Math.round(shortTarget + progress * (longTarget - shortTarget));
+        return Math.floor(shortTarget + progress * (longTarget - shortTarget));
     }
 
     /**
@@ -212,10 +218,9 @@ class SwipeFeatureExtractorCorrected {
         const featureMatrix = pts.map((_, idx) => this.extractPointFeatures(pts, idx));
 
         const numFrames = featureMatrix.length;
+        // No per-feature normalization during training path; keep raw features.
         const flatFeatures = new Float32Array(numFrames * this.featureDim);
-        for (let t = 0; t < numFrames; t++) {
-            flatFeatures.set(featureMatrix[t], t * this.featureDim);
-        }
+        for (let t = 0; t < numFrames; t++) flatFeatures.set(featureMatrix[t], t * this.featureDim);
 
         const result = {
             features: flatFeatures,

@@ -204,8 +204,8 @@ CONFIG: Dict[str, Any] = {
         "rare_word_boost": 6.0,
         "max_weight_factor": 28.0,
         "batch_size_factor": 0.35,  # Use a smaller batch size for validation.
-        "limit_batches": 0.15,  # To speed up validation, run on a random 15% subset of the validation set each time.
-        "check_interval": 0.5,  # Run validation 3 times per training epoch.
+        "limit_batches": 0.35,  # To speed up validation, run on a random 15% subset of the validation set each time.
+        "check_interval": 1.0,  # Run validation 3 times per training epoch.
         "max_samples": 1500,  # Limit the number of validation samples used.
         "log_error_batches": 3,  # Print mispredictions from the first 3 validation batches for qualitative analysis.
     },
@@ -413,7 +413,9 @@ class PersonalizedSwipeFeaturizer:
         "win_range_y",
     ]
 
-    def __init__(self, key_centers_path: Optional[str] = None, mobile_features: bool = False):
+    def __init__(
+        self, key_centers_path: Optional[str] = None, mobile_features: bool = False
+    ):
         self.key_centers = load_key_centers(key_centers_path)
         # Select feature names based on target footprint
         self.FEATURE_NAMES = (
@@ -712,16 +714,16 @@ class PersonalizedSwipeDataset(Dataset):
     def state_dict(self) -> Dict[str, Any]:
         """Return state dict for dataloader resumption."""
         return {
-            'manifest_path': self.manifest_path,
-            'sample_count': len(self.samples),
-            'epoch': getattr(self, '_epoch', 0)
+            "manifest_path": self.manifest_path,
+            "sample_count": len(self.samples),
+            "epoch": getattr(self, "_epoch", 0),
         }
 
     def load_state_dict(self, state: Dict[str, Any]) -> None:
         """Load state dict for dataloader resumption."""
-        if state.get('manifest_path') != self.manifest_path:
+        if state.get("manifest_path") != self.manifest_path:
             print(f"Warning: Manifest path mismatch during resume")
-        self._epoch = state.get('epoch', 0)
+        self._epoch = state.get("epoch", 0)
 
 
 # ---------------------------------------------------------------------------
@@ -837,7 +839,10 @@ class PersonalizedRNNTModel(nemo_asr.models.EncDecRNNTModel):
             loss_value = loss_value + kd_loss
 
         # --- Logging ---
-        logs = {"train_loss": loss_value, "learning_rate": self._optimizer.param_groups[0]["lr"]}
+        logs = {
+            "train_loss": loss_value,
+            "learning_rate": self._optimizer.param_groups[0]["lr"],
+        }
         if kd_loss is not None:
             logs["kd_loss"] = kd_loss.detach()
         self.log_dict(logs)
@@ -914,12 +919,14 @@ class PeriodicNeMoSaver(pl.Callback):
     def on_train_epoch_end(self, trainer, pl_module):
         epoch = trainer.current_epoch
         if (epoch + 1) % self.save_interval == 0:
-            nemo_path = Path(self.save_dir) / f"model_epoch{epoch+1}.nemo"
+            nemo_path = Path(self.save_dir) / f"model_epoch{epoch + 1}.nemo"
             try:
                 pl_module.save_to(str(nemo_path))
-                print(f"\033[1;32m✓ Saved NeMo checkpoint at epoch {epoch+1}:\033[0m {nemo_path}")
+                print(
+                    f"\033[1;32m✓ Saved NeMo checkpoint at epoch {epoch + 1}:\033[0m {nemo_path}"
+                )
             except Exception as e:
-                print(f"Warning: Could not save NeMo at epoch {epoch+1}: {e}")
+                print(f"Warning: Could not save NeMo at epoch {epoch + 1}: {e}")
 
 
 class ValidationErrorLogger(pl.Callback):
@@ -1113,7 +1120,7 @@ def build_model_config(cfg: DictConfig, labels: List[str]) -> DictConfig:
             "decoding": {
                 "strategy": "greedy_batch",
                 "use_cuda_graphs": False,
-                "greedy": {"max_symbols": 15},
+                "greedy": {"max_symbols": 13, "use_cuda_graph_decoder": False},
                 "greedy_batch": {"max_symbols": 13, "enable_cuda_graphs": False},
             },
             "loss": {"_target_": "nemo.collections.asr.losses.rnnt_loss.RNNTLoss"},
@@ -1134,7 +1141,11 @@ def build_model_config(cfg: DictConfig, labels: List[str]) -> DictConfig:
 
 def find_latest_checkpoint(prefer_checkpoint: Optional[str] = None) -> Optional[str]:
     """Finds the best .ckpt checkpoint to resume from under the run base."""
-    if prefer_checkpoint and Path(prefer_checkpoint).exists() and prefer_checkpoint.endswith(".ckpt"):
+    if (
+        prefer_checkpoint
+        and Path(prefer_checkpoint).exists()
+        and prefer_checkpoint.endswith(".ckpt")
+    ):
         print(f"Using specified checkpoint: {prefer_checkpoint}")
         return prefer_checkpoint
 
@@ -1144,7 +1155,9 @@ def find_latest_checkpoint(prefer_checkpoint: Optional[str] = None) -> Optional[
         "rnnt_checkpoints_*/**/*.ckpt",
         "**/checkpoints/*.ckpt",
     ]
-    candidates = {p for base in base_dirs for pattern in patterns for p in base.glob(pattern)}
+    candidates = {
+        p for base in base_dirs for pattern in patterns for p in base.glob(pattern)
+    }
     if not candidates:
         return None
 
@@ -1456,7 +1469,7 @@ def main() -> None:
                         mode="reduce-overhead",  # or "default" or "max-autotune"
                         backend="inductor",
                         fullgraph=False,
-                        dynamic=True
+                        dynamic=True,
                     )
                     compile_success = True
                     print("✓ Successfully compiled encoder")
@@ -1470,7 +1483,7 @@ def main() -> None:
                         model.joint,
                         mode="reduce-overhead",
                         fullgraph=False,
-                        dynamic=True
+                        dynamic=True,
                     )
                     compile_success = True
                     print("✓ Successfully compiled joint network")
@@ -1480,14 +1493,16 @@ def main() -> None:
                 # Approach 3: If component compilation failed, try whole model with max compatibility
                 if not compile_success:
                     try:
-                        print("Attempting to compile full model with compatibility mode...")
+                        print(
+                            "Attempting to compile full model with compatibility mode..."
+                        )
                         model = torch.compile(
                             model,
                             mode="default",  # Most compatible mode
                             fullgraph=False,  # Allow graph breaks
                             dynamic=True,  # Handle dynamic shapes
                             backend="inductor",
-                            disable=False
+                            disable=False,
                         )  # type: ignore[arg-type]
                         print("✓ Successfully compiled full model")
                     except Exception as e:
@@ -1497,7 +1512,9 @@ def main() -> None:
         except ImportError:
             print("torch.compile not available (requires PyTorch 2.0+)")
     elif resume_from:
-        print("Skipping torch.compile when resuming from checkpoint (avoids state dict issues)")
+        print(
+            "Skipping torch.compile when resuming from checkpoint (avoids state dict issues)"
+        )
 
     print(f"Starting trainer... Attempting to resume from: {resume_from}")
     trainer.fit(

@@ -31,14 +31,17 @@ from pathlib import Path
 import logging
 import os
 import re
+import datetime as dt
 
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from trained_models.nema1.export_common import load_trained_model
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 log = logging.getLogger('export_stateful_pair')
 
 
-def write_runtime_meta(model, out_path: Path):
+def write_runtime_meta(model, out_path: Path, source_checkpoint: str | None = None):
     # Attempt to fetch tokens from joint.vocabulary; fallback to cfg.labels
     tokens = None
     blank_id = None
@@ -98,12 +101,39 @@ def write_runtime_meta(model, out_path: Path):
     except Exception:
         pass
 
+    # Build predictor label mapping: RNNT blank is only in joint; predictor uses blankless labels.
+    # Map joint token id -> predictor id (or -1 for blank)
+    joint_vocab_size = len(tokens)
+    joint_blank_id = int(blank_id)
+    joint2pred = []
+    pred2joint = []
+    for i in range(joint_vocab_size):
+        if i == joint_blank_id:
+            joint2pred.append(-1)
+        else:
+            pid = i if i < joint_blank_id else i - 1
+            joint2pred.append(pid)
+    # Build inverse mapping array of size (joint_vocab_size-1)
+    for pid in range(joint_vocab_size - 1):
+        jid = pid if pid < joint_blank_id else pid + 1
+        pred2joint.append(jid)
+
     meta = {
         'vocab_size': len(tokens),
-        'blank_id': blank_id,
+        'blank_id': joint_blank_id,
         'tokens': tokens,
         'char_to_id': char_to_id,
         'id_to_char': id_to_char,
+        'predictor': {
+            'uses_blankless_labels': True,
+            'joint_blank_id': joint_blank_id,
+            'label_map': {
+                'joint2pred': joint2pred,
+                'pred2joint': pred2joint,
+            },
+            # By convention, BOS for predictor uses 0 index in predictor label space
+            'bos_id': 0,
+        },
     }
     if num_layers is not None and hidden_size is not None and encoder_dim is not None:
         meta['decoder_config'] = {
@@ -111,6 +141,25 @@ def write_runtime_meta(model, out_path: Path):
             'hidden_size': hidden_size,
             'encoder_dim': encoder_dim,
         }
+    # Attach export provenance metadata
+    try:
+        import nemo
+        nemo_ver = getattr(nemo, '__version__', '')
+    except Exception:
+        nemo_ver = ''
+    try:
+        import torch
+        torch_ver = getattr(torch, '__version__', '')
+    except Exception:
+        torch_ver = ''
+    meta['export_info'] = {
+        'export_time_utc': dt.datetime.utcnow().isoformat() + 'Z',
+        'source_checkpoint': source_checkpoint or '',
+        'nemo_version': nemo_ver,
+        'torch_version': torch_ver,
+        'exporter': 'new/export_stateful_pair.py',
+    }
+
     out_path.write_text(json.dumps(meta, indent=2), encoding='utf-8')
     log.info('\u2713 Wrote %s', out_path)
 
@@ -210,7 +259,7 @@ def main():
     log.info('\u2713 Exported: %s', dec_path)
 
     # Runtime meta
-    write_runtime_meta(model, out_dir / 'runtime_meta.json')
+    write_runtime_meta(model, out_dir / 'runtime_meta.json', source_checkpoint=ckpt_path)
 
     # Cleanup tmp
     try:

@@ -34,8 +34,8 @@ done
 
 # ============ Configuration ============
 : "${CKS_RUN_BASE:=./9292025script/20251002}"
-BATCH_SIZE=400          # Conservative to prevent OOM
-NUM_WORKERS=2           # Low worker count
+BATCH_SIZE=1000          # Conservative to prevent OOM
+NUM_WORKERS=10           # Low worker count
 EPOCHS_PER_PROFILE=10   # Train each profile for 10 epochs before switching
 
 # Define training stages with specific goals
