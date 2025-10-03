@@ -112,7 +112,8 @@ async function main() {
                     console.error(`Failed to find key center for '${ch}'`);
                     return [];
                 }
-                pts.push({ x: kc.x, y: kc.y, t });
+                // Transform from [-1, 1] key centers to [0, 1] dataset format
+                pts.push({ x: (kc.x + 1) / 2, y: (kc.y + 1) / 2, t });
                 t += 40; // ms
             }
             return pts;
