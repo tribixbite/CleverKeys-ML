@@ -185,6 +185,7 @@ def main() -> None:
     ap.add_argument('--word', help='Word to decode from dataset')
     ap.add_argument('--line', type=int, help='Line number (1-based) to decode from dataset')
     ap.add_argument('--max-symbols', type=int, default=15, help='Max symbols per encoder frame')
+    ap.add_argument('--targets', choices=['cumulative','last'], default='cumulative', help='Predictor targets feeding mode')
     args = ap.parse_args()
 
     model_dir = Path(args.model_dir)
@@ -251,6 +252,8 @@ def main() -> None:
     h = np.zeros((num_layers, 1, hidden_size), dtype=np.float32)
     c = np.zeros((num_layers, 1, hidden_size), dtype=np.float32)
     last_joint_token: Optional[int] = None  # last predicted in joint space; None means BOS
+    # Predictor-space cumulative sequence (start with BOS)
+    pred_seq = [bos_pred_id]
     hyp: list[int] = []
 
     # RNNT decode loop
@@ -258,19 +261,13 @@ def main() -> None:
         frame = encoded[:, :, t:t+1].astype(np.float32)
         emitted = 0
         while emitted < int(args.max_symbols):
-            # Last-only predictor target (NeMo greedy semantics)
-            if last_joint_token is None:
-                pid = bos_pred_id
+            # Build predictor targets per mode
+            if args.targets == 'cumulative':
+                target_seq = np.array([pred_seq], dtype=np.int32)
             else:
-                if last_joint_token == joint_blank_id:
-                    break
-                if joint2pred is not None:
-                    pid = int(joint2pred[last_joint_token])
-                    if pid < 0:
-                        pid = bos_pred_id
-                else:
-                    pid = last_joint_token if last_joint_token < joint_blank_id else last_joint_token - 1
-            target_seq = np.array([[pid]], dtype=np.int32)
+                # last-only
+                last_pid = pred_seq[-1] if pred_seq else bos_pred_id
+                target_seq = np.array([[last_pid]], dtype=np.int32)
 
             logits, h_new, c_new = run_decoder_joint(decoder_sess, frame, target_seq, h, c)
             # logits may be [V] or [1,V]
@@ -281,6 +278,17 @@ def main() -> None:
                 break
             hyp.append(pred_id)
             last_joint_token = pred_id
+            # Append to predictor-space cumulative sequence (skip joint blank)
+            if joint2pred is not None:
+                if 0 <= pred_id < len(joint2pred):
+                    pid = int(joint2pred[pred_id])
+                    if pid >= 0:
+                        pred_seq.append(pid)
+            else:
+                # derive mapping by skipping joint blank index
+                if pred_id != joint_blank_id:
+                    pid = pred_id if pred_id < joint_blank_id else pred_id - 1
+                    pred_seq.append(pid)
             emitted += 1
 
     # Map tokens to text

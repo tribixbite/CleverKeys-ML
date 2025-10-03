@@ -31,6 +31,7 @@ import lightning.pytorch as pl
 from lightning.pytorch.callbacks import ModelCheckpoint
 from torch.utils.data import WeightedRandomSampler
 from omegaconf import DictConfig
+import random
 import numpy as np
 import torch
 from torch.utils.data import DataLoader, Dataset
@@ -1078,7 +1079,7 @@ def build_model_config(cfg: DictConfig, labels: List[str]) -> DictConfig:
                 "dither": 0.0,
             },
             "encoder": {
-                "_target_": "nemo.collections.asr.modules.ConformerEncoder",
+                "_target_": "nemo.collections.asr.modules.SqueezeformerEncoder",
                 "feat_in": cfg.model.encoder.feat_in,
                 "n_layers": cfg.model.encoder.num_layers,
                 "d_model": cfg.model.encoder.d_model,
@@ -1291,6 +1292,18 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    # --- Seeding & matmul precision ---
+    seed = int(os.environ.get("PY_SEED", "1337"))
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+    try:
+        torch.set_float32_matmul_precision('high')
+    except Exception:
+        pass
+
     # --- Apply model size preset ---
     if args.model_size != SELECTED_MODEL:
         # Update model configuration with selected preset
@@ -1397,6 +1410,52 @@ def main() -> None:
         save_last=True,
         save_on_train_epoch_end=True,  # Save at epoch end to avoid resumption warnings
     )
+    class SamplePredictionsLogger(pl.Callback):
+        def __init__(self, train_manifest: str, val_limit: int = 2, train_sample: int = 15):
+            self.train_manifest = train_manifest
+            self.val_limit = val_limit
+            self.train_sample = train_sample
+            self._val_batches_logged = 0
+        def on_validation_epoch_start(self, trainer, pl_module):
+            self._val_batches_logged = 0
+        def on_validation_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0):
+            if self._val_batches_logged >= self.val_limit:
+                return
+            try:
+                signal, signal_len, transcript, transcript_len = batch
+                with torch.no_grad():
+                    encoded, encoded_len = pl_module.encoder(audio_signal=signal.transpose(1,2), length=signal_len.int())
+                    hyps = pl_module.decoding.rnnt_decoder_predictions_tensor(encoded, encoded_len)
+                for ref_tokens, ref_len, hyp in zip(transcript, transcript_len, hyps):
+                    ids = ref_tokens[: int(ref_len.item())].detach().cpu().numpy().tolist()
+                    ref_text = pl_module.decoding.decode_tokens_to_str(ids)
+                    if isinstance(hyp, list) and hyp:
+                        hyp = hyp[0]
+                    hyp_text = hyp.text if hasattr(hyp, 'text') else str(hyp)
+                    mark = "\033[1;32m✓\033[0m" if hyp_text == ref_text else "\033[1;31m✗\033[0m"
+                    print(f"  {mark} ref='{ref_text}' pred='{hyp_text}'")
+                self._val_batches_logged += 1
+            except Exception as e:
+                print(f"Could not log val predictions: {e}")
+        def on_validation_epoch_end(self, trainer, pl_module):
+            # Show a small sample of training words seen
+            try:
+                words = []
+                with open(self.train_manifest, 'r', encoding='utf-8') as fh:
+                    for i, line in enumerate(fh):
+                        if i >= self.train_sample:
+                            break
+                        try:
+                            w = json.loads(line).get('word','')
+                            if w:
+                                words.append(w)
+                        except Exception:
+                            pass
+                if words:
+                    print("\033[1;36mtrain sample words:\033[0m ", ', '.join(words))
+            except Exception as e:
+                print(f"Could not read training manifest for samples: {e}")
+
     callbacks = [
         checkpoint_callback,
         ValidationErrorLogger(
@@ -1406,6 +1465,7 @@ def main() -> None:
             save_interval=50,  # Save NeMo every 50 epochs
             save_dir=root_dir,
         ),
+        SamplePredictionsLogger(train_manifest=cfg.data.train_manifest, val_limit=2, train_sample=15),
     ]
     if UNFREEZING_AVAILABLE and cfg.unfreezing.get("enabled", False):
         schedule = None

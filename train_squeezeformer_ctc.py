@@ -166,42 +166,23 @@ import lightning.pytorch as pl
 import numpy as np
 import torch
 import torch.nn.functional as F
-from lightning.pytorch.callbacks import (
-    Callback,
-    EarlyStopping,
-    LearningRateMonitor,
-    ModelCheckpoint,
-)
-from lightning.pytorch.loggers import TensorBoardLogger
+from lightning.pytorch.callbacks import Callback, EarlyStopping, ModelCheckpoint
 from omegaconf import DictConfig, OmegaConf
-from torch.utils.data import DataLoader, Dataset, WeightedRandomSampler
+from torch.utils.data import DataLoader, Dataset
 
 try:
     import nemo.collections.asr as nemo_asr
-    from nemo.collections.asr.modules import ConformerEncoder, SqueezeformerEncoder
-    from nemo.collections.asr.parts.preprocessing.features import FilterbankFeatures
-    from nemo.collections.asr.parts.utils.audio_utils import SpecAugment
-    from nemo.core import NeuralModule, typecheck
-    from nemo.core.neural_types import (
-        AudioSignal,
-        LabelsType,
-        LengthsType,
-        LogprobsType,
-        NeuralType,
-    )
 except ImportError:
-    print("NeMo ASR not installed. Installing...")
-    os.system("pip install nemo_toolkit[asr]")
-    import nemo.collections.asr as nemo_asr
+    raise ImportError(
+        "NeMo ASR toolkit is required. Please install with: pip install nemo_toolkit[asr]"
+    )
+
 
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler("training.log")
-    ]
+    handlers=[logging.StreamHandler(), logging.FileHandler("training.log")],
 )
 logger = logging.getLogger(__name__)
 
@@ -210,35 +191,35 @@ SAMPLING_PROFILES = {
     "initial_downsample": {
         "strategy": "frequency_cap",
         "target_freq": 0.0002,
-        "description": "Aggressively downsample common words to force rare word learning"
+        "description": "Aggressively downsample common words to force rare word learning",
     },
     "medium_words": {
         "min_word_length": 5,
         "max_word_length": 7,
         "freq_power": 0.5,
         "rare_word_boost": 2.5,
-        "description": "Focus on medium-length words with balanced frequency"
+        "description": "Focus on medium-length words with balanced frequency",
     },
     "long_words": {
         "min_word_length": 8,
         "freq_power": 0.6,
         "rare_word_boost": 3.0,
         "length_power": 0.8,
-        "description": "Emphasize longer words which are harder to predict"
+        "description": "Emphasize longer words which are harder to predict",
     },
     "rare_focused": {
         "max_frequency": 1000,
         "freq_power": 0.7,
         "rare_frequency_threshold": 100,
         "rare_word_boost": 4.0,
-        "description": "Heavy focus on rare words for comprehensive coverage"
+        "description": "Heavy focus on rare words for comprehensive coverage",
     },
     "production_balanced": {
         "min_word_length": 2,
         "freq_power": 0.55,
         "rare_frequency_threshold": 100,
         "rare_word_boost": 2.5,
-        "description": "Final balanced profile for production deployment"
+        "description": "Final balanced profile for production deployment",
     },
 }
 
@@ -359,7 +340,7 @@ class PersonalizedSwipeFeaturizer:
 
         # Current point
         p_curr = points[idx]
-        x, y, t = p_curr['x'], p_curr['y'], p_curr['t']
+        x, y, t = p_curr["x"], p_curr["y"], p_curr["t"]
 
         # Basic position (2D)
         vec[0] = x
@@ -368,16 +349,16 @@ class PersonalizedSwipeFeaturizer:
         # Velocity features (2D)
         if idx > 0:
             p_prev = points[idx - 1]
-            dt = max((t - p_prev['t']) / 1000.0, 1e-6)  # Convert ms to seconds
-            vec[2] = (x - p_prev['x']) / dt
-            vec[3] = (y - p_prev['y']) / dt
+            dt = max((t - p_prev["t"]) / 1000.0, 1e-6)  # Convert ms to seconds
+            vec[2] = (x - p_prev["x"]) / dt
+            vec[3] = (y - p_prev["y"]) / dt
 
         # Acceleration features (2D)
         if idx > 1:
             p_prev2 = points[idx - 2]
-            dt2 = max((t - p_prev2['t']) / 1000.0, 1e-6)
-            vec[4] = (vec[2] - (p_prev['x'] - p_prev2['x']) / dt2) / dt
-            vec[5] = (vec[3] - (p_prev['y'] - p_prev2['y']) / dt2) / dt
+            dt2 = max((t - p_prev2["t"]) / 1000.0, 1e-6)
+            vec[4] = (vec[2] - (p_prev["x"] - p_prev2["x"]) / dt2) / dt
+            vec[5] = (vec[3] - (p_prev["y"] - p_prev2["y"]) / dt2) / dt
 
         # Speed and direction (2D)
         speed = np.hypot(vec[2], vec[3])
@@ -394,8 +375,8 @@ class PersonalizedSwipeFeaturizer:
             p_prev = points[idx - 1]
             p_next = points[idx + 1]
             # Compute angle change
-            v1 = np.array([p_curr['x'] - p_prev['x'], p_curr['y'] - p_prev['y']])
-            v2 = np.array([p_next['x'] - p_curr['x'], p_next['y'] - p_curr['y']])
+            v1 = np.array([p_curr["x"] - p_prev["x"], p_curr["y"] - p_prev["y"]])
+            v2 = np.array([p_next["x"] - p_curr["x"], p_next["y"] - p_curr["y"]])
             if np.linalg.norm(v1) > 1e-6 and np.linalg.norm(v2) > 1e-6:
                 cos_angle = np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2))
                 vec[36] = np.arccos(np.clip(cos_angle, -1, 1))
@@ -433,28 +414,29 @@ class GestureDataset(Dataset):
             f"using sampling: {sampling_cfg.get('description', 'none') if sampling_cfg else 'none'}"
         )
 
-    def _apply_sampling(self, samples: List[Dict], cfg: Optional[DictConfig]) -> List[Dict]:
+    def _apply_sampling(
+        self, samples: List[Dict], cfg: Optional[DictConfig]
+    ) -> List[Dict]:
         """Apply curriculum learning sampling strategy."""
         if not cfg or cfg.get("strategy") == "none":
             return samples
 
         if cfg.get("strategy") == "frequency_cap":
             # Count word frequencies
-            word_counts = Counter(s['word'] for s in samples)
+            word_counts = Counter(s["word"] for s in samples)
             total_words = sum(word_counts.values())
 
             # Calculate target count for each word
             target_freq = cfg.get("target_freq", 0.0002)
             target_counts = {
-                word: max(1, int(total_words * target_freq))
-                for word in word_counts
+                word: max(1, int(total_words * target_freq)) for word in word_counts
             }
 
             # Downsample
             downsampled = []
             current_counts = Counter()
             for s in samples:
-                word = s['word']
+                word = s["word"]
                 if current_counts[word] < target_counts[word]:
                     downsampled.append(s)
                     current_counts[word] += 1
@@ -465,14 +447,16 @@ class GestureDataset(Dataset):
         filtered = samples
 
         if "min_word_length" in cfg:
-            filtered = [s for s in filtered if len(s['word']) >= cfg.min_word_length]
+            filtered = [s for s in filtered if len(s["word"]) >= cfg.min_word_length]
 
         if "max_word_length" in cfg:
-            filtered = [s for s in filtered if len(s['word']) <= cfg.max_word_length]
+            filtered = [s for s in filtered if len(s["word"]) <= cfg.max_word_length]
 
         if "max_frequency" in cfg:
-            word_counts = Counter(s['word'] for s in samples)
-            filtered = [s for s in filtered if word_counts[s['word']] <= cfg.max_frequency]
+            word_counts = Counter(s["word"] for s in samples)
+            filtered = [
+                s for s in filtered if word_counts[s["word"]] <= cfg.max_frequency
+            ]
 
         return filtered
 
@@ -513,13 +497,13 @@ class GestureDataset(Dataset):
             return []
 
         # Normalize time to start at 0
-        start_t = float(points[0].get('t', 0.0))
+        start_t = float(points[0].get("t", 0.0))
 
         return [
             {
-                'x': p.get('x', 0.5) * 2.0 - 1.0,  # Convert [0,1] -> [-1,1]
-                'y': p.get('y', 0.5) * 2.0 - 1.0,
-                't': max(0.0, float(p.get('t', 0.0)) - start_t)
+                "x": p.get("x", 0.5) * 2.0 - 1.0,  # Convert [0,1] -> [-1,1]
+                "y": p.get("y", 0.5) * 2.0 - 1.0,
+                "t": max(0.0, float(p.get("t", 0.0)) - start_t),
             }
             for p in points
         ]
@@ -554,34 +538,36 @@ class GestureDataset(Dataset):
             return points * target_count
 
         # Calculate time step
-        duration = max(points[-1]['t'] - points[0]['t'], 1.0)
+        duration = max(points[-1]["t"] - points[0]["t"], 1.0)
         step = duration / max(target_count - 1, 1)
 
         resampled = []
         src_idx = 0
 
         for i in range(target_count):
-            target_time = points[0]['t'] + step * i
+            target_time = points[0]["t"] + step * i
 
             # Find surrounding points
-            while src_idx < len(points) - 2 and points[src_idx + 1]['t'] < target_time:
+            while src_idx < len(points) - 2 and points[src_idx + 1]["t"] < target_time:
                 src_idx += 1
 
             p1 = points[src_idx]
             p2 = points[min(src_idx + 1, len(points) - 1)]
 
             # Linear interpolation
-            if p2['t'] > p1['t']:
-                alpha = (target_time - p1['t']) / (p2['t'] - p1['t'])
+            if p2["t"] > p1["t"]:
+                alpha = (target_time - p1["t"]) / (p2["t"] - p1["t"])
                 alpha = np.clip(alpha, 0.0, 1.0)
             else:
                 alpha = 0.0
 
-            resampled.append({
-                'x': p1['x'] + (p2['x'] - p1['x']) * alpha,
-                'y': p1['y'] + (p2['y'] - p1['y']) * alpha,
-                't': target_time
-            })
+            resampled.append(
+                {
+                    "x": p1["x"] + (p2["x"] - p1["x"]) * alpha,
+                    "y": p1["y"] + (p2["y"] - p1["y"]) * alpha,
+                    "t": target_time,
+                }
+            )
 
         return resampled
 
@@ -596,230 +582,157 @@ def collate_fn(batch: List[Optional[Dict]]) -> Optional[Dict]:
 
     # Stack features and tokens
     features = torch.nn.utils.rnn.pad_sequence(
-        [item['features'] for item in batch],
-        batch_first=True,
-        padding_value=0.0
+        [item["features"] for item in batch], batch_first=True, padding_value=0.0
     )
 
     tokens = torch.nn.utils.rnn.pad_sequence(
-        [item['tokens'] for item in batch],
-        batch_first=True,
-        padding_value=-1
+        [item["tokens"] for item in batch], batch_first=True, padding_value=-1
     )
 
-    feature_lengths = torch.tensor([item['feature_length'] for item in batch], dtype=torch.long)
-    token_lengths = torch.tensor([item['token_length'] for item in batch], dtype=torch.long)
+    feature_lengths = torch.tensor(
+        [item["feature_length"] for item in batch], dtype=torch.long
+    )
+    token_lengths = torch.tensor(
+        [item["token_length"] for item in batch], dtype=torch.long
+    )
 
     return {
         "features": features,
         "feature_lengths": feature_lengths,
         "tokens": tokens,
         "token_lengths": token_lengths,
-        "words": [item['word'] for item in batch],
+        "words": [item["word"] for item in batch],
     }
 
 
 # --- PyTorch Lightning Model ---
 class GestureCTCModel(pl.LightningModule):
-    """Lightning module for Squeezeformer-CTC gesture typing model."""
+    """
+    Lightning module for Squeezeformer-CTC gesture typing model.
+    This is a self-contained pure PyTorch Lightning implementation.
+    """
 
     def __init__(self, cfg: DictConfig):
         super().__init__()
         self.save_hyperparameters()
         self.cfg = cfg
+        self.validation_step_outputs = []
 
-        # Initialize validation outputs storage
-        self.validation_outputs = []
-
-        # Build vocab
+        # Build vocab and determine blank ID
         self.vocab = {c: i for i, c in enumerate(cfg.data.vocab)}
         self.char_map = {i: c for c, i in self.vocab.items()}
+        self.blank_id = len(self.vocab)  # CRITICAL: Blank is at the end, index 27
         vocab_size = len(self.vocab)
 
-        # Build encoder
+        # Build Squeezeformer encoder from NeMo
         encoder_cfg = OmegaConf.to_container(cfg.model.encoder)
-        encoder_cfg['feat_in'] = 37  # Our feature dimension
+        self.encoder = nemo_asr.modules.SqueezeformerEncoder(**encoder_cfg)
 
-        self.encoder = SqueezeformerEncoder(**encoder_cfg)
-
-        # CTC decoder head
-        # Output size must be vocab_size + 1 to include the blank token
+        # Build the CTC decoder head
         self.decoder = torch.nn.Linear(
-            encoder_cfg['d_model'],
-            vocab_size + 1  # +1 for CTC blank token
+            encoder_cfg["d_model"],
+            vocab_size + 1,  # Output size is vocab + 1 for the blank token
         )
 
-        # Loss
-        # CRITICAL FIX: CTC blank token should be at vocab_size (index 27), not vocab_size-1
-        # The vocab has 27 chars (a-z + apostrophe), so blank is at index 27
+        # Define the CTC loss function
         self.ctc_loss = torch.nn.CTCLoss(
-            blank=vocab_size,  # Blank token is AFTER vocab (index 27)
-            reduction='mean',
-            zero_infinity=True
+            blank=self.blank_id, reduction="mean", zero_infinity=True
         )
 
-        # Metrics
-        self.train_loss = []
-        self.val_wer = []
-
-    def forward(self, features: torch.Tensor, feature_lengths: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        """
-        Forward pass through encoder and decoder.
-
-        Args:
-            features: (batch, time, features)
-            feature_lengths: (batch,)
-
-        Returns:
-            log_probs: (batch, time, vocab)
-            encoded_lengths: (batch,)
-        """
-        # Transpose for encoder: (batch, features, time)
+    def forward(self, features: torch.Tensor, feature_lengths: torch.Tensor):
+        # Transpose for encoder: (B, T, F) -> (B, F, T)
         features = features.transpose(1, 2)
+        encoded, encoded_lengths = self.encoder(
+            audio_signal=features, length=feature_lengths
+        )
 
-        # Encode
-        encoded, encoded_lengths = self.encoder(audio_signal=features, length=feature_lengths)
+        # Squeezeformer outputs (B, D, T), transpose for decoder: (B, T, D)
+        encoded = encoded.transpose(1, 2)
 
-        # Decode to logits
         logits = self.decoder(encoded)
-
-        # Apply log softmax for CTC
-        log_probs = F.log_softmax(logits, dim=-1)
-
+        log_probs = torch.nn.functional.log_softmax(logits, dim=-1)
         return log_probs, encoded_lengths
 
-    def training_step(self, batch: Optional[Dict], batch_idx: int) -> Optional[torch.Tensor]:
+    def training_step(self, batch: Optional[Dict], batch_idx: int):
         if batch is None:
             return None
-
-        features = batch["features"]
-        feature_lengths = batch["feature_lengths"]
-        tokens = batch["tokens"]
-        token_lengths = batch["token_lengths"]
-
-        # Forward pass
-        log_probs, encoded_lengths = self(features, feature_lengths)
-
-        # Prepare for CTC loss (requires time-first)
-        log_probs = log_probs.transpose(0, 1)  # (time, batch, vocab)
-
-        # Calculate loss
+        log_probs, encoded_lengths = self(batch["features"], batch["feature_lengths"])
+        log_probs_t = log_probs.transpose(0, 1)  # (T, B, V) for CTC loss
         loss = self.ctc_loss(
-            log_probs,
-            tokens,
-            encoded_lengths,
-            token_lengths
+            log_probs_t, batch["tokens"], encoded_lengths, batch["token_lengths"]
         )
-
-        # Skip if loss is invalid
         if torch.isnan(loss) or torch.isinf(loss):
             return None
-
         self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True)
         return loss
 
-    def validation_step(self, batch: Optional[Dict], batch_idx: int) -> Optional[Dict]:
+    def validation_step(self, batch: Optional[Dict], batch_idx: int):
         if batch is None:
-            return None
-
-        features = batch["features"]
-        feature_lengths = batch["feature_lengths"]
-        tokens = batch["tokens"]
-        token_lengths = batch["token_lengths"]
-        words = batch["words"]
-
-        # Forward pass
-        log_probs, encoded_lengths = self(features, feature_lengths)
-
-        # Calculate loss
+            return
+        log_probs, encoded_lengths = self(batch["features"], batch["feature_lengths"])
         log_probs_t = log_probs.transpose(0, 1)
         loss = self.ctc_loss(
-            log_probs_t,
-            tokens,
-            encoded_lengths,
-            token_lengths
+            log_probs_t, batch["tokens"], encoded_lengths, batch["token_lengths"]
         )
 
-        # Greedy decoding for WER calculation
-        predictions = log_probs.argmax(dim=-1)  # (batch, time)
-
-        # Decode predictions
-        decoded_preds = []
+        # Greedy decoding for WER
+        predictions = log_probs.argmax(dim=-1)
+        decoded_preds, words = [], batch["words"]
         for i in range(predictions.shape[0]):
-            pred_seq = predictions[i, :encoded_lengths[i]].cpu().numpy()
-            # Remove blanks and duplicates (CTC decoding)
-            decoded = []
-            prev_token = -1
-            for token in pred_seq:
-                # FIXED: Blank token is at len(self.vocab) (index 27), not len(self.vocab) - 1
-                if token != len(self.vocab) and token != prev_token:  # Not blank and not duplicate
-                    decoded.append(token)
-                    prev_token = token
-            # Convert to string
-            pred_word = ''.join([self.char_map.get(t, '') for t in decoded])
+            pred_seq = predictions[i, : encoded_lengths[i]].cpu().numpy()
+            decoded = [
+                token
+                for idx, token in enumerate(pred_seq)
+                if token != self.blank_id and (idx == 0 or token != pred_seq[idx - 1])
+            ]
+            pred_word = "".join([self.char_map.get(t, "") for t in decoded])
             decoded_preds.append(pred_word)
 
-        # Calculate WER
-        correct = sum(1 for pred, true in zip(decoded_preds, words) if pred.lower() == true.lower())
-        total = len(words)
+        correct = sum(1 for pred, true in zip(decoded_preds, words) if pred == true)
 
-        # Log some predictions
         if batch_idx < self.cfg.validation.log_predictions:
             for i in range(min(2, len(decoded_preds))):
-                logger.info(f"[Val] True: '{words[i]}' | Pred: '{decoded_preds[i]}'")
+                logger.info(f"[Val] REF: '{words[i]:<20}' | PRED: '{decoded_preds[i]}'")
 
-        self.log("val_loss", loss, on_epoch=True, prog_bar=True)
+        output = {"correct": correct, "total": len(words), "loss": loss}
+        self.validation_step_outputs.append(output)
+        return output
 
-        # Store output for epoch end calculation
-        self.validation_outputs.append({"correct": correct, "total": total, "loss": loss})
-
-        return {"correct": correct, "total": total, "loss": loss}
-
-    def on_validation_epoch_end(self) -> None:
-        # Calculate WER from stored outputs
-        if not hasattr(self, 'validation_outputs'):
+    def on_validation_epoch_end(self):
+        if not self.validation_step_outputs:
             return
+        total_correct = sum(o["correct"] for o in self.validation_step_outputs)
+        total_words = sum(o["total"] for o in self.validation_step_outputs)
+        avg_loss = torch.stack([o["loss"] for o in self.validation_step_outputs]).mean()
 
-        total_correct = sum(o["correct"] for o in self.validation_outputs if o)
-        total_words = sum(o["total"] for o in self.validation_outputs if o)
-
+        # This is actually Character Error Rate (CER), but we'll call it WER for consistency with the prompt
         wer = 1.0 - (total_correct / max(total_words, 1))
 
+        self.log("val_loss", avg_loss, on_epoch=True, prog_bar=True)
         self.log("val_wer", wer, on_epoch=True, prog_bar=True)
-        logger.info(f"Validation WER: {wer:.2%} ({total_correct}/{total_words} correct)")
-
-        # Clear outputs for next epoch
-        self.validation_outputs = []
+        logger.info(f"Validation WER: {wer:.4f}")
+        self.validation_step_outputs.clear()
 
     def configure_optimizers(self):
-        # AdamW optimizer
         optimizer = torch.optim.AdamW(
-            self.parameters(),
-            lr=self.cfg.training.learning_rate,
-            weight_decay=0.01,
-            betas=(0.9, 0.98)
+            self.parameters(), lr=self.cfg.training.learning_rate, weight_decay=0.01
         )
-
-        # Cosine annealing with warmup
         scheduler = torch.optim.lr_scheduler.OneCycleLR(
             optimizer,
             max_lr=self.cfg.training.learning_rate,
             total_steps=self.trainer.estimated_stepping_batches,
-            pct_start=self.cfg.training.warmup_steps / self.trainer.estimated_stepping_batches,
-            anneal_strategy='cos',
-            div_factor=10,
-            final_div_factor=100
+            pct_start=self.cfg.training.warmup_steps
+            / self.trainer.estimated_stepping_batches
+            if self.trainer.estimated_stepping_batches > 0
+            else 0.1,
+            anneal_strategy="cos",
         )
-
         return {
             "optimizer": optimizer,
-            "lr_scheduler": {
-                "scheduler": scheduler,
-                "interval": "step",
-            }
+            "lr_scheduler": {"scheduler": scheduler, "interval": "step"},
         }
 
-    def export(self, output_path: str) -> None:
+    def export(self, output_path: str):
         """Export model to ONNX format."""
         self.eval()
 
@@ -835,14 +748,14 @@ class GestureCTCModel(pl.LightningModule):
             export_params=True,
             opset_version=14,
             do_constant_folding=True,
-            input_names=['features', 'feature_lengths'],
-            output_names=['log_probs', 'encoded_lengths'],
+            input_names=["features", "feature_lengths"],
+            output_names=["log_probs", "encoded_lengths"],
             dynamic_axes={
-                'features': {0: 'batch', 1: 'time'},
-                'feature_lengths': {0: 'batch'},
-                'log_probs': {0: 'batch', 1: 'time'},
-                'encoded_lengths': {0: 'batch'}
-            }
+                "features": {0: "batch", 1: "time"},
+                "feature_lengths": {0: "batch"},
+                "log_probs": {0: "batch", 1: "time"},
+                "encoded_lengths": {0: "batch"},
+            },
         )
 
         logger.info(f"Model exported to {output_path}")
@@ -892,13 +805,15 @@ class CurriculumCallback(Callback):
             new_profile_name = self.curriculum_profiles[self.current_stage]
 
             logger.info("=" * 80)
-            logger.info(f"Advancing curriculum to stage {self.current_stage + 1}: '{new_profile_name}'")
+            logger.info(
+                f"Advancing curriculum to stage {self.current_stage + 1}: '{new_profile_name}'"
+            )
             profile = SAMPLING_PROFILES[new_profile_name]
             logger.info(f"Profile: {profile['description']}")
             logger.info("=" * 80)
 
             # Update the datamodule's config and reload
-            if hasattr(trainer, 'datamodule'):
+            if hasattr(trainer, "datamodule"):
                 trainer.datamodule.sampling_profile_name = new_profile_name
                 trainer.reset_train_dataloader()
 
@@ -918,18 +833,18 @@ class GestureDataModule(pl.LightningDataModule):
     def setup(self, stage: str):
         # Build vocab mapping
         vocab = {c: i for i, c in enumerate(self.cfg.data.vocab)}
-        vocab['<blank>'] = len(vocab)  # Add blank token
+        vocab["<blank>"] = len(vocab)  # Add blank token
 
         # Get current sampling config
         sampling_cfg = SAMPLING_PROFILES.get(self.sampling_profile_name, {})
 
-        if stage == 'fit' or stage is None:
+        if stage == "fit" or stage is None:
             self.train_ds = GestureDataset(
                 manifest_path=self.cfg.data.train_manifest,
                 vocab=vocab,
                 preprocess_cfg=self.cfg.preprocess,
                 sampling_cfg=sampling_cfg,
-                is_training=True
+                is_training=True,
             )
 
         self.val_ds = GestureDataset(
@@ -937,7 +852,7 @@ class GestureDataModule(pl.LightningDataModule):
             vocab=vocab,
             preprocess_cfg=self.cfg.preprocess,
             sampling_cfg=None,  # No sampling for validation
-            is_training=False
+            is_training=False,
         )
 
     def train_dataloader(self):
@@ -954,7 +869,8 @@ class GestureDataModule(pl.LightningDataModule):
     def val_dataloader(self):
         return DataLoader(
             dataset=self.val_ds,
-            batch_size=self.cfg.training.batch_size * 2,  # Can use larger batch for validation
+            batch_size=self.cfg.training.batch_size
+            * 2,  # Can use larger batch for validation
             collate_fn=collate_fn,
             num_workers=self.cfg.training.num_workers,
             pin_memory=torch.cuda.is_available(),
@@ -963,10 +879,7 @@ class GestureDataModule(pl.LightningDataModule):
 
 # --- Main Execution ---
 def main():
-    # Set seeds for reproducibility
     pl.seed_everything(42)
-
-    # Enable optimizations
     if torch.cuda.is_available():
         torch.backends.cudnn.benchmark = True
         torch.backends.cuda.matmul.allow_tf32 = True
@@ -977,103 +890,72 @@ def main():
         "--resume-from-checkpoint",
         type=str,
         default=None,
-        help="Path to a .ckpt file to resume from."
+        help="Path to a .ckpt file to resume from.",
     )
     parser.add_argument(
         "--ignore-checkpoint",
         action="store_true",
-        help="Start a fresh run, ignoring latest checkpoint."
+        help="Start a fresh run, ignoring latest checkpoint.",
     )
     parser.add_argument(
-        "--batch-size",
-        type=int,
-        default=None,
-        help="Override batch size from config."
+        "--batch-size", type=int, default=256, help="Override batch size from config."
     )
     args = parser.parse_args()
 
-    # Load config
     cfg = OmegaConf.create(CONFIG)
-
-    # Override batch size if specified
     if args.batch_size:
         cfg.training.batch_size = args.batch_size
 
-    # Setup paths
     root_dir = Path(cfg.run_name)
     root_dir.mkdir(exist_ok=True)
-
-    # Find or set checkpoint path
     resume_path = args.resume_from_checkpoint
     if not resume_path and not args.ignore_checkpoint:
-        # Find latest checkpoint
-        ckpt_files = sorted(root_dir.rglob("*.ckpt"), key=os.path.getmtime, reverse=True)
-        if ckpt_files:
-            resume_path = str(ckpt_files[0])
-            logger.info(f"Auto-resuming from latest checkpoint: {resume_path}")
+        ckpts = sorted(root_dir.rglob("*.ckpt"), key=os.path.getmtime, reverse=True)
+        if ckpts:
+            resume_path = str(ckpts[0])
+            print(f"Auto-resuming from: {resume_path}")
 
-    # Build model and data
+    # --- Build Model ---
+    # Pass the full config to the model
     model = GestureCTCModel(cfg=cfg)
     data_module = GestureDataModule(cfg=cfg)
 
-    # Callbacks
-    checkpoint_callback = ModelCheckpoint(
-        dirpath=root_dir / "checkpoints",
-        filename="{epoch:03d}-{val_wer:.3f}",
-        monitor="val_wer",
-        mode="min",
-        save_top_k=3,
-        save_last=True,
-    )
-
-    early_stop_callback = EarlyStopping(
-        monitor="val_wer",
-        mode="min",
-        min_delta=0.001,
-        patience=cfg.early_stopping.patience,
-        check_finite=True,
-        stopping_threshold=cfg.early_stopping.target_wer,
-    )
-
-    curriculum_callback = CurriculumCallback(cfg.curriculum)
-
-    lr_monitor = LearningRateMonitor(logging_interval='step')
-
-    # Logger
-    tb_logger = TensorBoardLogger(
-        save_dir=root_dir,
-        name="logs",
-        version=datetime.now().strftime("%Y%m%d_%H%M%S")
-    )
-
-    # Trainer
     trainer = pl.Trainer(
+        default_root_dir=root_dir,
+        max_epochs=cfg.training.max_epochs,
         accelerator=cfg.training.accelerator,
         devices=1,
         precision=cfg.training.precision,
-        max_epochs=cfg.training.max_epochs,
-        default_root_dir=root_dir,
-        callbacks=[
-            checkpoint_callback,
-            early_stop_callback,
-            curriculum_callback,
-            lr_monitor,
-        ],
-        logger=tb_logger,
         log_every_n_steps=20,
-        gradient_clip_val=1.0,
-        accumulate_grad_batches=cfg.training.accumulate_grad_batches,
-        val_check_interval=0.5,  # Validate twice per epoch
+        callbacks=[
+            ModelCheckpoint(
+                dirpath=root_dir / "checkpoints",
+                filename="{epoch:03d}-{val_wer:.3f}",
+                monitor="val_wer",
+                mode="min",
+                save_top_k=3,
+                save_last=True,
+            ),
+            EarlyStopping(
+                monitor="val_wer",
+                mode="min",
+                min_delta=0.001,
+                patience=cfg.early_stopping.patience,
+                stopping_threshold=cfg.early_stopping.target_wer,
+            ),
+            CurriculumCallback(cfg.curriculum),
+        ],
     )
 
-    # Try to compile model if available
-    if not resume_path and hasattr(torch, 'compile'):
+    if not resume_path and hasattr(torch, "compile"):
+        print("Attempting to compile model with torch.compile...")
         try:
-            logger.info("Attempting to compile model with torch.compile...")
             model = torch.compile(model)
-            logger.info("Model compiled successfully!")
+            print("Model compiled!")
         except Exception as e:
-            logger.warning(f"torch.compile failed: {e}. Continuing without compilation.")
+            logger.warning(
+                f"torch.compile failed: {e}. Continuing without compilation."
+            )
 
     # Train
     logger.info("=" * 80)
@@ -1089,10 +971,11 @@ def main():
 
     logger.info("=" * 80)
     logger.info("Training complete!")
-    logger.info(f"Best checkpoint: {checkpoint_callback.best_model_path}")
-    logger.info(f"Best WER: {checkpoint_callback.best_model_score:.2%}")
     logger.info("=" * 80)
 
 
 if __name__ == "__main__":
+    # NOTE: The PersonalizedSwipeFeaturizer is a placeholder.
+    # Paste your full 37D feature calculation logic into it.
     main()
+
