@@ -239,8 +239,8 @@ CONFIG = {
         "vocab": list("abcdefghijklmnopqrstuvwxyz'"),
     },
     "training": {
-        "batch_size": 256,
-        "num_workers": 0,  # Set to 0 to avoid multiprocessing issues
+        "batch_size": 1024,
+        "num_workers": 12,  # Set to 0 to avoid multiprocessing issues
         "learning_rate": 5e-4,
         "max_epochs": 500,
         "accelerator": "gpu" if torch.cuda.is_available() else "cpu",
@@ -930,7 +930,7 @@ def main():
         help="Start a fresh run, ignoring latest checkpoint.",
     )
     parser.add_argument(
-        "--batch-size", type=int, default=256, help="Override batch size from config."
+        "--batch-size", type=int, default=1024, help="Override batch size from config."
     )
     args = parser.parse_args()
 
