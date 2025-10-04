@@ -143,7 +143,7 @@ val session = ortEnvironment.createSession(modelBytes, sessionOptions)
 val inputTensor = OnnxTensor.createTensor(ortEnvironment, yourFeatureBuffer, longArrayOf(1, 96, 37))
 
 // 5. Run inference in a single, stateless call
-val results = session.run(Collections.singletonMap("input_name", inputTensor))
+val results = session.run(Collections.singletonMap("features", inputTensor))
 val logits = results[0].value as Array<Array<FloatArray>>
 
 // 6. Apply a simple greedy or beam search CTC decoder to the logits
@@ -354,13 +354,23 @@ class PersonalizedSwipeFeaturizer:
             vec[3] = (y - p_prev["y"]) / dt
 
         # Acceleration features (2D)
-        if idx > 1:
-            p_prev = points[idx - 1]  # Need to define p_prev here too
-            p_prev2 = points[idx - 2]
-            dt = max((t - p_prev["t"]) / 1000.0, 1e-6)
-            dt2 = max((p_prev["t"] - p_prev2["t"]) / 1000.0, 1e-6)
-            vec[4] = (vec[2] - (p_prev["x"] - p_prev2["x"]) / dt2) / dt
-            vec[5] = (vec[3] - (p_prev["y"] - p_prev2["y"]) / dt2) / dt
+        if idx > 0 and idx < len(points) - 1:
+            p_next = points[idx + 1]
+            p_prev = points[idx - 1]
+
+            # Time delta for the next point
+            dt_next = max((p_next["t"] - t) / 1000.0, 1e-6)
+
+            # Velocity at the next point
+            vx_next = (p_next["x"] - x) / dt_next
+            vy_next = (p_next["y"] - y) / dt_next
+
+            # Total time delta for central difference (t_next - t_prev)
+            dt_total = max((p_next["t"] - p_prev["t"]) / 1000.0, 1e-6)
+
+            # Correct acceleration using central difference
+            vec[4] = (vx_next - vec[2]) / dt_total
+            vec[5] = (vy_next - vec[3]) / dt_total
 
         # Speed and direction (2D)
         speed = np.hypot(vec[2], vec[3])
@@ -665,11 +675,11 @@ class GestureCTCModel(pl.LightningModule):
         loss = self.ctc_loss(
             log_probs_t, batch["tokens"], encoded_lengths, batch["token_lengths"]
         )
-        if torch.isnan(loss.detach()) or torch.isinf(loss.detach()):
+        if torch.isnan(loss) or torch.isinf(loss):
             return None
         self.log(
             "train_loss",
-            loss.detach(),
+            loss,
             prog_bar=True,
             logger=True,
             on_step=True,
@@ -684,7 +694,7 @@ class GestureCTCModel(pl.LightningModule):
         log_probs_t = log_probs.transpose(0, 1)
         loss = self.ctc_loss(
             log_probs_t, batch["tokens"], encoded_lengths, batch["token_lengths"]
-        )
+        ).detach()  # CRITICAL FIX: Detach the loss to avoid NaNs/Infs
 
         # Greedy decoding for WER
         predictions = log_probs.argmax(dim=-1)
@@ -730,7 +740,7 @@ class GestureCTCModel(pl.LightningModule):
         # This is actually Character Error Rate (CER), but we'll call it WER for consistency with the prompt
         wer = 1.0 - (total_correct / max(total_words, 1))
 
-        self.log("val_loss", avg_loss.detach(), on_epoch=True, prog_bar=True)
+        self.log("val_loss", avg_loss, on_epoch=True, prog_bar=True)
         self.log("val_wer", wer, on_epoch=True, prog_bar=True)
         logger.info(f"Validation WER: {wer:.4f}")
         self.validation_outputs.clear()
@@ -969,15 +979,15 @@ def main():
         ],
     )
 
-    if not resume_path and hasattr(torch, "compile"):
-        print("Attempting to compile model with torch.compile...")
-        try:
-            model = torch.compile(model)
-            print("Model compiled!")
-        except Exception as e:
-            logger.warning(
-                f"torch.compile failed: {e}. Continuing without compilation."
-            )
+    # if not resume_path and hasattr(torch, "compile"):
+    #     print("Attempting to compile model with torch.compile...")
+    #     try:
+    #         model = torch.compile(model)
+    #         print("Model compiled!")
+    #     except Exception as e:
+    #         logger.warning(
+    #             f"torch.compile failed: {e}. Continuing without compilation."
+    #         )
 
     # Train
     logger.info("=" * 80)
