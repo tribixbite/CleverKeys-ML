@@ -1424,7 +1424,10 @@ def main() -> None:
             try:
                 signal, signal_len, transcript, transcript_len = batch
                 with torch.no_grad():
-                    encoded, encoded_len = pl_module.encoder(audio_signal=signal.transpose(1,2), length=signal_len.int())
+                    # Use model.forward to avoid data shape mismatches; it handles transpose
+                    encoded, encoded_len = pl_module.forward(
+                        input_signal=signal, input_signal_length=signal_len
+                    )
                     hyps = pl_module.decoding.rnnt_decoder_predictions_tensor(encoded, encoded_len)
                 for ref_tokens, ref_len, hyp in zip(transcript, transcript_len, hyps):
                     ids = ref_tokens[: int(ref_len.item())].detach().cpu().numpy().tolist()
@@ -1467,6 +1470,22 @@ def main() -> None:
         ),
         SamplePredictionsLogger(train_manifest=cfg.data.train_manifest, val_limit=2, train_sample=15),
     ]
+
+    # Colored banner when val_wer improves
+    class ValWERBanner(pl.Callback):
+        def __init__(self):
+            self.best = None
+        def on_validation_epoch_end(self, trainer, pl_module):
+            try:
+                metrics = trainer.callback_metrics
+                if 'val_wer' in metrics:
+                    cur = float(metrics['val_wer'])
+                    if self.best is None or cur < self.best:
+                        self.best = cur
+                        print(f"\033[1;35m★★ BEST val_wer updated: {cur:.4f} ★★\033[0m")
+            except Exception:
+                pass
+    callbacks.append(ValWERBanner())
     if UNFREEZING_AVAILABLE and cfg.unfreezing.get("enabled", False):
         schedule = None
         if args.profile:

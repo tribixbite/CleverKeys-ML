@@ -117,7 +117,7 @@ extract_wer_from_checkpoint() {
 
 get_epoch_from_checkpoint() {
     local checkpoint=$1
-    if [[ $checkpoint =~ epoch=epoch=([0-9]+) ]]; then
+    if [[ $checkpoint =~ epoch=([0-9]+) ]]; then
         local e="${BASH_REMATCH[1]}"
         e=$((10#$e))
         echo "$e"
