@@ -276,11 +276,11 @@ CONFIG = {
         "switch_min_delta": 0.005,  # Minimum improvement to reset patience
     },
     "early_stopping": {
-        "target_wer": 0.005,  # More realistic target: 5% WER
-        "patience": 500,  # Much more patience since we're far from target
+        "target_wer": 0.05,  # More realistic target: 5% WER
+        "patience": 30,  # Much more patience since we're far from target
     },
     "validation": {
-        "log_predictions": 5,  # Log 5 random correct/incorrect predictions per epoch
+        "log_predictions": 10,  # Log 5 random correct/incorrect predictions per epoch
     },
 }
 
@@ -850,6 +850,12 @@ class CurriculumCallback(Callback):
                 # Force recreation of train dataloader on next epoch
                 trainer.datamodule.setup("fit")
 
+            # Reset the EarlyStopping callback's patience counter
+            for callback in trainer.callbacks:
+                if isinstance(callback, EarlyStopping):
+                    callback.wait_count = 0
+                    logger.info(f"Reset EarlyStopping patience counter to 0.")
+
             # Reset tracking
             self.epochs_since_improvement = 0
             self.val_wer_history = []
@@ -971,7 +977,7 @@ def main():
                 save_last=True,
             ),
             EarlyStopping(
-                monitor="val_loss",
+                monitor="val_wer",
                 mode="min",
                 min_delta=0.001,
                 patience=cfg.early_stopping.patience,
@@ -1012,3 +1018,58 @@ if __name__ == "__main__":
     # NOTE: The PersonalizedSwipeFeaturizer is a placeholder.
     # Paste your full 37D feature calculation logic into it.
     main()
+
+
+# 1. Interaction Between CurriculumCallback and EarlyStopping
+# There is a subtle conflict in how your two main callbacks operate.
+
+# Both the CurriculumCallback and the EarlyStopping callback are monitoring val_wer.
+
+# The CurriculumCallback has a patience of 5. When val_wer stagnates for 5 epochs, it switches the dataset to a new, harder profile.
+
+# The EarlyStopping callback has a much longer patience (e.g., 25).
+
+# The Potential Problem:
+# When the curriculum advances to a harder stage, the val_wer is almost guaranteed to get worse for a few epochs as the model adapts to the new data distribution.
+
+# The CurriculumCallback understands this and resets its own counter. However, the EarlyStopping callback does not. It sees this performance drop as another "failure to improve" and continues ticking up its own patience counter.
+
+# It's possible for a curriculum switch to inadvertently push the training run closer to an early, and undesirable, stop. The EarlyStopping callback might terminate the training before the model has had enough time to master the new curriculum stage.
+
+# How to Fix (Advanced):
+# The most robust solution is to make the CurriculumCallback reset the EarlyStopping counter whenever it triggers. This ensures the model gets a fresh start on its early stopping patience with each new curriculum stage.
+
+# Python
+
+# # In the CurriculumCallback class
+# def _advance_curriculum(self, trainer):
+#     if self.current_stage < len(self.curriculum_profiles) - 1:
+#         # ... (your existing logging and setup code) ...
+
+#         # --- ADD THIS SECTION ---
+#         # Reset the EarlyStopping callback's patience counter
+#         for callback in trainer.callbacks:
+#             if isinstance(callback, EarlyStopping):
+#                 callback.wait_count = 0
+#                 logger.info(f"Reset EarlyStopping patience counter to 0.")
+#         # ------------------------
+
+#         # Reset own tracking
+#         self.epochs_since_improvement = 0
+#         self.val_wer_history = []
+# 2. Potential Information Loss in Preprocessing
+# The current data pipeline is: Raw Points -> Resample by Time -> Calculate Features.
+
+# The Potential Problem:
+# You resample the (x, y, t) points to a fixed length by creating evenly spaced time intervals. This is great for normalizing sequence length, but it can smooth over or discard valuable, high-frequency information.
+
+# The most information-dense parts of a swipe are often the very beginning (the "touchdown") and the very end (the "liftoff"), where direction and acceleration change rapidly. Your original data might have many points clustered in these areas, but resampling by time will replace them with a few, evenly spaced points, potentially losing that crucial detail.
+
+# How to Fix (Alternative Approach):
+# Consider reversing the order of operations as an experiment to see if it improves accuracy.
+
+# New Pipeline: Raw Points -> Calculate Features -> Resample Feature Sequence
+
+# Calculate Features First: Run your PersonalizedSwipeFeaturizer on the original, raw points. This produces a feature sequence (e.g., shape [173, 37]) that preserves all the fine-grained velocity and acceleration details from the original gesture.
+
+# Resample the Features: Use a 1D interpolation method (like torch.nn.functional.interpolate) to resample this sequence of features to your target length (e.g., 96).
