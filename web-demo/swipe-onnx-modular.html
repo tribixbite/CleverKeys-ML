@@ -174,12 +174,14 @@
                 await rnntDecoder.loadLexicon('words.txt', 'word_frequencies_aligned.json');
                 // Feature extractor is used directly, not passed to decoder
 
-                // Initialize CTC decoder (commented out - model not available)
-                // ctcDecoder = new CTCDecoder();
-                // await ctcDecoder.initialize(
-                //     'models/ctc/ctc_model.onnx',
-                //     'models/ctc/tokenizer.json'
-                // );
+                // Initialize CTC decoder
+                ctcDecoder = new CTCDecoder();
+                // Expect encoder-only CTC (simple mode): point both to same ONNX
+                await ctcDecoder.initialize(
+                    'models/ctc/gesture_model.onnx',
+                    'models/ctc/gesture_model.onnx',
+                    'models/ctc/tokenizer.json'
+                );
 
                 console.log('✅ RNN-T model loaded successfully');
                 updateStatus('Ready - RNN-T model loaded', 'ready');
@@ -423,9 +425,9 @@
                 result = await rnntDecoder.beamSearch(featureData, { beamSize: 32, topK: 12, symbolsPerStep: 10, maxSymbols: 28 });
                     console.log('RNN-T result:', result);
                 } else {
-                    // Process with CTC model (not available)
-                    console.warn('CTC model not available');
-                    result = [{ text: 'CTC not available' }];
+                    // Process with CTC model
+                    const res = await ctcDecoder.simpleCTCDecode(swipePath);
+                    result = Array.isArray(res) ? res : [res];
                 }
 
                 const processingTime = performance.now() - startTime;

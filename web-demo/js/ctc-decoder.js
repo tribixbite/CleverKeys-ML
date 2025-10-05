@@ -328,6 +328,70 @@ class CTCDecoder {
             tokens: []
         };
     }
+
+    /**
+     * Basic prefix beam search over encoder per-frame logits (simple CTC mode)
+     */
+    async beamSearchSimpleCTC(points, beamSize = 10, blankId = 0) {
+        if (!this.initialized) throw new Error('CTC decoder not initialized');
+        const features = this.extractCTCFeatures(points);
+        const encOut = await this.runEncoder(features);
+        const memory = encOut.memory; // assume [T, D]
+        const T = encOut.sequenceLength;
+        const V = this.tokenizer.vocab_size || 30;
+        const getLogits = (t) => {
+            // Assumes logits are in first V dims (adjust if needed)
+            const arr = new Float32Array(V);
+            for (let c = 0; c < V; c++) arr[c] = memory.data[t * memory.dims[1] + c];
+            // Convert to log-probs
+            const maxv = Math.max(...arr);
+            let s = 0.0; const exps = new Float32Array(V);
+            for (let i=0;i<V;i++){const e=Math.exp(arr[i]-maxv); exps[i]=e; s+=e;}
+            for (let i=0;i<V;i++) exps[i] = Math.log(exps[i]/s);
+            return exps;
+        };
+
+        let beam = new Map(); // key: seq string, val: {p_b, p_nb, seq}
+        const key = (seq) => seq.join(',');
+        const add = (map, seq, pb, pnb) => {
+            const k = key(seq);
+            const prev = map.get(k) || {p_b:-Infinity,p_nb:-Infinity,seq};
+            prev.p_b = Math.max(prev.p_b, pb);
+            prev.p_nb = Math.max(prev.p_nb, pnb);
+            map.set(k, prev);
+        };
+        add(beam, [], 0.0, -Infinity);
+
+        for (let t=0; t<T; t++) {
+            const lps = getLogits(t);
+            // prune current beam
+            const top = Array.from(beam.values()).sort((a,b)=> (Math.max(a.p_b,a.p_nb) > Math.max(b.p_b,b.p_nb) ? -1:1)).slice(0, beamSize);
+            const next = new Map();
+            for (const hyp of top) {
+                const seq = hyp.seq; const p_b = hyp.p_b; const p_nb = hyp.p_nb;
+                // extend blank
+                add(next, seq, p_b + lps[blankId], -Infinity);
+                // extend tokens
+                for (let c=0;c<V;c++){
+                    if (c===blankId) continue;
+                    const last = seq.length ? seq[seq.length-1] : -1;
+                    const lp = lps[c];
+                    if (c===last){
+                        add(next, seq, -Infinity, p_nb + lp);
+                        add(next, seq.concat([c]), p_b + lp, -Infinity);
+                    } else {
+                        add(next, seq.concat([c]), Math.max(p_b,p_nb) + lp, -Infinity);
+                    }
+                }
+            }
+            beam = next;
+        }
+        const finals = Array.from(beam.values()).map(h=>({seq:h.seq, score: Math.max(h.p_b,h.p_nb)}));
+        finals.sort((a,b)=>b.score - a.score);
+        const toChar = (id) => this.tokenizer.idx_to_char ? this.tokenizer.idx_to_char[id] || '' : '';
+        const top = finals.slice(0,5).map(h=>({ text: h.seq.map(toChar).join(''), score: h.score }));
+        return top;
+    }
 }
 
 // Export for use

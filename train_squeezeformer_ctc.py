@@ -276,8 +276,8 @@ CONFIG = {
         "switch_min_delta": 0.005,  # Minimum improvement to reset patience
     },
     "early_stopping": {
-        "target_wer": 0.05,
-        "patience": 10,  # Stop if WER < 0.05 for 10 consecutive epochs
+        "target_wer": 0.005,  # More realistic target: 5% WER
+        "patience": 500,  # Much more patience since we're far from target
     },
     "validation": {
         "log_predictions": 5,  # Log 5 random correct/incorrect predictions per epoch
@@ -847,7 +847,8 @@ class CurriculumCallback(Callback):
             # Update the datamodule's config and reload
             if hasattr(trainer, "datamodule"):
                 trainer.datamodule.sampling_profile_name = new_profile_name
-                trainer.reset_train_dataloader()
+                # Force recreation of train dataloader on next epoch
+                trainer.datamodule.setup("fit")
 
             # Reset tracking
             self.epochs_since_improvement = 0
@@ -969,7 +970,7 @@ def main():
                 save_last=True,
             ),
             EarlyStopping(
-                monitor="val_wer",
+                monitor="val_loss",
                 mode="min",
                 min_delta=0.001,
                 patience=cfg.early_stopping.patience,
