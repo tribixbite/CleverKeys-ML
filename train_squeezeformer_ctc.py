@@ -459,15 +459,15 @@ class GestureDataset(Dataset):
         filtered = samples
 
         if "min_word_length" in cfg:
-            filtered = [s for s in filtered if len(s["word"]) >= cfg.min_word_length]
+            filtered = [s for s in filtered if len(s["word"]) >= cfg["min_word_length"]]
 
         if "max_word_length" in cfg:
-            filtered = [s for s in filtered if len(s["word"]) <= cfg.max_word_length]
+            filtered = [s for s in filtered if len(s["word"]) <= cfg["max_word_length"]]
 
         if "max_frequency" in cfg:
             word_counts = Counter(s["word"] for s in samples)
             filtered = [
-                s for s in filtered if word_counts[s["word"]] <= cfg.max_frequency
+                s for s in filtered if word_counts[s["word"]] <= cfg["max_frequency"]
             ]
 
         return filtered
@@ -869,7 +869,8 @@ class GestureDataModule(pl.LightningDataModule):
         vocab["<blank>"] = len(vocab)  # Add blank token
 
         # Get current sampling config
-        sampling_cfg = SAMPLING_PROFILES.get(self.sampling_profile_name, {})
+        sampling_dict = SAMPLING_PROFILES.get(self.sampling_profile_name, {})
+        sampling_cfg = OmegaConf.create(sampling_dict) if sampling_dict else None
 
         if stage == "fit" or stage is None:
             self.train_ds = GestureDataset(
