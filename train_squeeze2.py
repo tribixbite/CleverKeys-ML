@@ -269,6 +269,16 @@ CONFIG = {
             "dropout_att": 0.1,
         },
     },
+    # Preprocessing/resampling configuration used by GestureDataset
+    # This aligns with the repo-wide choices (56/96) while
+    # preserving this script's word-length-based scaling.
+    "preprocess": {
+        # Desired frames per character before clamping
+        "points_per_char": 6,
+        # Clamp the final resampled feature length to this range
+        "min_resample_len": 56,
+        "max_resample_len": 96,
+    },
     "curriculum": {
         "profiles": CURRICULUM_STAGES,
         "initial_stage_epochs": 50,
@@ -294,7 +304,6 @@ class PersonalizedSwipeFeaturizer:
 
     def __init__(self):
         self.feature_dim = 37
-        # QWERTY keyboard layout positions (normalized)
         self.key_positions = self._get_keyboard_layout()
         # Pre-calculate key positions as a NumPy array for vectorization
         self._key_chars = list(self.key_positions.keys())
@@ -313,11 +322,12 @@ class PersonalizedSwipeFeaturizer:
         for row_idx, row in enumerate(rows):
             y = row_idx * 0.33  # Normalized y position
             for col_idx, char in enumerate(row):
-                # Add slight offset for middle and bottom rows
                 x_offset = 0.05 * row_idx if row_idx > 0 else 0
                 x = (col_idx / 10.0) + x_offset
                 layout[char] = (x, y)
         layout["'"] = (0.95, 0.33)  # Apostrophe position
+        # Add a synthetic center key to reach 28 proximity features
+        layout["<center>"] = (0.5, 0.5)
         return layout
 
     def __call__(self, points: List[Dict]) -> np.ndarray:
@@ -328,17 +338,16 @@ class PersonalizedSwipeFeaturizer:
         if len(points) < 3:
             return np.zeros((len(points), self.feature_dim), dtype=np.float32)
 
-        # 1. Convert to NumPy array
         p = np.array([[pt["x"], pt["y"], pt["t"]] for pt in points], dtype=np.float32)
         x, y, t = p[:, 0], p[:, 1], p[:, 2]
         num_points = len(p)
         features = np.zeros((num_points, self.feature_dim), dtype=np.float32)
 
-        # 2. Position (Features 0-1)
+        # Position (Features 0-1)
         features[:, 0] = x
         features[:, 1] = y
 
-        # 3. Velocity (Features 2-3) - Backward difference (matches original)
+        # Velocity (Features 2-3)
         dt_bwd = np.diff(t, prepend=t[0]) / 1000.0
         dt_bwd = np.maximum(dt_bwd, 1e-6)
         vx = np.diff(x, prepend=x[0]) / dt_bwd
@@ -347,63 +356,51 @@ class PersonalizedSwipeFeaturizer:
         features[:, 2] = vx
         features[:, 3] = vy
 
-        # --- CORRECTED ACCELERATION (CENTRAL DIFFERENCE) ---
-        # 4. Acceleration (Features 4-5)
-        # Get the "next" velocity vector using np.roll
-        # Get the "next" and "previous" velocity vectors using np.roll
+        # Acceleration (Features 4-5)
         vx_prev = np.roll(vx, 1)
         vy_prev = np.roll(vy, 1)
         vx_next = np.roll(vx, -1)
         vy_next = np.roll(vy, -1)
-
-        # Get total time delta between next and previous points
         t_prev = np.roll(t, 1)
         t_next = np.roll(t, -1)
         dt_total = (t_next - t_prev) / 1000.0
-        dt_total = np.maximum(dt_total, 1e-6)  # Avoid division by zero
-
-        # Central difference calculation: (v_next - v_prev) / (t_next - t_prev)
+        dt_total = np.maximum(dt_total, 1e-6)
         ax = (vx_next - vx_prev) / dt_total
         ay = (vy_next - vy_prev) / dt_total
-
-        # Zero out boundaries to match original logic where this can't be computed
         ax[0], ay[0] = 0, 0
         ax[-1], ay[-1] = 0, 0
         features[:, 4] = ax
         features[:, 5] = ay
 
-        # 5. Speed and Direction (Features 6-7)
+        # Speed and Direction (Features 6-7)
         features[:, 6] = np.hypot(vx, vy)
         features[:, 7] = np.arctan2(vy, vx)
 
-        # 6. Keyboard Proximity (Features 8-35) - This was already correct
-        # (Assuming self._keys_xy is pre-calculated in __init__)
+        # Keyboard Proximity (Features 8-35)
         points_xy = p[:, :2]
         diffs = points_xy[:, np.newaxis, :] - self._keys_xy[np.newaxis, :, :]
         dists = np.linalg.norm(diffs, axis=2)
-        features[:, 8:36] = np.exp(-dists * 5)
 
-        # --- CORRECTED CURVATURE ---
-        # 7. Curvature (Feature 36) - This was already nearly correct
+        # --- THIS IS THE CHANGED LINE ---
+        # Make the slice dynamic based on the number of keys.
+        num_keys = self._keys_xy.shape[0]
+        features[:, 8 : 8 + num_keys] = np.exp(-dists * 5)
+
+        # Curvature (Feature 36)
         p_prev = np.roll(points_xy, 1, axis=0)
         p_next = np.roll(points_xy, -1, axis=0)
         v1 = points_xy - p_prev
         v2 = p_next - points_xy
-
         norm_v1 = np.linalg.norm(v1, axis=1)
         norm_v2 = np.linalg.norm(v2, axis=1)
         dot_product = np.einsum("ij,ij->i", v1, v2)
-
         denom = norm_v1 * norm_v2
         cos_angle = np.zeros(num_points, dtype=np.float32)
         valid_mask = denom > 1e-6
         cos_angle[valid_mask] = np.clip(
             dot_product[valid_mask] / denom[valid_mask], -1.0, 1.0
         )
-
         curvature = np.arccos(cos_angle)
-
-        # Zero out boundaries to match original's "if idx > 1" logic
         curvature[0] = 0
         curvature[-1] = 0
         features[:, 36] = curvature
@@ -735,23 +732,10 @@ class GestureCTCModel(pl.LightningModule):
             all_predictions.extend(output["predictions"])
             all_references.extend(output["references"])
 
-        # Define a transformation to ensure case-insensitivity
-        # We DO NOT remove punctuation because the apostrophe is in our vocabulary.
-        transformation = jiwer.ToLowerCase()
-
-        # Calculate true WER and CER
-        wer = jiwer.wer(
-            all_references,
-            all_predictions,
-            truth_transform=transformation,
-            hypothesis_transform=transformation,
-        )
-        cer = jiwer.cer(
-            all_references,
-            all_predictions,
-            truth_transform=transformation,
-            hypothesis_transform=transformation,
-        )
+        # Calculate WER and CER with default robust transforms
+        # (handles tokenization and spacing). Apostrophes are retained in both.
+        wer = jiwer.wer(all_references, all_predictions)
+        cer = jiwer.cer(all_references, all_predictions)
 
         avg_loss = torch.stack([o["loss"] for o in self.validation_outputs]).mean()
 
@@ -768,14 +752,17 @@ class GestureCTCModel(pl.LightningModule):
         optimizer = torch.optim.AdamW(
             self.parameters(), lr=self.cfg.training.learning_rate, weight_decay=0.01
         )
+        # Compute a valid warmup ratio for OneCycleLR
+        total_steps = max(1, int(self.trainer.estimated_stepping_batches))
+        # Convert warmup_steps to a fraction of total and clamp to (0, 1)
+        warmup_ratio = self.cfg.training.warmup_steps / float(total_steps)
+        warmup_ratio = float(max(0.0, min(0.9, warmup_ratio))) or 0.3
+
         scheduler = torch.optim.lr_scheduler.OneCycleLR(
             optimizer,
             max_lr=self.cfg.training.learning_rate,
-            total_steps=self.trainer.estimated_stepping_batches,
-            pct_start=self.cfg.training.warmup_steps
-            / self.trainer.estimated_stepping_batches
-            if self.trainer.estimated_stepping_batches > 0
-            else 0.1,
+            total_steps=total_steps,
+            pct_start=warmup_ratio,
             anneal_strategy="cos",
         )
         return {
@@ -907,6 +894,7 @@ class GestureDataModule(pl.LightningDataModule):
         # Its ID is simply the number of actual characters.
         self.blank_id = len(self.base_vocab)  # This will be 27
 
+    @staticmethod
     def collate_fn(batch: List[Optional[Dict]], pad_id: int) -> Optional[Dict]:
         """Custom collate function for variable-length sequences."""
         # Filter out None values
@@ -1010,6 +998,11 @@ def main():
     parser.add_argument(
         "--batch-size", type=int, default=768, help="Override batch size from config."
     )
+    parser.add_argument(
+        "--fast-dev-run",
+        action="store_true",
+        help="Run a quick dev pass (1 train/val batch) to validate the pipeline.",
+    )
     args = parser.parse_args()
 
     cfg = OmegaConf.create(CONFIG)
@@ -1046,6 +1039,7 @@ def main():
         precision=cfg.training.precision,
         log_every_n_steps=20,
         reload_dataloaders_every_n_epochs=1,
+        fast_dev_run=args.fast_dev_run,
         callbacks=[
             ModelCheckpoint(
                 dirpath=root_dir / "checkpoints",
