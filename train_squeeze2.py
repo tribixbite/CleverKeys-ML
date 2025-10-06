@@ -42,7 +42,7 @@ converge better and achieve higher accuracy:
 ------------------------
 --       USAGE        --
 ------------------------
-# Start a new training run (will store everything in 10-05-squeeze/)
+# Start a new training run (will store everything in 10-06-squeeze/)
 python train_squeezeformer_ctc.py
 
 # The script automatically finds and resumes from the latest checkpoint
@@ -73,7 +73,7 @@ import torch
 from train_squeezeformer_ctc import GestureCTCModel
 
 # Load your best checkpoint
-model = GestureCTCModel.load_from_checkpoint("10-05-squeeze/.../best.ckpt")
+model = GestureCTCModel.load_from_checkpoint("10-06-squeeze/.../best.ckpt")
 model.eval()
 
 # Export to ONNX
@@ -138,13 +138,18 @@ sessionOptions.addNnapi()
 val modelBytes = resources.openRawResource(R.raw.gesture_model_quant).readBytes()
 val session = ortEnvironment.createSession(modelBytes, sessionOptions)
 
-// 4. Prepare your feature tensor
-// Shape: [1, sequence_length, 37] -> flattened FloatBuffer
-val inputTensor = OnnxTensor.createTensor(ortEnvironment, yourFeatureBuffer, longArrayOf(1, 96, 37))
+// 4. Prepare your feature tensor AND length tensor
+val featuresBuffer = ... // Your FloatBuffer
+val featureLength = 96L // The actual, unpadded length of the swipe
+val inputTensor = OnnxTensor.createTensor(ortEnvironment, featuresBuffer, longArrayOf(1, 96, 37))
+val lengthsTensor = OnnxTensor.createTensor(ortEnvironment, longArrayOf(featureLength))
 
-// 5. Run inference in a single, stateless call
-val results = session.run(Collections.singletonMap("features", inputTensor))
-val logits = results[0].value as Array<Array<FloatArray>>
+// 5. Run inference with BOTH tensors
+val inputs = mapOf(
+    "features" to inputTensor, 
+    "feature_lengths" to lengthsTensor
+)
+val results = session.run(inputs)
 
 // 6. Apply a simple greedy or beam search CTC decoder to the logits
 val decodedText = yourLocalCtcDecoder(logits)
@@ -155,8 +160,9 @@ val decodedText = yourLocalCtcDecoder(logits)
 import argparse
 import json
 import logging
-import math
+import jiwer
 import os
+from functools import partial
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
@@ -232,15 +238,15 @@ CURRICULUM_STAGES = [
 ]
 
 CONFIG = {
-    "run_name": f"10-05-squeeze",
+    "run_name": f"10-06-squeeze",
     "data": {
         "train_manifest": "data/train_final_train.jsonl",
         "val_manifest": "data/train_final_val.jsonl",
         "vocab": list("abcdefghijklmnopqrstuvwxyz'"),
     },
     "training": {
-        "batch_size": 512,
-        "num_workers": 12,  # Set to 0 to avoid multiprocessing issues
+        "batch_size": 768,
+        "num_workers": 4,  # Set to 0 to avoid multiprocessing issues
         "learning_rate": 5e-4,
         "max_epochs": 500,
         "accelerator": "gpu" if torch.cuda.is_available() else "cpu",
@@ -262,12 +268,6 @@ CONFIG = {
             "dropout": 0.1,
             "dropout_att": 0.1,
         },
-    },
-    "preprocess": {
-        "resample_short_target": 56,
-        "resample_long_target": 96,
-        "resample_short_threshold": 48,
-        "resample_long_threshold": 112,
     },
     "curriculum": {
         "profiles": CURRICULUM_STAGES,
@@ -296,6 +296,11 @@ class PersonalizedSwipeFeaturizer:
         self.feature_dim = 37
         # QWERTY keyboard layout positions (normalized)
         self.key_positions = self._get_keyboard_layout()
+        # Pre-calculate key positions as a NumPy array for vectorization
+        self._key_chars = list(self.key_positions.keys())
+        self._keys_xy = np.array(
+            [self.key_positions[c] for c in self._key_chars], dtype=np.float32
+        )
 
     def _get_keyboard_layout(self) -> Dict[str, Tuple[float, float]]:
         """Returns normalized positions for QWERTY keyboard layout."""
@@ -317,83 +322,93 @@ class PersonalizedSwipeFeaturizer:
 
     def __call__(self, points: List[Dict]) -> np.ndarray:
         """
-        Extract features from a sequence of swipe points.
-
-        Args:
-            points: List of dicts with 'x', 'y', 't' keys
-
-        Returns:
-            numpy array of shape (len(points), 37)
+        Extracts features from a sequence of swipe points using vectorized NumPy operations.
+        This version correctly matches the original's central-difference logic.
         """
-        if not points:
-            return np.zeros((0, self.feature_dim), dtype=np.float32)
+        if len(points) < 3:
+            return np.zeros((len(points), self.feature_dim), dtype=np.float32)
 
-        features = []
-        for i in range(len(points)):
-            features.append(self._compute_feature_vector(points, i))
+        # 1. Convert to NumPy array
+        p = np.array([[pt["x"], pt["y"], pt["t"]] for pt in points], dtype=np.float32)
+        x, y, t = p[:, 0], p[:, 1], p[:, 2]
+        num_points = len(p)
+        features = np.zeros((num_points, self.feature_dim), dtype=np.float32)
 
-        return np.stack(features).astype(np.float32)
+        # 2. Position (Features 0-1)
+        features[:, 0] = x
+        features[:, 1] = y
 
-    def _compute_feature_vector(self, points: List[Dict], idx: int) -> np.ndarray:
-        """Compute 37D feature vector for a single point."""
-        vec = np.zeros(self.feature_dim, dtype=np.float32)
+        # 3. Velocity (Features 2-3) - Backward difference (matches original)
+        dt_bwd = np.diff(t, prepend=t[0]) / 1000.0
+        dt_bwd = np.maximum(dt_bwd, 1e-6)
+        vx = np.diff(x, prepend=x[0]) / dt_bwd
+        vy = np.diff(y, prepend=y[0]) / dt_bwd
+        vx[0], vy[0] = 0, 0
+        features[:, 2] = vx
+        features[:, 3] = vy
 
-        # Current point
-        p_curr = points[idx]
-        x, y, t = p_curr["x"], p_curr["y"], p_curr["t"]
+        # --- CORRECTED ACCELERATION (CENTRAL DIFFERENCE) ---
+        # 4. Acceleration (Features 4-5)
+        # Get the "next" velocity vector using np.roll
+        # Get the "next" and "previous" velocity vectors using np.roll
+        vx_prev = np.roll(vx, 1)
+        vy_prev = np.roll(vy, 1)
+        vx_next = np.roll(vx, -1)
+        vy_next = np.roll(vy, -1)
 
-        # Basic position (2D)
-        vec[0] = x
-        vec[1] = y
+        # Get total time delta between next and previous points
+        t_prev = np.roll(t, 1)
+        t_next = np.roll(t, -1)
+        dt_total = (t_next - t_prev) / 1000.0
+        dt_total = np.maximum(dt_total, 1e-6)  # Avoid division by zero
 
-        # Velocity features (2D)
-        if idx > 0:
-            p_prev = points[idx - 1]
-            dt = max((t - p_prev["t"]) / 1000.0, 1e-6)  # Convert ms to seconds
-            vec[2] = (x - p_prev["x"]) / dt
-            vec[3] = (y - p_prev["y"]) / dt
+        # Central difference calculation: (v_next - v_prev) / (t_next - t_prev)
+        ax = (vx_next - vx_prev) / dt_total
+        ay = (vy_next - vy_prev) / dt_total
 
-        # Acceleration features (2D)
-        if idx > 0 and idx < len(points) - 1:
-            p_next = points[idx + 1]
-            p_prev = points[idx - 1]
+        # Zero out boundaries to match original logic where this can't be computed
+        ax[0], ay[0] = 0, 0
+        ax[-1], ay[-1] = 0, 0
+        features[:, 4] = ax
+        features[:, 5] = ay
 
-            # Time delta for the next point
-            dt_next = max((p_next["t"] - t) / 1000.0, 1e-6)
+        # 5. Speed and Direction (Features 6-7)
+        features[:, 6] = np.hypot(vx, vy)
+        features[:, 7] = np.arctan2(vy, vx)
 
-            # Velocity at the next point
-            vx_next = (p_next["x"] - x) / dt_next
-            vy_next = (p_next["y"] - y) / dt_next
+        # 6. Keyboard Proximity (Features 8-35) - This was already correct
+        # (Assuming self._keys_xy is pre-calculated in __init__)
+        points_xy = p[:, :2]
+        diffs = points_xy[:, np.newaxis, :] - self._keys_xy[np.newaxis, :, :]
+        dists = np.linalg.norm(diffs, axis=2)
+        features[:, 8:36] = np.exp(-dists * 5)
 
-            # Total time delta for central difference (t_next - t_prev)
-            dt_total = max((p_next["t"] - p_prev["t"]) / 1000.0, 1e-6)
+        # --- CORRECTED CURVATURE ---
+        # 7. Curvature (Feature 36) - This was already nearly correct
+        p_prev = np.roll(points_xy, 1, axis=0)
+        p_next = np.roll(points_xy, -1, axis=0)
+        v1 = points_xy - p_prev
+        v2 = p_next - points_xy
 
-            # Correct acceleration using central difference
-            vec[4] = (vx_next - vec[2]) / dt_total
-            vec[5] = (vy_next - vec[3]) / dt_total
+        norm_v1 = np.linalg.norm(v1, axis=1)
+        norm_v2 = np.linalg.norm(v2, axis=1)
+        dot_product = np.einsum("ij,ij->i", v1, v2)
 
-        # Speed and direction (2D)
-        speed = np.hypot(vec[2], vec[3])
-        vec[6] = speed
-        vec[7] = np.arctan2(vec[3], vec[2]) if speed > 1e-6 else 0
+        denom = norm_v1 * norm_v2
+        cos_angle = np.zeros(num_points, dtype=np.float32)
+        valid_mask = denom > 1e-6
+        cos_angle[valid_mask] = np.clip(
+            dot_product[valid_mask] / denom[valid_mask], -1.0, 1.0
+        )
 
-        # Distance to each key (28D)
-        for i, (char, (kx, ky)) in enumerate(self.key_positions.items()):
-            dist = np.hypot(x - kx, y - ky)
-            vec[8 + i] = np.exp(-dist * 5)  # Gaussian proximity
+        curvature = np.arccos(cos_angle)
 
-        # Trajectory curvature (1D)
-        if idx > 1 and idx < len(points) - 1:
-            p_prev = points[idx - 1]
-            p_next = points[idx + 1]
-            # Compute angle change
-            v1 = np.array([p_curr["x"] - p_prev["x"], p_curr["y"] - p_prev["y"]])
-            v2 = np.array([p_next["x"] - p_curr["x"], p_next["y"] - p_curr["y"]])
-            if np.linalg.norm(v1) > 1e-6 and np.linalg.norm(v2) > 1e-6:
-                cos_angle = np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2))
-                vec[36] = np.arccos(np.clip(cos_angle, -1, 1))
+        # Zero out boundaries to match original's "if idx > 1" logic
+        curvature[0] = 0
+        curvature[-1] = 0
+        features[:, 36] = curvature
 
-        return vec
+        return features
 
 
 # --- Dataset ---
@@ -482,16 +497,16 @@ class GestureDataset(Dataset):
         if len(raw_points) < 2:
             return None
 
-        # --- NEW Preprocessing Pipeline ---
-        # 1. Normalize the raw points (no change here)
         norm_points = self._normalize_points(raw_points)
 
         # 2. Calculate features on the ORIGINAL, variable-length points
         raw_features_np = self.featurizer(norm_points)
         raw_features = torch.from_numpy(raw_features_np).float()
 
-        # 3. Determine the final target length (no change here)
-        target_len = self._determine_resample_target(len(norm_points))
+        # 3. Determine the final target length USING WORD LENGTH
+        target_len = self._determine_resample_target(
+            len(item["word"])
+        )  # <-- THIS LINE IS UPDATED
 
         # 4. Resample the FEATURE TENSOR to the target length
         features = self._resample_features(raw_features, target_len)
@@ -529,23 +544,16 @@ class GestureDataset(Dataset):
             for p in points
         ]
 
-    def _determine_resample_target(self, length: int) -> int:
-        """Determine adaptive resampling target based on trace length."""
+    def _determine_resample_target(self, word_length: int) -> int:
+        """Determine resampling target based on word length, clamped to a min/max."""
         cfg = self.preprocess_cfg
 
-        if length <= cfg.resample_short_threshold:
-            return cfg.resample_short_target
-        elif length >= cfg.resample_long_threshold:
-            return cfg.resample_long_target
-        else:
-            # Linear interpolation
-            progress = (length - cfg.resample_short_threshold) / (
-                cfg.resample_long_threshold - cfg.resample_short_threshold
-            )
-            return int(
-                cfg.resample_short_target
-                + progress * (cfg.resample_long_target - cfg.resample_short_target)
-            )
+        target_len = cfg.points_per_char * word_length
+
+        # Use np.clip to enforce the min and max boundaries
+        clamped_len = np.clip(target_len, cfg.min_resample_len, cfg.max_resample_len)
+
+        return int(clamped_len)
 
     def _resample_features(
         self, features: torch.Tensor, target_len: int
@@ -615,17 +623,17 @@ class GestureCTCModel(pl.LightningModule):
     This is a self-contained pure PyTorch Lightning implementation.
     """
 
-    def __init__(self, cfg: DictConfig):
+    def __init__(
+        self, cfg: DictConfig, vocab_size: int, blank_id: int, char_map: Dict[int, str]
+    ):
         super().__init__()
         self.save_hyperparameters()
         self.cfg = cfg
         self.validation_outputs = []
 
-        # Build vocab and determine blank ID
-        self.vocab = {c: i for i, c in enumerate(cfg.data.vocab)}
-        self.char_map = {i: c for c, i in self.vocab.items()}
-        vocab_size = len(self.vocab)
-        self.blank_id = vocab_size  # CRITICAL FIX: Blank is at index 27, AFTER the 27 characters (0-26).
+        # --- NEW: Assign values directly, don't calculate them ---
+        self.char_map = char_map
+        self.blank_id = blank_id
 
         # Build Squeezeformer encoder from NeMo
         encoder_cfg = OmegaConf.to_container(cfg.model.encoder)
@@ -720,27 +728,40 @@ class GestureCTCModel(pl.LightningModule):
     def on_validation_epoch_end(self):
         if not self.validation_outputs:
             return
-        # Aggregate predictions and references from all validation batches
+
         all_predictions = []
         all_references = []
         for output in self.validation_outputs:
             all_predictions.extend(output["predictions"])
             all_references.extend(output["references"])
 
-        # Calculate metrics on the aggregated lists
-        total_words = len(all_references)
-        total_correct = sum(
-            1 for pred, ref in zip(all_predictions, all_references) if pred == ref
+        # Define a transformation to ensure case-insensitivity
+        # We DO NOT remove punctuation because the apostrophe is in our vocabulary.
+        transformation = jiwer.ToLowerCase()
+
+        # Calculate true WER and CER
+        wer = jiwer.wer(
+            all_references,
+            all_predictions,
+            truth_transform=transformation,
+            hypothesis_transform=transformation,
+        )
+        cer = jiwer.cer(
+            all_references,
+            all_predictions,
+            truth_transform=transformation,
+            hypothesis_transform=transformation,
         )
 
         avg_loss = torch.stack([o["loss"] for o in self.validation_outputs]).mean()
 
-        # This is actually Character Error Rate (CER), but we'll call it WER for consistency with the prompt
-        wer = 1.0 - (total_correct / max(total_words, 1))
-
         self.log("val_loss", avg_loss, on_epoch=True, prog_bar=True)
         self.log("val_wer", wer, on_epoch=True, prog_bar=True)
-        logger.info(f"Validation WER: {wer:.4f}")
+        self.log(
+            "val_cer", cer, on_epoch=True, prog_bar=False
+        )  # Log CER for more detail
+
+        logger.info(f"Validation WER: {wer:.4f}, CER: {cer:.4f}")
         self.validation_outputs.clear()
 
     def configure_optimizers(self):
@@ -767,8 +788,8 @@ class GestureCTCModel(pl.LightningModule):
         self.eval()
 
         # Create dummy input
-        dummy_features = torch.randn(1, 96, 37)
-        dummy_lengths = torch.tensor([96])
+        dummy_features = torch.randn(1, 160, 37)
+        dummy_lengths = torch.tensor([160])
 
         # Export
         torch.onnx.export(
@@ -842,11 +863,13 @@ class CurriculumCallback(Callback):
             logger.info(f"Profile: {profile['description']}")
             logger.info("=" * 80)
 
-            # Update the datamodule's config and reload
+            # Update the datamodule's config
             if hasattr(trainer, "datamodule"):
                 trainer.datamodule.sampling_profile_name = new_profile_name
-                # Force recreation of train dataloader on next epoch
-                trainer.reset_train_dataloader()
+
+                # --- ADD THIS LINE ---
+                # Force the datamodule to re-create the training dataset with the new profile
+                trainer.datamodule.setup("fit")
 
             # Reset the EarlyStopping callback's patience counter
             for callback in trainer.callbacks:
@@ -867,11 +890,58 @@ class GestureDataModule(pl.LightningDataModule):
         self.cfg = cfg
         self.sampling_profile_name = cfg.curriculum.profiles[0]
 
-    def setup(self, stage: str):
-        # Build vocab mapping
-        vocab = {c: i for i, c in enumerate(self.cfg.data.vocab)}
-        vocab["<blank>"] = len(vocab)  # Add blank token
+        # --- CORRECTED Vocabulary Management ---
+        # The characters the model should actually predict
+        self.base_vocab = self.cfg.data.vocab
 
+        # Create mappings for characters ONLY
+        self.vocab_map = {c: i for i, c in enumerate(self.base_vocab)}
+        self.char_map = {i: c for c, i in self.vocab_map.items()}
+
+        # Define critical IDs separately
+        # The pad_id for token sequences can be anything not in vocab_map.
+        # -100 is the default `ignore_index` for many PyTorch loss functions.
+        self.pad_id = -100
+
+        # The blank token for CTC loss is always the last channel in the model's output.
+        # Its ID is simply the number of actual characters.
+        self.blank_id = len(self.base_vocab)  # This will be 27
+
+    def collate_fn(batch: List[Optional[Dict]], pad_id: int) -> Optional[Dict]:
+        """Custom collate function for variable-length sequences."""
+        # Filter out None values
+        batch = [item for item in batch if item is not None]
+
+        if not batch:
+            return None
+
+        # Stack features and tokens
+        features = torch.nn.utils.rnn.pad_sequence(
+            [item["features"] for item in batch], batch_first=True, padding_value=0.0
+        )
+
+        tokens = torch.nn.utils.rnn.pad_sequence(
+            [item["tokens"] for item in batch],
+            batch_first=True,
+            padding_value=pad_id,  # Use the apostrophe index for padding.
+        )
+
+        feature_lengths = torch.tensor(
+            [item["feature_length"] for item in batch], dtype=torch.long
+        )
+        token_lengths = torch.tensor(
+            [item["token_length"] for item in batch], dtype=torch.long
+        )
+
+        return {
+            "features": features,
+            "feature_lengths": feature_lengths,
+            "tokens": tokens,
+            "token_lengths": token_lengths,
+            "words": [item["word"] for item in batch],
+        }
+
+    def setup(self, stage: str):
         # Get current sampling config
         sampling_dict = SAMPLING_PROFILES.get(self.sampling_profile_name, {})
         sampling_cfg = OmegaConf.create(sampling_dict) if sampling_dict else None
@@ -879,7 +949,7 @@ class GestureDataModule(pl.LightningDataModule):
         if stage == "fit" or stage is None:
             self.train_ds = GestureDataset(
                 manifest_path=self.cfg.data.train_manifest,
-                vocab=vocab,
+                vocab=self.vocab_map,
                 preprocess_cfg=self.cfg.preprocess,
                 sampling_cfg=sampling_cfg,
                 is_training=True,
@@ -887,17 +957,18 @@ class GestureDataModule(pl.LightningDataModule):
 
         self.val_ds = GestureDataset(
             manifest_path=self.cfg.data.val_manifest,
-            vocab=vocab,
+            vocab=self.vocab_map,
             preprocess_cfg=self.cfg.preprocess,
             sampling_cfg=None,  # No sampling for validation
             is_training=False,
         )
 
     def train_dataloader(self):
+        collate_with_padding = partial(self.collate_fn, pad_id=self.pad_id)
         return DataLoader(
             dataset=self.train_ds,
             batch_size=self.cfg.training.batch_size,
-            collate_fn=collate_fn,
+            collate_fn=collate_with_padding,
             num_workers=self.cfg.training.num_workers,
             pin_memory=torch.cuda.is_available(),
             shuffle=True,
@@ -905,11 +976,12 @@ class GestureDataModule(pl.LightningDataModule):
         )
 
     def val_dataloader(self):
+        collate_with_padding = partial(self.collate_fn, pad_id=self.pad_id)
         return DataLoader(
             dataset=self.val_ds,
             batch_size=self.cfg.training.batch_size
             * 2,  # Can use larger batch for validation
-            collate_fn=collate_fn,
+            collate_fn=collate_with_padding,
             num_workers=self.cfg.training.num_workers,
             pin_memory=torch.cuda.is_available(),
         )
@@ -936,7 +1008,7 @@ def main():
         help="Start a fresh run, ignoring latest checkpoint.",
     )
     parser.add_argument(
-        "--batch-size", type=int, default=512, help="Override batch size from config."
+        "--batch-size", type=int, default=768, help="Override batch size from config."
     )
     args = parser.parse_args()
 
@@ -955,8 +1027,16 @@ def main():
 
     # --- Build Model ---
     # Pass the full config to the model
-    model = GestureCTCModel(cfg=cfg)
     data_module = GestureDataModule(cfg=cfg)
+    model = GestureCTCModel(
+        cfg=cfg,
+        # The number of characters the model should predict
+        vocab_size=len(data_module.base_vocab),
+        # The special ID for the CTC blank token
+        blank_id=data_module.blank_id,
+        # The map for decoding predictions back to text
+        char_map=data_module.char_map,
+    )
 
     trainer = pl.Trainer(
         default_root_dir=root_dir,
@@ -965,6 +1045,7 @@ def main():
         devices=1,
         precision=cfg.training.precision,
         log_every_n_steps=20,
+        reload_dataloaders_every_n_epochs=1,
         callbacks=[
             ModelCheckpoint(
                 dirpath=root_dir / "checkpoints",
