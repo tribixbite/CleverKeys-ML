@@ -494,6 +494,13 @@ def main():
     else:
         raise ValueError(f"Unsupported encoder model_type for CTC adaptation: {cfg.model_type}")
 
+    # Disable masking which expects longer sequences in HuBERT/Wav2Vec2 pretraining
+    try:
+        model.config.mask_time_prob = 0.0
+        model.config.mask_feature_prob = 0.0
+    except Exception:
+        pass
+
     # Freeze low-level feature extractor (common fine-tuning practice)
     try:
         model.freeze_feature_extractor()
