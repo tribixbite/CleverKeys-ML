@@ -473,6 +473,7 @@ def main():
     training_args = TrainingArguments(
         output_dir=str(output_dir),
         group_by_length=DEFAULT_CONFIG["training"]["group_by_length"],
+        length_column_name="input_values",
         per_device_train_batch_size=args.batch_size,
         per_device_eval_batch_size=args.batch_size,
         num_train_epochs=args.epochs,
