@@ -499,7 +499,6 @@ def main():
         compute_metrics=compute_metrics,
         train_dataset=train_ds,
         eval_dataset=val_ds,
-        tokenizer=processor.feature_extractor,
     )
 
     # Auto-resume from latest checkpoint
