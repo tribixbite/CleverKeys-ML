@@ -302,7 +302,7 @@ class DataCollatorCTCWithPadding:
     def __call__(self, features: List[Dict]) -> Dict[str, torch.Tensor]:
         # inputs: list of dicts with "input_values" as (T, 37) numpy arrays
         # labels: list of dicts with "labels" as 1D int lists
-        inputs = [f["input_values"] for f in features]
+        inputs = [np.asarray(f["input_values"], dtype=np.float32) for f in features]
         labels_list = [f["labels"] for f in features]
 
         # Pad inputs manually to (B, T_max, 37)
