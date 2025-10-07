@@ -300,23 +300,33 @@ class DataCollatorCTCWithPadding:
     padding: Union[bool, str] = True
 
     def __call__(self, features: List[Dict]) -> Dict[str, torch.Tensor]:
-        input_features = [{"input_values": f["input_values"]} for f in features]
-        label_features = [{"input_ids": f["labels"]} for f in features]
+        # inputs: list of dicts with "input_values" as (T, 37) numpy arrays
+        # labels: list of dicts with "labels" as 1D int lists
+        inputs = [f["input_values"] for f in features]
+        labels_list = [f["labels"] for f in features]
 
-        batch = self.processor.feature_extractor.pad(
-            input_features,
-            padding=self.padding,
-            return_tensors="pt",
-        )
+        # Pad inputs manually to (B, T_max, 37)
+        feat_dim = 37
+        lengths = [arr.shape[0] for arr in inputs]
+        max_len = max(lengths) if lengths else 0
+        batch_inputs = torch.zeros((len(inputs), max_len, feat_dim), dtype=torch.float32)
+        attn_mask = torch.zeros((len(inputs), max_len), dtype=torch.long)
+        for i, arr in enumerate(inputs):
+            t = arr.shape[0]
+            if t == 0:
+                continue
+            batch_inputs[i, :t, :] = torch.from_numpy(arr)
+            attn_mask[i, :t] = 1
+
+        # Pad labels with tokenizer pad, then set masked positions to -100
         labels_batch = self.processor.tokenizer.pad(
-            label_features,
+            [{"input_ids": l} for l in labels_list],
             padding=self.padding,
             return_tensors="pt",
         )
-
         labels = labels_batch["input_ids"].masked_fill(labels_batch.attention_mask.ne(1), -100)
-        batch["labels"] = labels
-        return batch
+
+        return {"input_values": batch_inputs, "attention_mask": attn_mask, "labels": labels}
 
 
 def build_tokenizer_and_processor(vocab_chars: str, workdir: Path) -> Tuple[Wav2Vec2Processor, Wav2Vec2CTCTokenizer, Path]:
