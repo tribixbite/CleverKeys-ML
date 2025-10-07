@@ -288,8 +288,9 @@ def build_tokenizer_and_processor(vocab_chars: str, workdir: Path) -> Tuple[Wav2
     with open(vocab_file, "w", encoding="utf-8") as f:
         json.dump(vocab_dict, f)
 
-    tokenizer = Wav2Vec2CTCTokenizer.from_pretrained(
-        str(tok_dir), unk_token="[UNK]", pad_token="[PAD]", word_delimiter_token=None
+    # Instantiate tokenizer directly from vocab file to avoid incorrect class resolution.
+    tokenizer = Wav2Vec2CTCTokenizer(
+        vocab_file=str(vocab_file), unk_token="[UNK]", pad_token="[PAD]", word_delimiter_token=None
     )
     feature_extractor = Wav2Vec2FeatureExtractor(
         feature_size=37, sampling_rate=100, padding_value=0.0, do_normalize=False
@@ -371,21 +372,22 @@ def main():
             ]
             batch["input_values"] = featurizer(norm_points).astype(np.float32)
 
-        with tokenizer.as_target_processor():
-            batch["labels"] = tokenizer(batch["word"].lower()).input_ids
+        # Use processor's target processor for labels
+        with processor.as_target_processor():
+            batch["labels"] = processor.tokenizer(batch["word"].lower()).input_ids
         return batch
 
-    logger.info("Featurizing and tokenizing...")
-    train_ds = train_ds.map(preprocess_function, remove_columns=train_ds.column_names)
-    val_ds = val_ds.map(preprocess_function, remove_columns=val_ds.column_names)
-
-    # Optional subsetting for quick pipeline checks
+    # Optional subsetting for quick pipeline checks (do this BEFORE map for speed)
     if args.subset_train and len(train_ds) > args.subset_train:
         logger.info(f"Subsetting train dataset to first {args.subset_train} samples (from {len(train_ds)})")
         train_ds = train_ds.select(range(args.subset_train))
     if args.subset_val and len(val_ds) > args.subset_val:
         logger.info(f"Subsetting val dataset to first {args.subset_val} samples (from {len(val_ds)})")
         val_ds = val_ds.select(range(args.subset_val))
+
+    logger.info("Featurizing and tokenizing...")
+    train_ds = train_ds.map(preprocess_function, remove_columns=train_ds.column_names)
+    val_ds = val_ds.map(preprocess_function, remove_columns=val_ds.column_names)
     logger.info(f"Training samples: {len(train_ds)} | Validation samples: {len(val_ds)}")
 
     # Model
