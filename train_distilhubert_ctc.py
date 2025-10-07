@@ -334,6 +334,8 @@ def main():
     parser.add_argument("--warmup-steps", type=int, default=DEFAULT_CONFIG["training"]["warmup_steps"])
     parser.add_argument("--no-fp16", action="store_true", help="Disable fp16 even if CUDA is available")
     parser.add_argument("--no-auto-resume", action="store_true", help="Do not auto-resume from latest checkpoint")
+    parser.add_argument("--subset-train", type=int, default=0, help="Use only the first N training samples (for quick smoke runs)")
+    parser.add_argument("--subset-val", type=int, default=0, help="Use only the first N validation samples (for quick smoke runs)")
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir)
@@ -376,6 +378,14 @@ def main():
     logger.info("Featurizing and tokenizing...")
     train_ds = train_ds.map(preprocess_function, remove_columns=train_ds.column_names)
     val_ds = val_ds.map(preprocess_function, remove_columns=val_ds.column_names)
+
+    # Optional subsetting for quick pipeline checks
+    if args.subset_train and len(train_ds) > args.subset_train:
+        logger.info(f"Subsetting train dataset to first {args.subset_train} samples (from {len(train_ds)})")
+        train_ds = train_ds.select(range(args.subset_train))
+    if args.subset_val and len(val_ds) > args.subset_val:
+        logger.info(f"Subsetting val dataset to first {args.subset_val} samples (from {len(val_ds)})")
+        val_ds = val_ds.select(range(args.subset_val))
     logger.info(f"Training samples: {len(train_ds)} | Validation samples: {len(val_ds)}")
 
     # Model
@@ -447,4 +457,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
