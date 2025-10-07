@@ -423,6 +423,20 @@ def main():
     val_ds = Dataset.from_list(val_data)
 
     # Preprocess: normalize points and featurize; tokenize labels
+    MIN_TEMPORAL_LEN = 400
+
+    def _resample_2d(arr: np.ndarray, new_len: int) -> np.ndarray:
+        if arr.shape[0] == new_len:
+            return arr
+        if arr.shape[0] == 0:
+            return np.zeros((new_len, arr.shape[1]), dtype=np.float32)
+        t_old = np.linspace(0.0, 1.0, arr.shape[0], endpoint=False)
+        t_new = np.linspace(0.0, 1.0, new_len, endpoint=False)
+        out = np.empty((new_len, arr.shape[1]), dtype=np.float32)
+        for d in range(arr.shape[1]):
+            out[:, d] = np.interp(t_new, t_old, arr[:, d])
+        return out
+
     def preprocess_function(batch):
         if not batch.get("points"):
             batch["input_values"] = np.zeros((0, 37), dtype=np.float32)
@@ -436,7 +450,11 @@ def main():
                 }
                 for p in batch["points"]
             ]
-            batch["input_values"] = featurizer(norm_points).astype(np.float32)
+            feats = featurizer(norm_points).astype(np.float32)
+            # Upsample to ensure conv stack has enough temporal extent
+            if feats.shape[0] < MIN_TEMPORAL_LEN:
+                feats = _resample_2d(feats, MIN_TEMPORAL_LEN)
+            batch["input_values"] = feats
 
         # Use processor's target processor for labels
         with processor.as_target_processor():
