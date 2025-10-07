@@ -41,6 +41,8 @@ from transformers import (
     Wav2Vec2FeatureExtractor,
     Wav2Vec2ForCTC,
     Wav2Vec2Processor,
+    HubertForCTC,
+    AutoConfig,
 )
 
 
@@ -51,7 +53,9 @@ from transformers import (
 DEFAULT_CONFIG = {
     "model_name": "distilhubert-ctc-gesture-model",
     # A HuBERT/DistilHuBERT-style backbone; allow size mismatches when adapting conv.
-    "pretrained_model": "facebook/distilhubert-base",
+    # Prefer a widely available encoder; DistilHuBERT repos vary.
+    # Use HuBERT base as stable default; still adapted to 37D inputs and CTC.
+    "pretrained_model": "facebook/hubert-base-ls960",
     "data": {
         "train_manifest": "data/train_final_train.jsonl",
         "val_manifest": "data/train_final_val.jsonl",
@@ -229,6 +233,44 @@ class GestureWav2Vec2ForCTC(Wav2Vec2ForCTC):
         )
 
 
+class GestureHubertForCTC(HubertForCTC):
+    """Adapt first conv layer to accept 37 channels for HuBERT; transpose input."""
+
+    def __init__(self, config):
+        super().__init__(config)
+        try:
+            new_conv = nn.Conv1d(
+                in_channels=37,
+                out_channels=config.conv_dim[0],
+                kernel_size=config.conv_kernel[0],
+                stride=config.conv_stride[0],
+                bias=False,
+            )
+            self.hubert.feature_extractor.conv_layers[0].conv = new_conv
+        except Exception as e:
+            logger.warning(f"Falling back: could not adapt first conv layer automatically (HuBERT): {e}")
+
+    def forward(
+        self,
+        input_values,
+        attention_mask: Optional[torch.Tensor] = None,
+        output_attentions: Optional[bool] = None,
+        output_hidden_states: Optional[bool] = None,
+        return_dict: Optional[bool] = None,
+        labels: Optional[torch.LongTensor] = None,
+    ):
+        if input_values.dim() == 3:
+            input_values = input_values.transpose(1, 2)
+        return super().forward(
+            input_values=input_values,
+            attention_mask=attention_mask,
+            output_attentions=output_attentions,
+            output_hidden_states=output_hidden_states,
+            return_dict=return_dict,
+            labels=labels,
+        )
+
+
 # -----------------------------------------------------------------------------
 # Data loading
 # -----------------------------------------------------------------------------
@@ -392,12 +434,23 @@ def main():
 
     # Model
     logger.info(f"Loading backbone: {args.pretrained_model}")
-    model = GestureWav2Vec2ForCTC.from_pretrained(
-        args.pretrained_model,
-        pad_token_id=processor.tokenizer.pad_token_id,
-        vocab_size=len(processor.tokenizer),
-        ignore_mismatched_sizes=True,
-    )
+    cfg = AutoConfig.from_pretrained(args.pretrained_model)
+    if cfg.model_type == "wav2vec2":
+        model = GestureWav2Vec2ForCTC.from_pretrained(
+            args.pretrained_model,
+            pad_token_id=processor.tokenizer.pad_token_id,
+            vocab_size=len(processor.tokenizer),
+            ignore_mismatched_sizes=True,
+        )
+    elif cfg.model_type == "hubert":
+        model = GestureHubertForCTC.from_pretrained(
+            args.pretrained_model,
+            pad_token_id=processor.tokenizer.pad_token_id,
+            vocab_size=len(processor.tokenizer),
+            ignore_mismatched_sizes=True,
+        )
+    else:
+        raise ValueError(f"Unsupported encoder model_type for CTC adaptation: {cfg.model_type}")
 
     # Freeze low-level feature extractor (common fine-tuning practice)
     try:
