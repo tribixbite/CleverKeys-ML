@@ -377,10 +377,13 @@ def compute_metrics_builder(tokenizer: Wav2Vec2CTCTokenizer):
         pred_str = tokenizer.batch_decode(pred_ids)
         label_str = tokenizer.batch_decode(label_ids, group_tokens=False)
 
+        # Sanitize empties to avoid jiwer errors
+        pred_str = [s if isinstance(s, str) and len(s) > 0 else "?" for s in pred_str]
+        label_str = [s if isinstance(s, str) and len(s) > 0 else "?" for s in label_str]
+
         tf = jiwer.ToLowerCase()
-        wer = jiwer.wer(label_str, pred_str, truth_transform=tf, hypothesis_transform=tf)
         cer = jiwer.cer(label_str, pred_str, truth_transform=tf, hypothesis_transform=tf)
-        return {"wer": wer, "cer": cer}
+        return {"cer": cer}
 
     return compute_metrics
 
@@ -522,7 +525,7 @@ def main():
         evaluation_strategy="epoch",
         save_strategy="epoch",
         load_best_model_at_end=True,
-        metric_for_best_model="wer",
+        metric_for_best_model="cer",
         greater_is_better=False,
         logging_steps=DEFAULT_CONFIG["training"]["logging_steps"],
         report_to=["tensorboard"],
