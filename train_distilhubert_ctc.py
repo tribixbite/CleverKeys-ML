@@ -366,6 +366,26 @@ def build_tokenizer_and_processor(vocab_chars: str, workdir: Path) -> Tuple[Wav2
 
 
 def compute_metrics_builder(tokenizer: Wav2Vec2CTCTokenizer):
+    def _levenshtein(a: str, b: str) -> int:
+        if a == b:
+            return 0
+        la, lb = len(a), len(b)
+        if la == 0:
+            return lb
+        if lb == 0:
+            return la
+        prev = list(range(lb + 1))
+        curr = [0] * (lb + 1)
+        for i in range(1, la + 1):
+            curr[0] = i
+            ca = a[i - 1]
+            for j in range(1, lb + 1):
+                cb = b[j - 1]
+                cost = 0 if ca == cb else 1
+                curr[j] = min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost)
+            prev, curr = curr, prev
+        return prev[lb]
+
     def compute_metrics(pred):
         pred_logits = pred.predictions
         pred_ids = np.argmax(pred_logits, axis=-1)
@@ -377,12 +397,18 @@ def compute_metrics_builder(tokenizer: Wav2Vec2CTCTokenizer):
         pred_str = tokenizer.batch_decode(pred_ids)
         label_str = tokenizer.batch_decode(label_ids, group_tokens=False)
 
-        # Sanitize empties to avoid jiwer errors
-        pred_str = [s if isinstance(s, str) and len(s) > 0 else "?" for s in pred_str]
-        label_str = [s if isinstance(s, str) and len(s) > 0 else "?" for s in label_str]
+        # Lowercase and sanitize
+        pred_str = [s.lower() if isinstance(s, str) else "" for s in pred_str]
+        label_str = [s.lower() if isinstance(s, str) else "" for s in label_str]
+        pred_str = [s if len(s) > 0 else "?" for s in pred_str]
+        label_str = [s if len(s) > 0 else "?" for s in label_str]
 
-        tf = jiwer.ToLowerCase()
-        cer = jiwer.cer(label_str, pred_str, truth_transform=tf, hypothesis_transform=tf)
+        total_edits = 0
+        total_chars = 0
+        for ref, hyp in zip(label_str, pred_str):
+            total_edits += _levenshtein(ref, hyp)
+            total_chars += max(1, len(ref))
+        cer = total_edits / total_chars if total_chars > 0 else 1.0
         return {"cer": cer}
 
     return compute_metrics
