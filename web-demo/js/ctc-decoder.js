@@ -9,6 +9,7 @@ class CTCDecoder {
         this.decoder = null;
         this.tokenizer = null;
         this.initialized = false;
+        this.featureExtractor = null; // Optional: use shared 37D extractor
     }
 
     async initialize(encoderPath, decoderPath, tokenizerPath) {
@@ -22,9 +23,15 @@ class CTCDecoder {
             this.decoder = await ort.InferenceSession.create(decoderPath);
             console.log('CTC Decoder loaded');
 
-            // Load tokenizer config
-            const response = await fetch(tokenizerPath);
-            this.tokenizer = await response.json();
+            // Load tokenizer config (Node vs Browser)
+            if (typeof window === 'undefined') {
+                const fs = require('fs');
+                const raw = fs.readFileSync(tokenizerPath, 'utf-8');
+                this.tokenizer = JSON.parse(raw);
+            } else {
+                const response = await fetch(tokenizerPath);
+                this.tokenizer = await response.json();
+            }
             console.log('Tokenizer loaded:', {
                 vocabSize: this.tokenizer.vocab_size,
                 specialTokens: this.tokenizer.special_tokens
@@ -38,8 +45,89 @@ class CTCDecoder {
         }
     }
 
+    setFeatureExtractor(extractor) {
+        this.featureExtractor = extractor;
+    }
+
+    // Normalize to [-1,1] and zero-start time, matching training
+    _normalizePoints(points) {
+        if (!points || points.length === 0) return [];
+        const t0 = points[0].t || 0;
+        return points.map(p => ({
+            x: (p.x ?? 0.5) * 2 - 1,
+            y: (p.y ?? 0.5) * 2 - 1,
+            t: Math.max(0, (p.t || 0) - t0)
+        }));
+    }
+
+    _determineResampleTarget(n) {
+        const shortTarget = 56, longTarget = 96, shortThresh = 48, longThresh = 112;
+        if (n <= shortThresh) return shortTarget;
+        if (n >= longThresh) return longTarget;
+        const p = (n - shortThresh) / (longThresh - shortThresh);
+        return Math.floor(shortTarget + p * (longTarget - shortTarget));
+    }
+
+    _resample(points, target) {
+        if (!points || !points.length) return [];
+        if (points.length === target) return points;
+        if (points.length === 1) return Array.from({length: target}, () => ({...points[0]}));
+        const duration = Math.max(points[points.length-1].t - points[0].t, 1.0);
+        const step = duration / Math.max(target - 1, 1);
+        const out = [];
+        let i = 0;
+        for (let k=0;k<target;k++){
+            const tt = points[0].t + step*k;
+            while (i < points.length-2 && points[i+1].t < tt) i++;
+            const p1 = points[i], p2 = points[Math.min(i+1, points.length-1)];
+            const alpha = p2.t > p1.t ? Math.min(1, Math.max(0, (tt - p1.t) / (p2.t - p1.t))) : 0;
+            out.push({ x: p1.x + (p2.x - p1.x)*alpha, y: p1.y + (p2.y - p1.y)*alpha, t: tt });
+        }
+        return out;
+    }
+
+    _ctcKeyLayout01() {
+        // Matches train_squeezeformer_ctc PersonalizedSwipeFeaturizer._get_keyboard_layout()
+        const rows = ["qwertyuiop", "asdfghjkl", "zxcvbnm"]; const layout=[];
+        for (let r=0;r<rows.length;r++){
+            const y = r * 0.33;
+            for (let c=0;c<rows[r].length;c++){
+                const ch = rows[r][c];
+                const x = (c / 10.0) + (r>0 ? 0.05*r : 0);
+                layout.push({ ch, x, y });
+            }
+        }
+        layout.push({ ch: "'", x: 0.95, y: 0.33 });
+        return layout; // 28 entries
+    }
+
+    _featurize37Exact(points) {
+        const norm = this._normalizePoints(points);
+        const target = this._determineResampleTarget(norm.length);
+        const pts = this._resample(norm, target);
+        const keys = this._ctcKeyLayout01();
+        const T = pts.length; const F = 37;
+        const out = new Float32Array(T*F);
+        for (let i=0;i<T;i++){
+            const p = pts[i]; const base = i*F;
+            out[base+0]=p.x; out[base+1]=p.y;
+            // velocity
+            if (i>0){ const prev=pts[i-1]; const dt=Math.max((p.t - prev.t)/1000.0,1e-6); out[base+2]=(p.x-prev.x)/dt; out[base+3]=(p.y-prev.y)/dt; }
+            // acceleration via central difference
+            if (i>0 && i<T-1){ const prev=pts[i-1], next=pts[i+1]; const dt_next=Math.max((next.t - p.t)/1000.0,1e-6); const vx_next=(next.x - p.x)/dt_next; const vy_next=(next.y - p.y)/dt_next; const dt_total=Math.max((next.t - prev.t)/1000.0,1e-6); out[base+4]=(vx_next - out[base+2])/dt_total; out[base+5]=(vy_next - out[base+3])/dt_total; }
+            const speed=Math.hypot(out[base+2]||0, out[base+3]||0); out[base+6]=speed; out[base+7]=speed>1e-6 ? Math.atan2(out[base+3]||0,out[base+2]||0) : 0;
+            // distances to 28 keys (in [0,1] layout; training used this despite [-1,1] coords)
+            for (let k=0;k<keys.length;k++){
+                const dx=p.x - keys[k].x, dy=p.y - keys[k].y; const dist=Math.hypot(dx,dy); out[base+8+k]=Math.exp(-dist*5);
+            }
+            // curvature
+            if (i>1 && i<T-1){ const prev=pts[i-1], next=pts[i+1]; const v1=[p.x - prev.x, p.y - prev.y]; const v2=[next.x - p.x, next.y - p.y]; const n1=Math.hypot(v1[0],v1[1]), n2=Math.hypot(v2[0],v2[1]); if (n1>1e-6 && n2>1e-6){ const cos=(v1[0]*v2[0]+v1[1]*v2[1])/(n1*n2); out[base+36]=Math.acos(Math.max(-1,Math.min(1,cos))); } }
+        }
+        return { flat: out, T };
+    }
+
     /**
-     * Resample points to target count
+     * Resample points to target count (fallback simple path)
      */
     resamplePoints(points, targetCount) {
         if (points.length === 0 || targetCount <= 0) return [];
@@ -68,64 +156,46 @@ class CTCDecoder {
     }
 
     /**
-     * Extract CTC-specific features from points
+     * Extract features from points
+     * If a shared 37D feature extractor is provided, prefer it to match training.
      */
     extractCTCFeatures(points) {
-        // CTC model expects exactly 150 points
-        const targetPoints = 150;
+        // Always use exact 37D CTC featurizer to match training
+        const exact = this._featurize37Exact(points);
+        return { flatFeatures: exact.flat, sequenceLength: exact.T, featureDim: 37 };
 
-        // Resample points to exactly 150
+        // Fallback minimal 6D features (not used when exact is available)
+        const targetPoints = 150; // fixed length fallback
         const resampledPoints = this.resamplePoints(points, targetPoints);
         const numPoints = resampledPoints.length;
         const trajectoryFeatures = new Float32Array(numPoints * 6);
-
         for (let i = 0; i < numPoints; i++) {
             const curr = resampledPoints[i];
             const prev = i > 0 ? resampledPoints[i - 1] : curr;
-
-            // Calculate velocity - matching Python implementation
             const dt = i > 0 ? Math.max((curr.t - prev.t) / 1000.0, 0.001) : 0.001;
             const vx = i > 0 ? (curr.x - prev.x) / dt : 0;
             const vy = i > 0 ? (curr.y - prev.y) / dt : 0;
-
-            // 6D features: [x, y, vx, vy, t, pressure] - matching test_ctc_python.py
-            trajectoryFeatures[i * 6 + 0] = curr.x;      // x position (already in [-1,1])
-            trajectoryFeatures[i * 6 + 1] = curr.y;      // y position (already in [-1,1])
-            trajectoryFeatures[i * 6 + 2] = vx;          // x velocity
-            trajectoryFeatures[i * 6 + 3] = vy;          // y velocity
-            trajectoryFeatures[i * 6 + 4] = curr.t / 1000.0; // time in seconds
-            trajectoryFeatures[i * 6 + 5] = 1.0;         // pressure (default to 1)
+            trajectoryFeatures[i * 6 + 0] = curr.x;
+            trajectoryFeatures[i * 6 + 1] = curr.y;
+            trajectoryFeatures[i * 6 + 2] = vx;
+            trajectoryFeatures[i * 6 + 3] = vy;
+            trajectoryFeatures[i * 6 + 4] = curr.t / 1000.0;
+            trajectoryFeatures[i * 6 + 5] = 1.0;
         }
-
-        // Find nearest keys for each point
-        const nearestKeys = new BigInt64Array(numPoints);
+        const srcMask = new Uint8Array(numPoints).fill(1);
         const keyboardLayout = this.getKeyboardLayout();
-
+        const nearestKeys = new BigInt64Array(numPoints);
         for (let i = 0; i < numPoints; i++) {
             const point = resampledPoints[i];
             let minDist = Infinity;
-            let nearestKey = 4; // Default to 'a'
-
+            let nearestKey = 0;
             for (const [char, pos] of Object.entries(keyboardLayout)) {
-                const dist = Math.sqrt((point.x - pos.x) ** 2 + (point.y - pos.y) ** 2);
-                if (dist < minDist) {
-                    minDist = dist;
-                    nearestKey = this.tokenizer.char_to_idx[char] || 4;
-                }
+                const dist = Math.hypot(point.x - pos.x, point.y - pos.y);
+                if (dist < minDist) { minDist = dist; nearestKey = this.tokenizer.char_to_idx[char] || 0; }
             }
-
             nearestKeys[i] = BigInt(nearestKey);
         }
-
-        // Create source mask (boolean array for valid positions)
-        const srcMask = new Uint8Array(numPoints).fill(1);
-
-        return {
-            trajectoryFeatures,
-            nearestKeys,
-            srcMask,
-            sequenceLength: numPoints
-        };
+        return { trajectoryFeatures, nearestKeys, srcMask, sequenceLength: numPoints };
     }
 
     /**
@@ -153,26 +223,53 @@ class CTCDecoder {
      * Run encoder on extracted features
      */
     async runEncoder(features) {
-        console.log('Encoder input features:', {
-            trajectoryShape: [1, features.sequenceLength, 6],
-            nearestKeysShape: [1, features.sequenceLength],
-            srcMaskShape: [1, features.sequenceLength]
-        });
+        if (features.flatFeatures) {
+            console.log('Encoder input features:', {
+                featuresShape: [1, features.sequenceLength, features.featureDim || 37]
+            });
+        } else {
+            console.log('Encoder input features:', {
+                trajectoryShape: [1, features.sequenceLength, 6],
+                nearestKeysShape: [1, features.sequenceLength],
+                srcMaskShape: [1, features.sequenceLength]
+            });
+        }
 
-        const inputs = {
-            'trajectory_features': new ort.Tensor('float32',
-                features.trajectoryFeatures, [1, features.sequenceLength, 6]),
-            'nearest_keys': new ort.Tensor('int64',
-                features.nearestKeys, [1, features.sequenceLength]),
-            'src_mask': new ort.Tensor('bool',
-                features.srcMask, [1, features.sequenceLength])
-        };
+        // Build inputs based on model signature
+        const inputNames = this.encoder.inputNames || Object.keys(this.encoder.inputMetadata || {});
+        let inputs;
+        if (inputNames.includes('features')) {
+            const T = features.sequenceLength;
+            const F = features.featureDim || 37;
+            if (!features.flatFeatures) throw new Error('Expected 37D features. Provide featureExtractor to CTCDecoder.');
+            inputs = {
+                'features': new ort.Tensor('float32', features.flatFeatures, [1, T, F]),
+                'feature_lengths': new ort.Tensor('int64', BigInt64Array.from([BigInt(T)]), [1])
+            };
+        } else {
+            // Legacy triple-input path (not typical for CTC export)
+            inputs = {
+                'trajectory_features': new ort.Tensor('float32',
+                    features.trajectoryFeatures, [1, features.sequenceLength, 6]),
+                'nearest_keys': new ort.Tensor('int64',
+                    features.nearestKeys, [1, features.sequenceLength]),
+                'src_mask': new ort.Tensor('bool',
+                    features.srcMask, [1, features.sequenceLength])
+            };
+        }
 
         try {
             const outputs = await this.encoder.run(inputs);
-            console.log('Encoder output received:', outputs['encoder_output'].dims);
+            // Be flexible about output name: prefer 'log_probs' (CTC), then 'encoder_output', then 'logits', else first tensor
+            let memory = outputs['log_probs'] || outputs['encoder_output'] || outputs['logits'] || null;
+            if (!memory) {
+                const first = Object.values(outputs)[0];
+                if (!first) throw new Error('No outputs from encoder session');
+                memory = first;
+            }
+            console.log('Encoder output received:', memory.dims);
             return {
-                memory: outputs['encoder_output'],
+                memory,
                 sequenceLength: features.sequenceLength
             };
         } catch (error) {
@@ -293,23 +390,27 @@ class CTCDecoder {
         // Run encoder only
         const encoderOutput = await this.runEncoder(features);
         const memory = encoderOutput.memory;
+        const dims = memory.dims || [];
+        const T = (dims.length === 3) ? dims[1] : encoderOutput.sequenceLength;
+        const D = (dims.length === 3) ? dims[2] : (dims[1] || 0);
+        const V = this.tokenizer?.vocab_size || D || 28;
+        const blankId = (this.tokenizer?.special_tokens && typeof this.tokenizer.special_tokens.blank_id === 'number')
+            ? this.tokenizer.special_tokens.blank_id : (V - 1);
 
         // If encoder outputs character probabilities directly
         // Apply CTC decoding: collapse repeated characters and remove blanks
         const sequence = [];
-        let prevChar = -1;
+        let prevId = -1;
 
-        for (let t = 0; t < encoderOutput.sequenceLength; t++) {
+        for (let t = 0; t < T; t++) {
             // Get logits for this time step
-            const logits = new Float32Array(30);
-            for (let c = 0; c < 30; c++) {
-                logits[c] = memory.data[t * 256 + c]; // Assuming first 30 dims are logits
-            }
+            const logits = new Float32Array(V);
+            for (let c = 0; c < V; c++) logits[c] = memory.data[t * D + c];
 
             // Get argmax
             let maxIdx = 0;
             let maxVal = logits[0];
-            for (let c = 1; c < 30; c++) {
+            for (let c = 1; c < V; c++) {
                 if (logits[c] > maxVal) {
                     maxVal = logits[c];
                     maxIdx = c;
@@ -317,10 +418,11 @@ class CTCDecoder {
             }
 
             // CTC collapse: only add if different from previous and not blank/special
-            if (maxIdx >= 4 && maxIdx !== prevChar) {
-                sequence.push(this.tokenizer.idx_to_char[maxIdx]);
-                prevChar = maxIdx;
+            if (maxIdx !== blankId && maxIdx !== prevId) {
+                const ch = this.tokenizer?.idx_to_char ? this.tokenizer.idx_to_char[String(maxIdx)] : '';
+                if (ch) sequence.push(ch);
             }
+            prevId = maxIdx;
         }
 
         return {
@@ -332,17 +434,23 @@ class CTCDecoder {
     /**
      * Basic prefix beam search over encoder per-frame logits (simple CTC mode)
      */
-    async beamSearchSimpleCTC(points, beamSize = 10, blankId = 0) {
+    async beamSearchSimpleCTC(points, beamSize = 10, blankId) {
         if (!this.initialized) throw new Error('CTC decoder not initialized');
         const features = this.extractCTCFeatures(points);
         const encOut = await this.runEncoder(features);
-        const memory = encOut.memory; // assume [T, D]
-        const T = encOut.sequenceLength;
-        const V = this.tokenizer.vocab_size || 30;
+        const memory = encOut.memory;
+        const dims = memory.dims || [];
+        const T = (dims.length === 3) ? dims[1] : encOut.sequenceLength;
+        const D = (dims.length === 3) ? dims[2] : (dims[1] || 0);
+        const V = this.tokenizer.vocab_size || D || 28;
+        const resolvedBlank = (blankId !== undefined && blankId !== null)
+            ? blankId
+            : ((this.tokenizer.special_tokens && typeof this.tokenizer.special_tokens.blank_id === 'number')
+                ? this.tokenizer.special_tokens.blank_id : (V - 1));
         const getLogits = (t) => {
             // Assumes logits are in first V dims (adjust if needed)
             const arr = new Float32Array(V);
-            for (let c = 0; c < V; c++) arr[c] = memory.data[t * memory.dims[1] + c];
+            for (let c = 0; c < V; c++) arr[c] = memory.data[t * D + c];
             // Convert to log-probs
             const maxv = Math.max(...arr);
             let s = 0.0; const exps = new Float32Array(V);
@@ -370,10 +478,10 @@ class CTCDecoder {
             for (const hyp of top) {
                 const seq = hyp.seq; const p_b = hyp.p_b; const p_nb = hyp.p_nb;
                 // extend blank
-                add(next, seq, p_b + lps[blankId], -Infinity);
+                add(next, seq, p_b + lps[resolvedBlank], -Infinity);
                 // extend tokens
                 for (let c=0;c<V;c++){
-                    if (c===blankId) continue;
+                    if (c===resolvedBlank) continue;
                     const last = seq.length ? seq[seq.length-1] : -1;
                     const lp = lps[c];
                     if (c===last){

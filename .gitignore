@@ -4,6 +4,7 @@ logs*/
 data/
 _pycache_/
 __pycache__/
+*.ckpt
 *.pyc
 *.pyo
 *.pyd
@@ -30,3 +31,4 @@ __pycache__/*.*
 .specstory/
 *Zone.Identifier
 **/node_modules/
+web-demo/node_modules/

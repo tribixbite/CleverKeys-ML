@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Neural Swipe Typing - Modular ONNX Demo</title>
 
-    <!-- External Dependencies -->
-    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.16.3/dist/ort.min.js"></script>
+    <!-- Dependencies: prefer local onnxruntime-web for offline tests -->
+    <script src="node_modules/onnxruntime-web/dist/ort.min.js"></script>
 
     <!-- Custom Styles -->
     <link rel="stylesheet" href="css/swipe-demo.css">
@@ -176,12 +176,15 @@
 
                 // Initialize CTC decoder
                 ctcDecoder = new CTCDecoder();
+                window.ctcDecoder = ctcDecoder;
                 // Expect encoder-only CTC (simple mode): point both to same ONNX
                 await ctcDecoder.initialize(
                     'models/ctc/gesture_model.onnx',
                     'models/ctc/gesture_model.onnx',
                     'models/ctc/tokenizer.json'
                 );
+                // Reuse the same 37D feature extractor as RNNT path
+                ctcDecoder.setFeatureExtractor(featureExtractor);
 
                 console.log('✅ RNN-T model loaded successfully');
                 updateStatus('Ready - RNN-T model loaded', 'ready');

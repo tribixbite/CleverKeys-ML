@@ -245,7 +245,7 @@ CONFIG = {
         "vocab": list("abcdefghijklmnopqrstuvwxyz'"),
     },
     "training": {
-        "batch_size": 768,
+        "batch_size": 512,
         "num_workers": 4,  # Set to 0 to avoid multiprocessing issues
         "learning_rate": 5e-4,
         "max_epochs": 500,
@@ -445,44 +445,80 @@ class GestureDataset(Dataset):
         if not cfg or cfg.get("strategy") == "none":
             return samples
 
+        word_counts = Counter(s["word"] for s in samples)
+        total_words = sum(word_counts.values())
+
         if cfg.get("strategy") == "frequency_cap":
-            # Count word frequencies
-            word_counts = Counter(s["word"] for s in samples)
-            total_words = sum(word_counts.values())
-
-            # Calculate target count for each word
             target_freq = cfg.get("target_freq", 0.0002)
-            target_counts = {
-                word: max(1, int(total_words * target_freq)) for word in word_counts
-            }
+            target_count = int(total_words * target_freq)
+            
+            # Efficiently build a list of words that are over-represented
+            oversampled_words = {word for word, count in word_counts.items() if count > target_count}
+            
+            # Create a pool of indices for words that are not oversampled
+            base_indices = [i for i, s in enumerate(samples) if s["word"] not in oversampled_words]
+            
+            # For oversampled words, create a pool of indices and sample them down
+            sampled_indices = []
+            for word in oversampled_words:
+                word_indices = [i for i, s in enumerate(samples) if s["word"] == word]
+                sampled_indices.extend(np.random.choice(word_indices, size=target_count, replace=False))
 
-            # Downsample
-            downsampled = []
-            current_counts = Counter()
-            for s in samples:
-                word = s["word"]
-                if current_counts[word] < target_counts[word]:
-                    downsampled.append(s)
-                    current_counts[word] += 1
+            final_indices = base_indices + sampled_indices
+            np.random.shuffle(final_indices)
+            return [samples[i] for i in final_indices]
 
-            return downsampled
+        # --- NEW: Weighted Sampling Logic ---
+        weights = np.ones(len(samples))
+        
+        # Get all filtering and weighting parameters from the config
+        min_len = cfg.get("min_word_length", 0)
+        max_len = cfg.get("max_word_length", float('inf'))
+        max_freq = cfg.get("max_frequency", float('inf'))
+        freq_power = cfg.get("freq_power", 0.0)
+        rare_thresh = cfg.get("rare_frequency_threshold", 0)
+        rare_boost = cfg.get("rare_word_boost", 1.0)
+        length_power = cfg.get("length_power", 0.0)
 
-        # Filter by word properties
-        filtered = samples
+        for i, s in enumerate(samples):
+            word = s["word"]
+            count = word_counts[word]
+            word_len = len(word)
 
-        if "min_word_length" in cfg:
-            filtered = [s for s in filtered if len(s["word"]) >= cfg["min_word_length"]]
+            # Apply hard filters - if a sample doesn't match, its weight is 0
+            if not (min_len <= word_len <= max_len and count <= max_freq):
+                weights[i] = 0
+                continue
 
-        if "max_word_length" in cfg:
-            filtered = [s for s in filtered if len(s["word"]) <= cfg["max_word_length"]]
+            # Apply weighting factors
+            # 1. Frequency weighting
+            if freq_power > 0:
+                weights[i] *= (1 / count) ** freq_power
+            
+            # 2. Rare word boost
+            if count <= rare_thresh:
+                weights[i] *= rare_boost
+            
+            # 3. Length weighting
+            if length_power > 0:
+                weights[i] *= word_len ** length_power
 
-        if "max_frequency" in cfg:
-            word_counts = Counter(s["word"] for s in samples)
-            filtered = [
-                s for s in filtered if word_counts[s["word"]] <= cfg["max_frequency"]
-            ]
+        # Normalize weights
+        total_weight = np.sum(weights)
+        if total_weight == 0:
+            logger.warning(f"No samples matched the sampling profile: {cfg.get('description')}. Using original samples.")
+            return samples
+            
+        probabilities = weights / total_weight
 
-        return filtered
+        # Perform weighted sampling to get a new list of samples
+        # We sample with replacement to the size of the original filtered set
+        num_to_sample = int(np.count_nonzero(weights))
+        chosen_indices = np.random.choice(
+            len(samples), size=num_to_sample, p=probabilities, replace=True
+        )
+        
+        return [samples[i] for i in chosen_indices]
 
     def __len__(self) -> int:
         return len(self.samples)
@@ -888,7 +924,7 @@ class GestureDataModule(pl.LightningDataModule):
         # Define critical IDs separately
         # The pad_id for token sequences can be anything not in vocab_map.
         # -100 is the default `ignore_index` for many PyTorch loss functions.
-        self.pad_id = -100
+        self.pad_id = 0
 
         # The blank token for CTC loss is always the last channel in the model's output.
         # Its ID is simply the number of actual characters.
@@ -996,7 +1032,7 @@ def main():
         help="Start a fresh run, ignoring latest checkpoint.",
     )
     parser.add_argument(
-        "--batch-size", type=int, default=768, help="Override batch size from config."
+        "--batch-size", type=int, default=512, help="Override batch size from config."
     )
     parser.add_argument(
         "--fast-dev-run",

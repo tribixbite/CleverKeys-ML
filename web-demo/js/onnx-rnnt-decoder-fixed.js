@@ -139,6 +139,21 @@ class RNNTDecoder {
         return { logits, h, c };
     }
 
+    _lastStepLogitsArray(tensor) {
+        if (!tensor || !tensor.data) return [];
+        const dims = tensor.dims || [];
+        const data = tensor.data;
+        if (dims.length === 0) return Array.from(data);
+        const V = dims[dims.length - 1] || 0;
+        if (V === 0) return Array.from(data);
+        const L = data.length;
+        const Ueff = Math.max(1, Math.floor(L / V));
+        const start = (Ueff - 1) * V;
+        const out = new Array(V);
+        for (let i = 0; i < V; i++) out[i] = data[start + i];
+        return out;
+    }
+
     /**
      * Load and build lexicon trie from words.txt and aligned log frequencies JSON.
      * Applies filtering to remove unsuitable entries for gesture prediction.
@@ -187,8 +202,23 @@ class RNNTDecoder {
             priors.push(logp);
         }
 
-        const charToId = this.runtimeMeta?.char_to_id || {};
-        const idToChar = this.runtimeMeta?.id_to_char || {};
+        // Build char/id mapping from runtimeMeta.tokens for joint-space ids
+        let charToId = {};
+        let idToChar = {};
+        if (Array.isArray(this.runtimeMeta?.tokens)) {
+            const toks = this.runtimeMeta.tokens;
+            for (let i = 0; i < toks.length; i++) {
+                const tok = toks[i];
+                if (!tok || tok === '<blank>' || tok === '<unk>' || tok === '<RNNT_BLANK>') continue;
+                if (/^[a-z']$/.test(tok)) {
+                    charToId[tok] = i;
+                    idToChar[String(i)] = tok;
+                }
+            }
+        } else {
+            charToId = this.runtimeMeta?.char_to_id || {};
+            idToChar = this.runtimeMeta?.id_to_char || {};
+        }
 
         // Build trie with integer character IDs
         const root = { children: new Map(), isWordEnd: false, wid: -1, logp: 0.0 };
@@ -307,8 +337,7 @@ class RNNTDecoder {
             while (symbolsEmitted < maxSymbolsPerFrame && decodedTokens.length < maxSymbols) {
                 const jointResults = await this.decoderJointSession.run(jointFeeds);
                 const picked = this._pickDecoderOutputs(jointResults);
-                const logitsTensor = picked.logits;
-                const logits = logitsTensor.data;
+                const logits = this._lastStepLogitsArray(picked.logits);
 
                 // Argmax
                 let maxVal = -Infinity;
@@ -326,8 +355,7 @@ class RNNTDecoder {
                     break;
                 } else {
                     decodedTokens.push(predictedToken);
-                    // Append non-blank to history for conditioning
-                    decodedTokens.push(predictedToken);
+                    // Prepare next symbol prediction for same time frame: extend target sequence
                     symbolsEmitted += 1;
                     // Prepare next symbol prediction for same time frame: extend target sequence
                     const last2 = decodedTokens[decodedTokens.length - 1];
@@ -485,7 +513,12 @@ class RNNTDecoder {
                     }
                     const out = await this.decoderJointSession.run(feeds);
                     const picked = this._pickDecoderOutputs(out);
-                    const probs = softmax(Array.from(picked.logits.data));
+                    if (this.verbose) {
+                        const d = picked.logits?.dims || [];
+                        console.log('[RNNT] logits dims/dataLen:', d, picked.logits?.data?.length);
+                    }
+                    const last = this._lastStepLogitsArray(picked.logits);
+                    const probs = softmax(last);
                     h = picked.h || h; c = picked.c || c;
                     // Geometry bias warm-up: strong early, decays to zero by 30% of the sequence
                     let allowedSet = null;
