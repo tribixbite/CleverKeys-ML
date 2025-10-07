@@ -33,6 +33,7 @@ import torch
 import torch.nn as nn
 from datasets import Dataset
 import jiwer
+import types
 
 from transformers import (
     Trainer,
@@ -249,6 +250,19 @@ class GestureHubertForCTC(HubertForCTC):
             self.hubert.feature_extractor.conv_layers[0].conv = new_conv
         except Exception as e:
             logger.warning(f"Falling back: could not adapt first conv layer automatically (HuBERT): {e}")
+
+        # Patch feature_extractor.forward to avoid unsqueezing when input already has channel dim
+        fe = self.hubert.feature_extractor
+
+        def _forward_patched(self_fe, hidden_states):
+            # Accept (B, T) or (B, C, T). If 2D, add channel; if 3D, assume already (B, C, T)
+            if hidden_states.dim() == 2:
+                hidden_states = hidden_states.unsqueeze(1)
+            for conv_layer in self_fe.conv_layers:
+                hidden_states = conv_layer(hidden_states)
+            return hidden_states
+
+        fe.forward = types.MethodType(_forward_patched, fe)
 
     def forward(
         self,
