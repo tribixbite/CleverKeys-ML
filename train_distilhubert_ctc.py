@@ -410,6 +410,8 @@ def main():
     val_ds = Dataset.from_list(val_data)
 
     # Preprocess: normalize points and featurize; tokenize labels
+    allowed_chars = set(DEFAULT_CONFIG["data"]["vocab_chars"])
+
     def preprocess_function(batch):
         if not batch.get("points"):
             batch["input_values"] = np.zeros((0, 37), dtype=np.float32)
@@ -426,9 +428,12 @@ def main():
             feats = featurizer(norm_points).astype(np.float32)
             batch["input_values"] = feats
 
-        # Use processor's target processor for labels
+        # Use processor's target processor for labels (letters only)
+        clean_word = "".join(c for c in batch.get("word", "").lower() if c in allowed_chars)
         with processor.as_target_processor():
-            batch["labels"] = processor.tokenizer(batch["word"].lower()).input_ids
+            batch["labels"] = processor.tokenizer(clean_word).input_ids
+        # Provide length column for grouped sampling
+        batch["input_length"] = int(batch["input_values"].shape[0]) if isinstance(batch["input_values"], np.ndarray) else 0
         return batch
 
     # Optional subsetting for quick pipeline checks (do this BEFORE map for speed)
@@ -438,6 +443,15 @@ def main():
     if args.subset_val and len(val_ds) > args.subset_val:
         logger.info(f"Subsetting val dataset to first {args.subset_val} samples (from {len(val_ds)})")
         val_ds = val_ds.select(range(args.subset_val))
+
+    # Filter out samples with too few points or that clean to empty label
+    def _filter_fn(example):
+        has_points = example.get("points") and len(example["points"]) >= DEFAULT_CONFIG["preprocess"]["min_points"]
+        word_clean = "".join(c for c in example.get("word", "").lower() if c in allowed_chars)
+        return bool(has_points and len(word_clean) > 0)
+
+    train_ds = train_ds.filter(_filter_fn)
+    val_ds = val_ds.filter(_filter_fn)
 
     logger.info("Featurizing and tokenizing...")
     train_ds = train_ds.map(preprocess_function, remove_columns=train_ds.column_names)
@@ -473,10 +487,12 @@ def main():
             logger.warning(f"Could not disable masking: {e}")
 
     # Freeze low-level feature extractor (common fine-tuning practice)
-    try:
-        model.freeze_feature_extractor()
-    except Exception:
-        pass
+    if hasattr(model, "freeze_feature_extractor"):
+        try:
+            model.freeze_feature_extractor()
+            logger.info("Froze feature extractor successfully.")
+        except Exception as e:
+            logger.warning(f"Failed to freeze feature extractor: {e}")
 
     # Training args
     fp16 = DEFAULT_CONFIG["training"]["fp16"] and (not args.no_fp16)
