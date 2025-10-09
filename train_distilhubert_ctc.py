@@ -73,7 +73,7 @@ DEFAULT_CONFIG = {
         "save_total_limit": 2,
     },
     "preprocess": {
-        "min_points": 3,
+        "min_points": 10,
     },
 }
 
@@ -197,19 +197,15 @@ class GestureWav2Vec2ForCTC(Wav2Vec2ForCTC):
 
     def __init__(self, config):
         super().__init__(config)
-        # Replace first conv to support 37-channel inputs
-        # Some configs expose conv params as lists on config.
-        try:
-            new_conv = nn.Conv1d(
-                in_channels=37,
-                out_channels=config.conv_dim[0],
-                kernel_size=config.conv_kernel[0],
-                stride=config.conv_stride[0],
-                bias=False,
-            )
-            self.wav2vec2.feature_extractor.conv_layers[0].conv = new_conv
-        except Exception as e:
-            logger.warning(f"Falling back: could not adapt first conv layer automatically: {e}")
+        # Replace first conv to support 37-channel inputs (fail fast if not possible)
+        new_conv = nn.Conv1d(
+            in_channels=37,
+            out_channels=config.conv_dim[0],
+            kernel_size=config.conv_kernel[0],
+            stride=config.conv_stride[0],
+            bias=False,
+        )
+        self.wav2vec2.feature_extractor.conv_layers[0].conv = new_conv
 
     def forward(
         self,
@@ -239,30 +235,15 @@ class GestureHubertForCTC(HubertForCTC):
 
     def __init__(self, config):
         super().__init__(config)
-        try:
-            new_conv = nn.Conv1d(
-                in_channels=37,
-                out_channels=config.conv_dim[0],
-                kernel_size=config.conv_kernel[0],
-                stride=config.conv_stride[0],
-                bias=False,
-            )
-            self.hubert.feature_extractor.conv_layers[0].conv = new_conv
-        except Exception as e:
-            logger.warning(f"Falling back: could not adapt first conv layer automatically (HuBERT): {e}")
-
-        # Patch feature_extractor.forward to avoid unsqueezing when input already has channel dim
-        fe = self.hubert.feature_extractor
-
-        def _forward_patched(self_fe, hidden_states):
-            # Accept (B, T) or (B, C, T). If 2D, add channel; if 3D, assume already (B, C, T)
-            if hidden_states.dim() == 2:
-                hidden_states = hidden_states.unsqueeze(1)
-            for conv_layer in self_fe.conv_layers:
-                hidden_states = conv_layer(hidden_states)
-            return hidden_states
-
-        fe.forward = types.MethodType(_forward_patched, fe)
+        # Replace first conv to support 37-channel inputs (fail fast if not possible)
+        new_conv = nn.Conv1d(
+            in_channels=37,
+            out_channels=config.conv_dim[0],
+            kernel_size=config.conv_kernel[0],
+            stride=config.conv_stride[0],
+            bias=False,
+        )
+        self.hubert.feature_extractor.conv_layers[0].conv = new_conv
 
     def forward(
         self,
@@ -314,33 +295,41 @@ class DataCollatorCTCWithPadding:
     padding: Union[bool, str] = True
 
     def __call__(self, features: List[Dict]) -> Dict[str, torch.Tensor]:
-        # inputs: list of dicts with "input_values" as (T, 37) numpy arrays
-        # labels: list of dicts with "labels" as 1D int lists
-        inputs = [np.asarray(f["input_values"], dtype=np.float32) for f in features]
-        labels_list = [f["labels"] for f in features]
+        # Split inputs and labels since they have to be padded differently
+        input_features = [{"input_values": f["input_values"]} for f in features]
+        label_features = [{"input_ids": f["labels"]} for f in features]
 
-        # Pad inputs manually to (B, T_max, 37)
-        feat_dim = 37
-        lengths = [arr.shape[0] for arr in inputs]
-        max_len = max(lengths) if lengths else 0
-        batch_inputs = torch.zeros((len(inputs), max_len, feat_dim), dtype=torch.float32)
-        attn_mask = torch.zeros((len(inputs), max_len), dtype=torch.long)
-        for i, arr in enumerate(inputs):
-            t = arr.shape[0]
-            if t == 0:
-                continue
-            batch_inputs[i, :t, :] = torch.from_numpy(arr)
-            attn_mask[i, :t] = 1
-
-        # Pad labels with tokenizer pad, then set masked positions to -100
-        labels_batch = self.processor.tokenizer.pad(
-            [{"input_ids": l} for l in labels_list],
+        # Use processor's built-in padding
+        batch = self.processor.feature_extractor.pad(
+            input_features,
             padding=self.padding,
             return_tensors="pt",
         )
-        labels = labels_batch["input_ids"].masked_fill(labels_batch.attention_mask.ne(1), -100)
+        labels_batch = self.processor.tokenizer.pad(
+            label_features,
+            padding=self.padding,
+            return_tensors="pt",
+        )
 
-        return {"input_values": batch_inputs, "attention_mask": attn_mask, "labels": labels}
+        # Replace padding with -100 to ignore in loss
+        labels = labels_batch["input_ids"].masked_fill(labels_batch.attention_mask.ne(1), -100)
+        batch["labels"] = labels
+
+        # Ensure inputs are (B, T, 37). Normalize shapes if needed.
+        inp = batch["input_values"]
+        if inp.dim() == 4 and inp.size(1) == 1:
+            # [B,1,37,T] -> [B,T,37]
+            batch["input_values"] = inp.squeeze(1).transpose(1, 2)
+        elif inp.dim() == 3 and inp.size(1) == 37:
+            # [B,37,T] -> [B,T,37]
+            batch["input_values"] = inp.transpose(1, 2)
+
+        # Build attention mask as 1 where any feature dim is non-zero if absent
+        if "attention_mask" not in batch:
+            x = batch["input_values"]
+            batch["attention_mask"] = (x.abs().sum(dim=-1) > 0).long()
+
+        return batch
 
 
 def build_tokenizer_and_processor(vocab_chars: str, workdir: Path) -> Tuple[Wav2Vec2Processor, Wav2Vec2CTCTokenizer, Path]:
@@ -366,26 +355,6 @@ def build_tokenizer_and_processor(vocab_chars: str, workdir: Path) -> Tuple[Wav2
 
 
 def compute_metrics_builder(tokenizer: Wav2Vec2CTCTokenizer):
-    def _levenshtein(a: str, b: str) -> int:
-        if a == b:
-            return 0
-        la, lb = len(a), len(b)
-        if la == 0:
-            return lb
-        if lb == 0:
-            return la
-        prev = list(range(lb + 1))
-        curr = [0] * (lb + 1)
-        for i in range(1, la + 1):
-            curr[0] = i
-            ca = a[i - 1]
-            for j in range(1, lb + 1):
-                cb = b[j - 1]
-                cost = 0 if ca == cb else 1
-                curr[j] = min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost)
-            prev, curr = curr, prev
-        return prev[lb]
-
     def compute_metrics(pred):
         pred_logits = pred.predictions
         pred_ids = np.argmax(pred_logits, axis=-1)
@@ -397,18 +366,12 @@ def compute_metrics_builder(tokenizer: Wav2Vec2CTCTokenizer):
         pred_str = tokenizer.batch_decode(pred_ids)
         label_str = tokenizer.batch_decode(label_ids, group_tokens=False)
 
-        # Lowercase and sanitize
-        pred_str = [s.lower() if isinstance(s, str) else "" for s in pred_str]
-        label_str = [s.lower() if isinstance(s, str) else "" for s in label_str]
-        pred_str = [s if len(s) > 0 else "?" for s in pred_str]
-        label_str = [s if len(s) > 0 else "?" for s in label_str]
+        # Lowercase and sanitize empties to avoid jiwer errors
+        pred_str = [s.lower() if isinstance(s, str) and len(s) > 0 else "?" for s in pred_str]
+        label_str = [s.lower() if isinstance(s, str) and len(s) > 0 else "?" for s in label_str]
 
-        total_edits = 0
-        total_chars = 0
-        for ref, hyp in zip(label_str, pred_str):
-            total_edits += _levenshtein(ref, hyp)
-            total_chars += max(1, len(ref))
-        cer = total_edits / total_chars if total_chars > 0 else 1.0
+        transformation = jiwer.ToLowerCase()
+        cer = jiwer.cer(label_str, pred_str, truth_transform=transformation, hypothesis_transform=transformation)
         return {"cer": cer}
 
     return compute_metrics
@@ -452,20 +415,6 @@ def main():
     val_ds = Dataset.from_list(val_data)
 
     # Preprocess: normalize points and featurize; tokenize labels
-    MIN_TEMPORAL_LEN = 400
-
-    def _resample_2d(arr: np.ndarray, new_len: int) -> np.ndarray:
-        if arr.shape[0] == new_len:
-            return arr
-        if arr.shape[0] == 0:
-            return np.zeros((new_len, arr.shape[1]), dtype=np.float32)
-        t_old = np.linspace(0.0, 1.0, arr.shape[0], endpoint=False)
-        t_new = np.linspace(0.0, 1.0, new_len, endpoint=False)
-        out = np.empty((new_len, arr.shape[1]), dtype=np.float32)
-        for d in range(arr.shape[1]):
-            out[:, d] = np.interp(t_new, t_old, arr[:, d])
-        return out
-
     def preprocess_function(batch):
         if not batch.get("points"):
             batch["input_values"] = np.zeros((0, 37), dtype=np.float32)
@@ -480,9 +429,6 @@ def main():
                 for p in batch["points"]
             ]
             feats = featurizer(norm_points).astype(np.float32)
-            # Upsample to ensure conv stack has enough temporal extent
-            if feats.shape[0] < MIN_TEMPORAL_LEN:
-                feats = _resample_2d(feats, MIN_TEMPORAL_LEN)
             batch["input_values"] = feats
 
         # Use processor's target processor for labels
