@@ -17,4 +17,12 @@ Date: 2025-10-07
   - Fail-fast conv adaptation: removed try/except around conv layer replacement in both HuBERT/W2V2 adapters. Script will error early if adaptation fails.
   - Removed feature upsampling; preserve true gesture length. Increased `min_points` from 3 -> 10 to filter ultra-short swipes.
   - Simplified collator to use `processor.feature_extractor.pad` and `tokenizer.pad`, with a small post-step to normalize to `(B, T, 37)` and build `attention_mask` when absent.
-  - Metrics now use jiwer CER with lowercase + empty-string sanitization; select best by `cer`.
+- Metrics now use jiwer CER with lowercase + empty-string sanitization; select best by `cer`.
+
+2025-10-07 (update 2)
+
+- Removed apostrophe from vocabulary and keyboard layout due to training keyboard lacking the key.
+- Cleaned labels to only a-z; samples that reduce to empty after cleaning are filtered out.
+- Switched collator to strict manual padding to `(B, T, 37)` with assertions and clear attention masks; added input_length for `group_by_length` sampler.
+- Enabled `group_by_length=True` and provided `length_column_name="input_length"`.
+- Added `empty_pred_rate` metric for visibility into empty decodes.

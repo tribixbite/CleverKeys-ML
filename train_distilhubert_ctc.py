@@ -60,7 +60,7 @@ DEFAULT_CONFIG = {
     "data": {
         "train_manifest": "data/train_final_train.jsonl",
         "val_manifest": "data/train_final_val.jsonl",
-        "vocab_chars": "abcdefghijklmnopqrstuvwxyz'",
+        "vocab_chars": "abcdefghijklmnopqrstuvwxyz",
     },
     "training": {
         "batch_size": 128,  # per device
@@ -117,7 +117,7 @@ class PersonalizedSwipeFeaturizer:
                 x_offset = 0.05 * row_idx if row_idx > 0 else 0
                 x = (col_idx / 10.0) + x_offset
                 layout[char] = (x, y)
-        layout["'"] = (0.95, 0.33)
+        # Apostrophe removed: training keyboard has no apostrophe key
         return layout
 
     def __call__(self, points: List[Dict]) -> np.ndarray:
@@ -295,41 +295,35 @@ class DataCollatorCTCWithPadding:
     padding: Union[bool, str] = True
 
     def __call__(self, features: List[Dict]) -> Dict[str, torch.Tensor]:
-        # Split inputs and labels since they have to be padded differently
-        input_features = [{"input_values": f["input_values"]} for f in features]
-        label_features = [{"input_ids": f["labels"]} for f in features]
+        # Strict manual padding to (B, T, 37)
+        xs: List[torch.Tensor] = []
+        lengths: List[int] = []
+        for f in features:
+            arr = np.asarray(f["input_values"], dtype=np.float32)
+            assert arr.ndim == 2 and arr.shape[1] == 37, f"Expected (T,37), got {arr.shape}"
+            ten = torch.from_numpy(arr)
+            xs.append(ten)
+            lengths.append(ten.shape[0])
 
-        # Use processor's built-in padding
-        batch = self.processor.feature_extractor.pad(
-            input_features,
-            padding=self.padding,
-            return_tensors="pt",
-        )
+        max_len = max(lengths) if lengths else 0
+        B = len(xs)
+        feat_dim = 37
+        input_values = torch.zeros((B, max_len, feat_dim), dtype=torch.float32)
+        attention_mask = torch.zeros((B, max_len), dtype=torch.long)
+        for i, t in enumerate(lengths):
+            if t > 0:
+                input_values[i, :t] = xs[i]
+                attention_mask[i, :t] = 1
+
+        # Labels
+        label_features = [{"input_ids": f["labels"]} for f in features]
         labels_batch = self.processor.tokenizer.pad(
             label_features,
             padding=self.padding,
             return_tensors="pt",
         )
-
-        # Replace padding with -100 to ignore in loss
         labels = labels_batch["input_ids"].masked_fill(labels_batch.attention_mask.ne(1), -100)
-        batch["labels"] = labels
-
-        # Ensure inputs are (B, T, 37). Normalize shapes if needed.
-        inp = batch["input_values"]
-        if inp.dim() == 4 and inp.size(1) == 1:
-            # [B,1,37,T] -> [B,T,37]
-            batch["input_values"] = inp.squeeze(1).transpose(1, 2)
-        elif inp.dim() == 3 and inp.size(1) == 37:
-            # [B,37,T] -> [B,T,37]
-            batch["input_values"] = inp.transpose(1, 2)
-
-        # Build attention mask as 1 where any feature dim is non-zero if absent
-        if "attention_mask" not in batch:
-            x = batch["input_values"]
-            batch["attention_mask"] = (x.abs().sum(dim=-1) > 0).long()
-
-        return batch
+        return {"input_values": input_values, "attention_mask": attention_mask, "labels": labels}
 
 
 def build_tokenizer_and_processor(vocab_chars: str, workdir: Path) -> Tuple[Wav2Vec2Processor, Wav2Vec2CTCTokenizer, Path]:
@@ -366,13 +360,14 @@ def compute_metrics_builder(tokenizer: Wav2Vec2CTCTokenizer):
         pred_str = tokenizer.batch_decode(pred_ids)
         label_str = tokenizer.batch_decode(label_ids, group_tokens=False)
 
-        # Lowercase and sanitize empties to avoid jiwer errors
-        pred_str = [s.lower() if isinstance(s, str) and len(s) > 0 else "?" for s in pred_str]
-        label_str = [s.lower() if isinstance(s, str) and len(s) > 0 else "?" for s in label_str]
+        # Track empty predictions, sanitize for CER
+        empty_pred = sum(1 for s in pred_str if not isinstance(s, str) or len(s) == 0)
+        pred_str = [s.lower() if isinstance(s, str) and len(s) > 0 else " " for s in pred_str]
+        label_str = [s.lower() if isinstance(s, str) and len(s) > 0 else " " for s in label_str]
 
         transformation = jiwer.ToLowerCase()
         cer = jiwer.cer(label_str, pred_str, truth_transform=transformation, hypothesis_transform=transformation)
-        return {"cer": cer}
+        return {"cer": cer, "empty_pred_rate": empty_pred / max(1, len(pred_str))}
 
     return compute_metrics
 
@@ -470,11 +465,12 @@ def main():
         raise ValueError(f"Unsupported encoder model_type for CTC adaptation: {cfg.model_type}")
 
     # Disable masking which expects longer sequences in HuBERT/Wav2Vec2 pretraining
-    try:
-        model.config.mask_time_prob = 0.0
-        model.config.mask_feature_prob = 0.0
-    except Exception:
-        pass
+    if hasattr(model, "config"):
+        try:
+            model.config.mask_time_prob = 0.0
+            model.config.mask_feature_prob = 0.0
+        except Exception as e:
+            logger.warning(f"Could not disable masking: {e}")
 
     # Freeze low-level feature extractor (common fine-tuning practice)
     try:
@@ -486,7 +482,8 @@ def main():
     fp16 = DEFAULT_CONFIG["training"]["fp16"] and (not args.no_fp16)
     training_args = TrainingArguments(
         output_dir=str(output_dir),
-        group_by_length=False,
+        group_by_length=True,
+        length_column_name="input_length",
         per_device_train_batch_size=args.batch_size,
         per_device_eval_batch_size=args.batch_size,
         num_train_epochs=args.epochs,
