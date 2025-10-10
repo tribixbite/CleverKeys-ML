@@ -34,7 +34,7 @@ from omegaconf import DictConfig
 import random
 import numpy as np
 import torch
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader, Dataset, Subset
 from collections import Counter
 import re
 
@@ -141,14 +141,14 @@ CONFIG: Dict[str, Any] = {
     "data": {
         "train_manifest": "data/train_final_train.jsonl",
         "val_manifest": "data/train_final_val.jsonl",
-        "vocab_path": "data/vocab.txt",
+        "vocab_path": None,  # Inline alphabet vocab by default; can be overridden via CLI
         "key_centers_path": None,  # Optional: Path to a JSON file defining keyboard layout for featurization.
         "max_trace_len": 256,  # Safety limit to prevent excessively long traces from consuming too much memory.
     },
     # --- Training Hyperparameters ---
     "training": {
-        "batch_size": 1000,  # Maximize GPU utilization on a 16GB+ card. Larger batches provide more stable gradients.
-        "num_workers": 10,  # Use multiple workers to pre-fetch data and keep the GPU saturated. Set based on CPU cores.
+        "batch_size": 512,  # Safer default for 16GB GPUs and RNNT
+        "num_workers": 4,  # Safer default; can be overridden via CLI
         "learning_rate": 2e-4,  # A conservative learning rate for the AdamW optimizer, good for stable convergence.
         "max_epochs": 500,  # Total number of training epochs (increased for multi-day training).
         "gradient_accumulation": 1,  # Accumulate gradients over multiple batches. Useful for simulating larger batch sizes on smaller GPUs.
@@ -197,7 +197,7 @@ CONFIG: Dict[str, Any] = {
     },
     # --- Validation Parameters ---
     "validation": {
-        "strategy": "inverse_sqrt_freq",  # Can also apply sampling to validation to focus evaluation on challenging cases.
+        "strategy": "none",  # Keep validation deterministic by default
         "freq_power": 0.75,
         "length_power": 1.3,
         "min_word_length": 2,
@@ -948,20 +948,34 @@ class ValidationErrorLogger(pl.Callback):
             self._logged_this_epoch += 1
 
 
-def load_vocab(vocab_path: str) -> Dict[str, int]:
-    """Loads the vocabulary file into a dictionary."""
-    vocab: Dict[str, int] = {}
-    with open(vocab_path, "r", encoding="utf-8") as fh:
-        for idx, line in enumerate(fh):
-            token = line.strip()
-            if token:
-                vocab[token] = idx
-    if "<unk>" not in vocab:
-        vocab["<unk>"] = len(vocab)
+def load_vocab(vocab_path: Optional[str]) -> Dict[str, int]:
+    """Loads vocab from file if provided, otherwise uses inline alphabet vocab."""
+    if vocab_path:
+        try:
+            vocab: Dict[str, int] = {}
+            with open(vocab_path, "r", encoding="utf-8") as fh:
+                for idx, line in enumerate(fh):
+                    token = line.strip()
+                    if token:
+                        vocab[token] = idx
+            if "<unk>" not in vocab:
+                vocab["<unk>"] = len(vocab)
+            return vocab
+        except FileNotFoundError:
+            print(f"Warning: Vocab file not found at {vocab_path}. Falling back to inline alphabet.")
+    # Inline alphabet vocab
+    letters = list("abcdefghijklmnopqrstuvwxyz")
+    vocab = {ch: i for i, ch in enumerate(letters)}
+    vocab["<unk>"] = len(vocab)
     return vocab
 
 
-def build_dataloaders(cfg: DictConfig, vocab: Dict[str, int]):
+def build_dataloaders(
+    cfg: DictConfig,
+    vocab: Dict[str, int],
+    subset_train: int = 0,
+    subset_val: int = 0,
+):
     """Builds and configures the training and validation DataLoaders."""
     featurizer = PersonalizedSwipeFeaturizer(
         cfg.data.get("key_centers_path"),
@@ -999,7 +1013,9 @@ def build_dataloaders(cfg: DictConfig, vocab: Dict[str, int]):
         is_training=False,
     )
 
-    train_weights = train_ds.compute_sampling_weights(cfg.sampling)
+    # Compute sampling weights only if training dataset is base dataset (not Subset)
+    base_train_ds = train_ds.dataset if isinstance(train_ds, Subset) else train_ds
+    train_weights = base_train_ds.compute_sampling_weights(cfg.sampling)
     train_sampler = None
     if train_weights is not None:
         train_sampler = WeightedRandomSampler(
@@ -1025,7 +1041,8 @@ def build_dataloaders(cfg: DictConfig, vocab: Dict[str, int]):
     )
 
     val_sampler = None
-    val_weights = val_ds.compute_sampling_weights(cfg.validation)
+    base_val_ds = val_ds.dataset if isinstance(val_ds, Subset) else val_ds
+    val_weights = base_val_ds.compute_sampling_weights(cfg.validation)
     if val_weights is not None:
         num_samples = min(
             len(val_weights), int(cfg.validation.get("max_samples", len(val_weights)))
@@ -1272,6 +1289,11 @@ def main() -> None:
         default=None,
         help="Path to vocab.txt",
     )
+    # Fast test and subsetting
+    parser.add_argument("--subset-train", type=int, default=0, help="Use only first N training samples")
+    parser.add_argument("--subset-val", type=int, default=0, help="Use only first N validation samples")
+    parser.add_argument("--fast-test", action="store_true", help="Use small subset (2000/400) and 1 epoch for quick verification")
+    parser.add_argument("--dry-run-first-batch", action="store_true", help="Build one train batch and run forward+loss, then exit")
     parser.add_argument(
         "--batch-size", type=int, default=None, help="Override training batch size"
     )
@@ -1316,7 +1338,8 @@ def main() -> None:
     # --- Resolve Paths and Set up Environment ---
     cfg.data.train_manifest = _resolve_path(cfg.data.train_manifest)
     cfg.data.val_manifest = _resolve_path(cfg.data.val_manifest)
-    cfg.data.vocab_path = _resolve_path(cfg.data.vocab_path)
+    if cfg.data.vocab_path:
+        cfg.data.vocab_path = _resolve_path(cfg.data.vocab_path)
     if args.train_manifest:
         cfg.data.train_manifest = _resolve_path(args.train_manifest)
     if args.val_manifest:
@@ -1363,9 +1386,18 @@ def main() -> None:
             cfg.validation.update(vprof)
             print(f"Applied validation sampling profile: {args.val_profile}")
 
+    # --- Fast test & subsetting overrides ---
+    subset_train = int(args.subset_train or (2000 if args.fast_test else 0))
+    subset_val = int(args.subset_val or (400 if args.fast_test else 0))
+    if args.fast_test:
+        cfg.training.max_epochs = 1
+        if cfg.training.batch_size > 64:
+            cfg.training.batch_size = 64
+        cfg.training.num_workers = 0 if not _has_usable_cuda() else cfg.training.num_workers
+
     # --- Build Model and DataLoaders ---
     vocab = load_vocab(cfg.data.vocab_path)
-    train_loader, val_loader = build_dataloaders(cfg, vocab)
+    train_loader, val_loader = build_dataloaders(cfg, vocab, subset_train=subset_train, subset_val=subset_val)
     nemo_cfg = build_model_config(cfg, list(vocab.keys()))
 
     # --- Scheduler max_steps computation ---
@@ -1398,7 +1430,7 @@ def main() -> None:
 
     # Prepare run directories and callbacks
     profile_tag = args.profile if args.profile else "default"
-    run_base = os.environ.get("CKS_RUN_BASE", "./9292025script")
+    run_base = os.environ.get("CKS_RUN_BASE", "./runs")
     root_dir = f"{run_base}/rnnt_checkpoints_{profile_tag}_{runtime_id}"
 
     # --- Callbacks ---
@@ -1503,6 +1535,31 @@ def main() -> None:
                 warmup_epochs=cfg.unfreezing.get("warmup_epochs", 2),
             )
         )
+
+    # --- Dry-run first batch (optional) ---
+    if args.dry_run_first_batch:
+        print("Performing dry-run on first training batch...")
+        try:
+            batch = next(iter(train_loader))
+            signal, signal_len, transcript, transcript_len = batch
+            with torch.no_grad():
+                encoded, encoded_len = model.forward(
+                    input_signal=signal, input_signal_length=signal_len
+                )
+                decoder, target_length, _ = model.decoder(
+                    targets=transcript, target_length=transcript_len
+                )
+                joint = model.joint(encoder_outputs=encoded, decoder_outputs=decoder)
+                loss_value = model.loss(
+                    log_probs=joint,
+                    targets=transcript,
+                    input_lengths=encoded_len,
+                    target_lengths=target_length,
+                )
+            print(f"[DRY] Batch shapes: signal={tuple(signal.shape)} tokens={tuple(transcript.shape)}; RNNT loss={float(loss_value)}")
+        except Exception as e:
+            print(f"Dry-run failed: {e}")
+        return
 
     # --- Trainer ---
     # Find the latest checkpoint to resume from
@@ -1610,3 +1667,8 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+    # Optional subsetting
+    if subset_train and subset_train > 0 and len(train_ds) > subset_train:
+        train_ds = Subset(train_ds, list(range(subset_train)))
+    if subset_val and subset_val > 0 and len(val_ds) > subset_val:
+        val_ds = Subset(val_ds, list(range(subset_val)))
