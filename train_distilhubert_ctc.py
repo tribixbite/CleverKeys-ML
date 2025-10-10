@@ -344,11 +344,10 @@ class DataCollatorCTCWithPadding:
         B = len(xs)
         feat_dim = 37
         input_values = torch.zeros((B, target_len, feat_dim), dtype=torch.float32)
-        attention_mask = torch.zeros((B, target_len), dtype=torch.long)
         for i, t in enumerate(lengths):
             if t > 0:
                 input_values[i, :t] = xs[i]
-                attention_mask[i, :t] = 1
+                # intentionally not building attention_mask; we omit it to avoid short-length mask issues
 
         # Labels
         label_features = [{"input_ids": f["labels"]} for f in features]
@@ -362,7 +361,6 @@ class DataCollatorCTCWithPadding:
         )
         return {
             "input_values": input_values,
-            "attention_mask": attention_mask,
             "labels": labels,
         }
 
