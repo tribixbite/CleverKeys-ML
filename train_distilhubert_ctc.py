@@ -34,6 +34,7 @@ import torch.nn as nn
 from datasets import Dataset
 import jiwer
 import types
+from torch.utils.data import SequentialSampler
 
 from transformers import (
     Trainer,
@@ -74,7 +75,7 @@ DEFAULT_CONFIG = {
         "save_total_limit": 2,
     },
     "preprocess": {
-        "min_points": 10,
+        "min_points": 120,
     },
 }
 
@@ -225,10 +226,18 @@ class GestureWav2Vec2ForCTC(Wav2Vec2ForCTC):
         labels: Optional[torch.LongTensor] = None,
     ):
         # Normalize to (B, C, T)
-        if input_values.dim() == 4 and input_values.size(1) == 1 and input_values.size(2) == 37:
+        if (
+            input_values.dim() == 4
+            and input_values.size(1) == 1
+            and input_values.size(2) == 37
+        ):
             # [B,1,37,T] -> [B,37,T]
             input_values = input_values.squeeze(1)
-        if input_values.dim() == 3 and input_values.size(2) == 37 and input_values.size(1) != 37:
+        if (
+            input_values.dim() == 3
+            and input_values.size(2) == 37
+            and input_values.size(1) != 37
+        ):
             # [B,T,37] -> [B,37,T]
             input_values = input_values.transpose(1, 2)
 
@@ -256,15 +265,23 @@ class GestureHubertForCTC(HubertForCTC):
             bias=False,
         )
         self.hubert.feature_extractor.conv_layers[0].conv = new_conv
-        
+
         # Patch feature extractor to robustly accept (B,T,37), (B,37,T), or (B,1,37,T)
         fe = self.hubert.feature_extractor
 
         def _forward_patched(self_fe, hidden_states):
             # Coerce to (B, C, T)
-            if hidden_states.dim() == 4 and hidden_states.size(1) == 1 and hidden_states.size(2) == 37:
+            if (
+                hidden_states.dim() == 4
+                and hidden_states.size(1) == 1
+                and hidden_states.size(2) == 37
+            ):
                 hidden_states = hidden_states.squeeze(1)
-            if hidden_states.dim() == 3 and hidden_states.size(2) == 37 and hidden_states.size(1) != 37:
+            if (
+                hidden_states.dim() == 3
+                and hidden_states.size(2) == 37
+                and hidden_states.size(1) != 37
+            ):
                 hidden_states = hidden_states.transpose(1, 2)
             elif hidden_states.dim() == 2:
                 hidden_states = hidden_states.unsqueeze(1)
@@ -321,49 +338,60 @@ def load_data_from_manifest(manifest_path: str) -> List[Dict]:
 
 
 @dataclass
+@dataclass
+@dataclass
 class DataCollatorCTCWithPadding:
     processor: Wav2Vec2Processor
     padding: Union[bool, str] = True
+    min_input_length: int = 400  # This is where the magic happens
 
     def __call__(self, features: List[Dict]) -> Dict[str, torch.Tensor]:
-        # Strict manual padding to (B, T, 37)
-        xs: List[torch.Tensor] = []
-        lengths: List[int] = []
-        for f in features:
-            arr = np.asarray(f["input_values"], dtype=np.float32)
-            assert arr.ndim == 2 and arr.shape[1] == 37, (
-                f"Expected (T,37), got {arr.shape}"
-            )
-            ten = torch.from_numpy(arr)
-            xs.append(ten)
-            lengths.append(ten.shape[0])
-
-        # Ensure temporal length is large enough for HuBERT conv stack (min ~400)
-        MIN_TIME_LEN = 400
-        max_len = max(lengths) if lengths else 0
-        target_len = max(max_len, MIN_TIME_LEN)
-        B = len(xs)
-        feat_dim = 37
-        input_values = torch.zeros((B, target_len, feat_dim), dtype=torch.float32)
-        for i, t in enumerate(lengths):
-            if t > 0:
-                input_values[i, :t] = xs[i]
-                # intentionally not building attention_mask; we omit it to avoid short-length mask issues
-
-        # Labels
+        input_features = [
+            np.asarray(f["input_values"], dtype=np.float32) for f in features
+        ]
         label_features = [{"input_ids": f["labels"]} for f in features]
-        labels_batch = self.processor.tokenizer.pad(
-            label_features,
-            padding=self.padding,
-            return_tensors="pt",
+
+        lengths = [arr.shape[0] for arr in input_features]
+        max_len = max(lengths) if lengths else 0
+        target_len = max(max_len, self.min_input_length)
+
+        padded_inputs = torch.zeros(
+            (len(features), target_len, 37), dtype=torch.float32
         )
+        attention_mask = torch.zeros((len(features), target_len), dtype=torch.long)
+
+        for i, arr in enumerate(input_features):
+            seq_len = arr.shape[0]
+            if seq_len > 0:
+                padded_inputs[i, :seq_len] = torch.from_numpy(arr)
+                attention_mask[i, :seq_len] = 1
+
+        labels_batch = self.processor.tokenizer.pad(
+            label_features, padding=self.padding, return_tensors="pt"
+        )
+
         labels = labels_batch["input_ids"].masked_fill(
             labels_batch.attention_mask.ne(1), -100
         )
+
         return {
-            "input_values": input_values,
+            "input_values": padded_inputs,
+            "attention_mask": attention_mask,
             "labels": labels,
         }
+
+
+class CustomTrainer(Trainer):
+    """
+    Custom Trainer that disables length-grouping for the evaluation set to
+    avoid the `ValueError` from the default evaluation sampler.
+    """
+
+    def _get_eval_sampler(
+        self, eval_dataset: Dataset
+    ) -> Optional[torch.utils.data.Sampler]:
+        # CHANGED: Force a simple SequentialSampler for evaluation
+        return SequentialSampler(eval_dataset)
 
 
 def build_tokenizer_and_processor(
@@ -407,22 +435,25 @@ def compute_metrics_builder(tokenizer: Wav2Vec2CTCTokenizer):
         pred_str = tokenizer.batch_decode(pred_ids)
         label_str = tokenizer.batch_decode(label_ids, group_tokens=False)
 
-        # Track empty predictions, sanitize for CER
-        empty_pred = sum(1 for s in pred_str if not isinstance(s, str) or len(s) == 0)
-        pred_str = [
-            s.lower() if isinstance(s, str) and len(s) > 0 else " " for s in pred_str
+        # Track empty predictions before sanitization for metrics
+        empty_pred = sum(1 for s in pred_str if not isinstance(s, str) or not s.strip())
+
+        # Sanitize both predictions and labels for jiwer.
+        # jiwer.cer can raise a ValueError if a reference string is empty or just
+        # whitespace, as its internal processing results in an empty list.
+        # We replace any such string with a placeholder to prevent this.
+        sanitized_preds = [
+            s.lower() if isinstance(s, str) and s.strip() else "[empty]"
+            for s in pred_str
         ]
-        label_str = [
-            s.lower() if isinstance(s, str) and len(s) > 0 else " " for s in label_str
+        sanitized_labels = [
+            s.lower() if isinstance(s, str) and s.strip() else "[empty]"
+            for s in label_str
         ]
 
-        transformation = jiwer.ToLowerCase()
-        cer = jiwer.cer(
-            label_str,
-            pred_str,
-            truth_transform=transformation,
-            hypothesis_transform=transformation,
-        )
+        # We've already handled casing, so no need for jiwer's transforms.
+        cer = jiwer.cer(sanitized_labels, sanitized_preds)
+
         return {"cer": cer, "empty_pred_rate": empty_pred / max(1, len(pred_str))}
 
     return compute_metrics
@@ -592,42 +623,36 @@ def main():
 
     # Model
     logger.info(f"Loading backbone: {args.pretrained_model}")
-    cfg = AutoConfig.from_pretrained(args.pretrained_model)
-    if cfg.model_type == "wav2vec2":
-        model = GestureWav2Vec2ForCTC.from_pretrained(
-            args.pretrained_model,
-            pad_token_id=processor.tokenizer.pad_token_id,
-            vocab_size=len(processor.tokenizer),
-            ignore_mismatched_sizes=True,
-        )
-    elif cfg.model_type == "hubert":
-        model = GestureHubertForCTC.from_pretrained(
-            args.pretrained_model,
-            pad_token_id=processor.tokenizer.pad_token_id,
-            vocab_size=len(processor.tokenizer),
-            ignore_mismatched_sizes=True,
-        )
-    else:
-        raise ValueError(
-            f"Unsupported encoder model_type for CTC adaptation: {cfg.model_type}"
-        )
 
+    # 1. Load the model's configuration first
+    config = AutoConfig.from_pretrained(args.pretrained_model)
+
+    # 2. Modify the configuration to be less aggressive
+    # Original strides: (5, 2, 2, 2, 2, 2). Total subsampling: 160x
+    # We reduce the strides to get a longer output sequence.
+    # New strides: (2, 2, 2, 1, 1, 1). Total subsampling: 8x
+    config.conv_stride = (2, 2, 2, 2, 1, 1, 1)
+    config.pad_token_id = processor.tokenizer.pad_token_id
+    config.vocab_size = len(processor.tokenizer)
+    config.ctc_zero_infinity = True  # Recommended for stability
+    model_class = (
+        GestureHubertForCTC if config.model_type == "hubert" else GestureWav2Vec2ForCTC
+    )
+    model = model_class.from_pretrained(
+        args.pretrained_model,
+        config=config,  # Pass the modified config here
+        ignore_mismatched_sizes=True,
+    )
     # Disable masking which expects longer sequences in HuBERT/Wav2Vec2 pretraining
-    if hasattr(model, "config"):
-        try:
-            model.config.mask_time_prob = 0.0
-            model.config.mask_feature_prob = 0.0
-        except Exception as e:
-            logger.warning(f"Could not disable masking: {e}")
+    if hasattr(model.config, "mask_time_prob"):
+        model.config.mask_time_prob = 0.0
+    if hasattr(model.config, "mask_feature_prob"):
+        model.config.mask_feature_prob = 0.0
 
     # Freeze low-level feature extractor (common fine-tuning practice)
-    if hasattr(model, "freeze_feature_extractor"):
-        try:
-            model.freeze_feature_extractor()
-            logger.info("Froze feature extractor successfully.")
-        except Exception as e:
-            logger.warning(f"Failed to freeze feature extractor: {e}")
-
+    if hasattr(model, "freeze_feature_encoder"):
+        model.freeze_feature_encoder()
+        logger.info("Froze feature encoder successfully.")
     # Training args
     fp16 = DEFAULT_CONFIG["training"]["fp16"] and (not args.no_fp16)
     training_args = TrainingArguments(
@@ -656,6 +681,7 @@ def main():
     # Optional debug callback
     callbacks = []
     if args.debug_shapes:
+
         class DebugShapesCallback(TrainerCallback):
             def on_train_batch_begin(self, args, state, control, **kwargs):
                 if state.global_step == 0:
@@ -665,27 +691,15 @@ def main():
                         logger.info(f"[DEBUG] Batch keys: {keys}")
                         for k, v in batch.items():
                             if hasattr(v, "shape"):
-                                logger.info(f"[DEBUG] {k}.shape = {tuple(v.shape)} {v.dtype}")
+                                logger.info(
+                                    f"[DEBUG] {k}.shape = {tuple(v.shape)} {v.dtype}"
+                                )
                     except Exception as e:
                         logger.warning(f"[DEBUG] Failed to log shapes: {e}")
+
         callbacks.append(DebugShapesCallback())
 
-    class CTCCustomTrainer(Trainer):
-        def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
-            labels = inputs.pop("labels")
-            outputs = model(input_values=inputs["input_values"])  # get logits only
-            logits = outputs.logits  # (B, T, V)
-            log_probs = torch.nn.functional.log_softmax(logits, dim=-1).transpose(0, 1)  # (T, B, V)
-            input_lengths = torch.full((logits.size(0),), logits.size(1), dtype=torch.long, device=logits.device)
-            target_lengths = (labels != -100).sum(-1)
-            targets = labels.masked_fill(labels == -100, model.config.pad_token_id)
-            loss_fct = torch.nn.CTCLoss(blank=model.config.pad_token_id, zero_infinity=True)
-            loss = loss_fct(log_probs, targets, input_lengths, target_lengths)
-            if return_outputs:
-                return loss, outputs
-            return loss
-
-    trainer = CTCCustomTrainer(
+    trainer = CustomTrainer(
         model=model,
         data_collator=data_collator,
         args=training_args,
@@ -698,19 +712,40 @@ def main():
     # Optional: dry-run a single batch to surface shape/forward issues immediately
     if args.dry_run_first_batch:
         from torch.utils.data import DataLoader
+
         logger.info("Dry-running first batch...")
-        dl = DataLoader(train_ds, batch_size=args.batch_size, shuffle=False,
-                        collate_fn=data_collator, num_workers=0)
+        dl = DataLoader(
+            train_ds,
+            batch_size=args.batch_size,
+            shuffle=False,
+            collate_fn=data_collator,
+            num_workers=0,
+        )
         first = next(iter(dl))
         for k, v in first.items():
             if hasattr(v, "shape"):
                 logger.info(f"[DRY] {k}.shape={tuple(v.shape)} {v.dtype}")
         model.eval()
         import traceback
+
         try:
             with torch.no_grad():
-                out = model(**{k: v for k, v in first.items() if k in ("input_values", "labels")})
-            logger.info(f"[DRY] loss={float(out.loss)}")
+                outputs = model(input_values=first["input_values"])  # logits only
+                logits = outputs.logits
+                log_probs = torch.nn.functional.log_softmax(logits, dim=-1).transpose(
+                    0, 1
+                )
+                input_lengths = torch.full(
+                    (logits.size(0),), logits.size(1), dtype=torch.long
+                )
+                labels = first["labels"]
+                target_lengths = (labels != -100).sum(-1)
+                targets = labels.masked_fill(labels == -100, model.config.pad_token_id)
+                loss_fct = torch.nn.CTCLoss(
+                    blank=model.config.pad_token_id, zero_infinity=True
+                )
+                loss = loss_fct(log_probs, targets, input_lengths, target_lengths)
+            logger.info(f"[DRY] manual_ctc_loss={float(loss)}")
         except Exception:
             logger.error("[DRY] Forward failed:\n" + traceback.format_exc())
         return
