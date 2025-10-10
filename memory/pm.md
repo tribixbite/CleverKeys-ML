@@ -26,3 +26,12 @@ Date: 2025-10-07
 - Switched collator to strict manual padding to `(B, T, 37)` with assertions and clear attention masks; added input_length for `group_by_length` sampler.
 - Enabled `group_by_length=True` and provided `length_column_name="input_length"`.
 - Added `empty_pred_rate` metric for visibility into empty decodes.
+2025-10-10
+
+- Upgraded `train_transformer_1.py` (lightweight Transformer + CTC) for mobile-feasible training:
+  - Added CLI args: `--lr`, `--warmup-steps`, `--subset-train`, `--subset-val`, `--fast-test`, `--dry-run-first-batch`.
+  - Switched to manual collator padding to strict `(B, T, 37)` with `attention_mask`.
+  - Enabled length grouping via `length_column_name="input_length"`.
+  - Replaced deprecated `evaluation_strategy` with `eval_strategy`.
+  - Added optional subset-before-map to speed fast tests.
+  - Preserved dataset paths: `data/train_final_train.jsonl`, `data/train_final_val.jsonl`.
