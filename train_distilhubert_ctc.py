@@ -223,8 +223,12 @@ class GestureWav2Vec2ForCTC(Wav2Vec2ForCTC):
         return_dict: Optional[bool] = None,
         labels: Optional[torch.LongTensor] = None,
     ):
-        # Expect (batch, time, features) -> (batch, features, time)
-        if input_values.dim() == 3:
+        # Normalize to (B, C, T)
+        if input_values.dim() == 4 and input_values.size(1) == 1 and input_values.size(2) == 37:
+            # [B,1,37,T] -> [B,37,T]
+            input_values = input_values.squeeze(1)
+        if input_values.dim() == 3 and input_values.size(2) == 37 and input_values.size(1) != 37:
+            # [B,T,37] -> [B,37,T]
             input_values = input_values.transpose(1, 2)
 
         return super().forward(
@@ -251,6 +255,23 @@ class GestureHubertForCTC(HubertForCTC):
             bias=False,
         )
         self.hubert.feature_extractor.conv_layers[0].conv = new_conv
+        
+        # Patch feature extractor to robustly accept (B,T,37), (B,37,T), or (B,1,37,T)
+        fe = self.hubert.feature_extractor
+
+        def _forward_patched(self_fe, hidden_states):
+            # Coerce to (B, C, T)
+            if hidden_states.dim() == 4 and hidden_states.size(1) == 1 and hidden_states.size(2) == 37:
+                hidden_states = hidden_states.squeeze(1)
+            if hidden_states.dim() == 3 and hidden_states.size(2) == 37 and hidden_states.size(1) != 37:
+                hidden_states = hidden_states.transpose(1, 2)
+            elif hidden_states.dim() == 2:
+                hidden_states = hidden_states.unsqueeze(1)
+            for conv_layer in self_fe.conv_layers:
+                hidden_states = conv_layer(hidden_states)
+            return hidden_states
+
+        fe.forward = types.MethodType(_forward_patched, fe)
 
     def forward(
         self,
