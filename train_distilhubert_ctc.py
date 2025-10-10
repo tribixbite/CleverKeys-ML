@@ -251,65 +251,44 @@ class GestureWav2Vec2ForCTC(Wav2Vec2ForCTC):
         )
 
 
-class GestureHubertForCTC(HubertForCTC):
-    """Adapt first conv layer to accept 37 channels for HuBERT; transpose input."""
-
+class GestureHubertModel(HubertPreTrainedModel):
     def __init__(self, config):
         super().__init__(config)
-        # Replace first conv to support 37-channel inputs (fail fast if not possible)
-        new_conv = nn.Conv1d(
-            in_channels=37,
-            out_channels=config.conv_dim[0],
-            kernel_size=config.conv_kernel[0],
-            stride=config.conv_stride[0],
-            bias=False,
-        )
-        self.hubert.feature_extractor.conv_layers[0].conv = new_conv
+        self.input_projection = nn.Linear(37, config.hidden_size)
+        self.dropout = nn.Dropout(config.feat_proj_dropout)
+        self.encoder = HubertEncoder(config)
 
-        # Patch feature extractor to robustly accept (B,T,37), (B,37,T), or (B,1,37,T)
-        fe = self.hubert.feature_extractor
-
-        def _forward_patched(self_fe, hidden_states):
-            # Coerce to (B, C, T)
-            if (
-                hidden_states.dim() == 4
-                and hidden_states.size(1) == 1
-                and hidden_states.size(2) == 37
-            ):
-                hidden_states = hidden_states.squeeze(1)
-            if (
-                hidden_states.dim() == 3
-                and hidden_states.size(2) == 37
-                and hidden_states.size(1) != 37
-            ):
-                hidden_states = hidden_states.transpose(1, 2)
-            elif hidden_states.dim() == 2:
-                hidden_states = hidden_states.unsqueeze(1)
-            for conv_layer in self_fe.conv_layers:
-                hidden_states = conv_layer(hidden_states)
-            return hidden_states
-
-        fe.forward = types.MethodType(_forward_patched, fe)
-
-    def forward(
-        self,
-        input_values,
-        attention_mask: Optional[torch.Tensor] = None,
-        output_attentions: Optional[bool] = None,
-        output_hidden_states: Optional[bool] = None,
-        return_dict: Optional[bool] = None,
-        labels: Optional[torch.LongTensor] = None,
-    ):
-        if input_values.dim() == 3:
+    def forward(self, input_values, attention_mask=None, output_attentions=None, output_hidden_states=None, return_dict=None):
+        # Expect input_values: (B, T, 37)
+        if input_values.dim() == 4 and input_values.size(1) == 1 and input_values.size(2) == 37:
+            input_values = input_values.squeeze(1).transpose(1, 2)
+        elif input_values.dim() == 3 and input_values.size(2) == 37:
+            pass
+        elif input_values.dim() == 3 and input_values.size(1) == 37:
             input_values = input_values.transpose(1, 2)
-        return super().forward(
-            input_values=input_values,
-            attention_mask=attention_mask,
+        else:
+            raise ValueError(f"Unexpected input_values shape: {tuple(input_values.shape)}")
+
+        hidden_states = self.dropout(self.input_projection(input_values))
+        extended_attention_mask = None
+        if attention_mask is not None:
+            extended_attention_mask = self.invert_attention_mask(attention_mask)
+
+        encoder_outputs = self.encoder(
+            hidden_states,
+            attention_mask=extended_attention_mask,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
-            labels=labels,
         )
+        return encoder_outputs
+
+class GestureTransformerForCTC(HubertForCTC):
+    def __init__(self, config):
+        super().__init__(config)
+        self.hubert = GestureHubertModel(config)
+        self.lm_head = nn.Linear(config.hidden_size, config.vocab_size)
+        self.init_weights()
 
 
 # -----------------------------------------------------------------------------
@@ -337,27 +316,18 @@ def load_data_from_manifest(manifest_path: str) -> List[Dict]:
     return data
 
 
-@dataclass
-@dataclass
-@dataclass
 class DataCollatorCTCWithPadding:
     processor: Wav2Vec2Processor
     padding: Union[bool, str] = True
-    min_input_length: int = 400  # This is where the magic happens
 
     def __call__(self, features: List[Dict]) -> Dict[str, torch.Tensor]:
-        input_features = [
-            np.asarray(f["input_values"], dtype=np.float32) for f in features
-        ]
+        input_features = [np.asarray(f["input_values"], dtype=np.float32) for f in features]
         label_features = [{"input_ids": f["labels"]} for f in features]
 
         lengths = [arr.shape[0] for arr in input_features]
-        max_len = max(lengths) if lengths else 0
-        target_len = max(max_len, self.min_input_length)
+        target_len = max(lengths) if lengths else 0
 
-        padded_inputs = torch.zeros(
-            (len(features), target_len, 37), dtype=torch.float32
-        )
+        padded_inputs = torch.zeros((len(features), target_len, 37), dtype=torch.float32)
         attention_mask = torch.zeros((len(features), target_len), dtype=torch.long)
 
         for i, arr in enumerate(input_features):
@@ -374,24 +344,32 @@ class DataCollatorCTCWithPadding:
             labels_batch.attention_mask.ne(1), -100
         )
 
-        return {
-            "input_values": padded_inputs,
-            "attention_mask": attention_mask,
-            "labels": labels,
-        }
+        return {"input_values": padded_inputs, "attention_mask": attention_mask, "labels": labels}
 
 
 class CustomTrainer(Trainer):
-    """
-    Custom Trainer that disables length-grouping for the evaluation set to
-    avoid the `ValueError` from the default evaluation sampler.
-    """
+    """Custom Trainer that also computes CTC loss explicitly using attention_mask."""
 
-    def _get_eval_sampler(
-        self, eval_dataset: Dataset
-    ) -> Optional[torch.utils.data.Sampler]:
-        # CHANGED: Force a simple SequentialSampler for evaluation
+    def _get_eval_sampler(self, eval_dataset: Dataset) -> Optional[torch.utils.data.Sampler]:
         return SequentialSampler(eval_dataset)
+
+    def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
+        labels = inputs.pop("labels")
+        attention_mask = inputs.get("attention_mask", None)
+        outputs = model(input_values=inputs["input_values"], attention_mask=attention_mask)
+        logits = outputs.logits  # (B, T, V)
+        log_probs = torch.nn.functional.log_softmax(logits, dim=-1).transpose(0, 1)  # (T, B, V)
+        if attention_mask is not None:
+            input_lengths = attention_mask.sum(dim=1).to(dtype=torch.long)
+        else:
+            input_lengths = torch.full((logits.size(0),), logits.size(1), dtype=torch.long, device=logits.device)
+        target_lengths = (labels != -100).sum(-1)
+        targets = labels.masked_fill(labels == -100, model.config.pad_token_id)
+        loss_fct = torch.nn.CTCLoss(blank=model.config.pad_token_id, zero_infinity=True)
+        loss = loss_fct(log_probs, targets, input_lengths, target_lengths)
+        if return_outputs:
+            return loss, outputs
+        return loss
 
 
 def build_tokenizer_and_processor(
@@ -621,38 +599,13 @@ def main():
         f"Training samples: {len(train_ds)} | Validation samples: {len(val_ds)}"
     )
 
-    # Model
-    logger.info(f"Loading backbone: {args.pretrained_model}")
-
-    # 1. Load the model's configuration first
+    # Model (new architecture: remove conv frontend, project 37D -> hidden, use transformer only)
+    logger.info(f"Loading backbone config: {args.pretrained_model}")
     config = AutoConfig.from_pretrained(args.pretrained_model)
-
-    # 2. Modify the configuration to be less aggressive
-    # Original strides: (5, 2, 2, 2, 2, 2). Total subsampling: 160x
-    # We reduce the strides to get a longer output sequence.
-    # New strides: (2, 2, 2, 1, 1, 1). Total subsampling: 8x
-    config.conv_stride = (2, 2, 2, 2, 1, 1, 1)
     config.pad_token_id = processor.tokenizer.pad_token_id
     config.vocab_size = len(processor.tokenizer)
-    config.ctc_zero_infinity = True  # Recommended for stability
-    model_class = (
-        GestureHubertForCTC if config.model_type == "hubert" else GestureWav2Vec2ForCTC
-    )
-    model = model_class.from_pretrained(
-        args.pretrained_model,
-        config=config,  # Pass the modified config here
-        ignore_mismatched_sizes=True,
-    )
-    # Disable masking which expects longer sequences in HuBERT/Wav2Vec2 pretraining
-    if hasattr(model.config, "mask_time_prob"):
-        model.config.mask_time_prob = 0.0
-    if hasattr(model.config, "mask_feature_prob"):
-        model.config.mask_feature_prob = 0.0
-
-    # Freeze low-level feature extractor (common fine-tuning practice)
-    if hasattr(model, "freeze_feature_encoder"):
-        model.freeze_feature_encoder()
-        logger.info("Froze feature encoder successfully.")
+    config.ctc_zero_infinity = True
+    model = GestureTransformerForCTC(config)
     # Training args
     fp16 = DEFAULT_CONFIG["training"]["fp16"] and (not args.no_fp16)
     training_args = TrainingArguments(
