@@ -337,11 +337,14 @@ class DataCollatorCTCWithPadding:
             xs.append(ten)
             lengths.append(ten.shape[0])
 
+        # Ensure temporal length is large enough for HuBERT conv stack (min ~400)
+        MIN_TIME_LEN = 400
         max_len = max(lengths) if lengths else 0
+        target_len = max(max_len, MIN_TIME_LEN)
         B = len(xs)
         feat_dim = 37
-        input_values = torch.zeros((B, max_len, feat_dim), dtype=torch.float32)
-        attention_mask = torch.zeros((B, max_len), dtype=torch.long)
+        input_values = torch.zeros((B, target_len, feat_dim), dtype=torch.float32)
+        attention_mask = torch.zeros((B, target_len), dtype=torch.long)
         for i, t in enumerate(lengths):
             if t > 0:
                 input_values[i, :t] = xs[i]
@@ -477,7 +480,23 @@ def main():
         default=0,
         help="Use only the first N validation samples (for quick smoke runs)",
     )
+    parser.add_argument(
+        "--fast-test",
+        action="store_true",
+        help="Run a fast test: small subset, 1 epoch, small batch, no resume",
+    )
     args = parser.parse_args()
+
+    # Fast test overrides
+    if args.fast_test:
+        if args.subset_train == 0:
+            args.subset_train = 2000
+        if args.subset_val == 0:
+            args.subset_val = 400
+        args.epochs = 1
+        if args.batch_size > 16:
+            args.batch_size = 16
+        args.no_auto_resume = True
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
