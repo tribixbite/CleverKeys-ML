@@ -670,7 +670,22 @@ def main():
                         logger.warning(f"[DEBUG] Failed to log shapes: {e}")
         callbacks.append(DebugShapesCallback())
 
-    trainer = Trainer(
+    class CTCCustomTrainer(Trainer):
+        def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
+            labels = inputs.pop("labels")
+            outputs = model(input_values=inputs["input_values"])  # get logits only
+            logits = outputs.logits  # (B, T, V)
+            log_probs = torch.nn.functional.log_softmax(logits, dim=-1).transpose(0, 1)  # (T, B, V)
+            input_lengths = torch.full((logits.size(0),), logits.size(1), dtype=torch.long, device=logits.device)
+            target_lengths = (labels != -100).sum(-1)
+            targets = labels.masked_fill(labels == -100, model.config.pad_token_id)
+            loss_fct = torch.nn.CTCLoss(blank=model.config.pad_token_id, zero_infinity=True)
+            loss = loss_fct(log_probs, targets, input_lengths, target_lengths)
+            if return_outputs:
+                return loss, outputs
+            return loss
+
+    trainer = CTCCustomTrainer(
         model=model,
         data_collator=data_collator,
         args=training_args,
@@ -691,9 +706,14 @@ def main():
             if hasattr(v, "shape"):
                 logger.info(f"[DRY] {k}.shape={tuple(v.shape)} {v.dtype}")
         model.eval()
-        with torch.no_grad():
-            out = model(**{k: v for k, v in first.items() if k in ("input_values", "labels")})
-        logger.info(f"[DRY] loss={float(out.loss)}")
+        import traceback
+        try:
+            with torch.no_grad():
+                out = model(**{k: v for k, v in first.items() if k in ("input_values", "labels")})
+            logger.info(f"[DRY] loss={float(out.loss)}")
+        except Exception:
+            logger.error("[DRY] Forward failed:\n" + traceback.format_exc())
+        return
         return
 
     # Auto-resume from latest checkpoint
