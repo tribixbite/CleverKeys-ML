@@ -63,9 +63,9 @@ DEFAULT_CONFIG = {
         "vocab_chars": "abcdefghijklmnopqrstuvwxyz",
     },
     "training": {
-        "batch_size": 128,  # per device
+        "batch_size": 512,  # per device
         "learning_rate": 3e-4,
-        "max_epochs": 100,
+        "max_epochs": 400,
         "warmup_steps": 1000,
         "fp16": torch.cuda.is_available(),
         "group_by_length": True,
@@ -93,6 +93,7 @@ logger = logging.getLogger(__name__)
 # -----------------------------------------------------------------------------
 # Feature extraction (aligned with train_squeeze2’s featurizer behavior)
 # -----------------------------------------------------------------------------
+
 
 class PersonalizedSwipeFeaturizer:
     """
@@ -124,7 +125,10 @@ class PersonalizedSwipeFeaturizer:
         if len(points) < DEFAULT_CONFIG["preprocess"]["min_points"]:
             return np.zeros((0, self.feature_dim), dtype=np.float32)
 
-        p = np.array([[pt.get("x", 0.0), pt.get("y", 0.0), pt.get("t", 0.0)] for pt in points], dtype=np.float32)
+        p = np.array(
+            [[pt.get("x", 0.0), pt.get("y", 0.0), pt.get("t", 0.0)] for pt in points],
+            dtype=np.float32,
+        )
         x, y, t = p[:, 0], p[:, 1], p[:, 2]
         num_points = len(p)
         features = np.zeros((num_points, self.feature_dim), dtype=np.float32)
@@ -180,7 +184,9 @@ class PersonalizedSwipeFeaturizer:
         denom = norm_v1 * norm_v2
         cos_angle = np.zeros(num_points, dtype=np.float32)
         valid_mask = denom > 1e-6
-        cos_angle[valid_mask] = np.clip(dot_product[valid_mask] / denom[valid_mask], -1.0, 1.0)
+        cos_angle[valid_mask] = np.clip(
+            dot_product[valid_mask] / denom[valid_mask], -1.0, 1.0
+        )
         curvature = np.arccos(cos_angle)
         curvature[0] = curvature[-1] = 0.0
         features[:, 36] = curvature
@@ -191,6 +197,7 @@ class PersonalizedSwipeFeaturizer:
 # -----------------------------------------------------------------------------
 # Custom model to accept 37-channel inputs
 # -----------------------------------------------------------------------------
+
 
 class GestureWav2Vec2ForCTC(Wav2Vec2ForCTC):
     """Adapt first conv layer to accept 37 channels; transpose input time/features."""
@@ -270,6 +277,7 @@ class GestureHubertForCTC(HubertForCTC):
 # Data loading
 # -----------------------------------------------------------------------------
 
+
 def load_data_from_manifest(manifest_path: str) -> List[Dict]:
     data: List[Dict] = []
     with open(manifest_path, "r", encoding="utf-8") as f:
@@ -283,7 +291,8 @@ def load_data_from_manifest(manifest_path: str) -> List[Dict]:
                     isinstance(item, dict)
                     and "word" in item
                     and "points" in item
-                    and len(item["points"]) >= DEFAULT_CONFIG["preprocess"]["min_points"]
+                    and len(item["points"])
+                    >= DEFAULT_CONFIG["preprocess"]["min_points"]
                 ):
                     data.append(item)
     return data
@@ -300,7 +309,9 @@ class DataCollatorCTCWithPadding:
         lengths: List[int] = []
         for f in features:
             arr = np.asarray(f["input_values"], dtype=np.float32)
-            assert arr.ndim == 2 and arr.shape[1] == 37, f"Expected (T,37), got {arr.shape}"
+            assert arr.ndim == 2 and arr.shape[1] == 37, (
+                f"Expected (T,37), got {arr.shape}"
+            )
             ten = torch.from_numpy(arr)
             xs.append(ten)
             lengths.append(ten.shape[0])
@@ -322,11 +333,19 @@ class DataCollatorCTCWithPadding:
             padding=self.padding,
             return_tensors="pt",
         )
-        labels = labels_batch["input_ids"].masked_fill(labels_batch.attention_mask.ne(1), -100)
-        return {"input_values": input_values, "attention_mask": attention_mask, "labels": labels}
+        labels = labels_batch["input_ids"].masked_fill(
+            labels_batch.attention_mask.ne(1), -100
+        )
+        return {
+            "input_values": input_values,
+            "attention_mask": attention_mask,
+            "labels": labels,
+        }
 
 
-def build_tokenizer_and_processor(vocab_chars: str, workdir: Path) -> Tuple[Wav2Vec2Processor, Wav2Vec2CTCTokenizer, Path]:
+def build_tokenizer_and_processor(
+    vocab_chars: str, workdir: Path
+) -> Tuple[Wav2Vec2Processor, Wav2Vec2CTCTokenizer, Path]:
     vocab_dict = {char: i for i, char in enumerate(vocab_chars)}
     vocab_dict["[UNK]"] = len(vocab_dict)
     vocab_dict["[PAD]"] = len(vocab_dict)
@@ -339,12 +358,17 @@ def build_tokenizer_and_processor(vocab_chars: str, workdir: Path) -> Tuple[Wav2
 
     # Instantiate tokenizer directly from vocab file to avoid incorrect class resolution.
     tokenizer = Wav2Vec2CTCTokenizer(
-        vocab_file=str(vocab_file), unk_token="[UNK]", pad_token="[PAD]", word_delimiter_token=None
+        vocab_file=str(vocab_file),
+        unk_token="[UNK]",
+        pad_token="[PAD]",
+        word_delimiter_token=None,
     )
     feature_extractor = Wav2Vec2FeatureExtractor(
         feature_size=37, sampling_rate=100, padding_value=0.0, do_normalize=False
     )
-    processor = Wav2Vec2Processor(feature_extractor=feature_extractor, tokenizer=tokenizer)
+    processor = Wav2Vec2Processor(
+        feature_extractor=feature_extractor, tokenizer=tokenizer
+    )
     return processor, tokenizer, tok_dir
 
 
@@ -362,11 +386,20 @@ def compute_metrics_builder(tokenizer: Wav2Vec2CTCTokenizer):
 
         # Track empty predictions, sanitize for CER
         empty_pred = sum(1 for s in pred_str if not isinstance(s, str) or len(s) == 0)
-        pred_str = [s.lower() if isinstance(s, str) and len(s) > 0 else " " for s in pred_str]
-        label_str = [s.lower() if isinstance(s, str) and len(s) > 0 else " " for s in label_str]
+        pred_str = [
+            s.lower() if isinstance(s, str) and len(s) > 0 else " " for s in pred_str
+        ]
+        label_str = [
+            s.lower() if isinstance(s, str) and len(s) > 0 else " " for s in label_str
+        ]
 
         transformation = jiwer.ToLowerCase()
-        cer = jiwer.cer(label_str, pred_str, truth_transform=transformation, hypothesis_transform=transformation)
+        cer = jiwer.cer(
+            label_str,
+            pred_str,
+            truth_transform=transformation,
+            hypothesis_transform=transformation,
+        )
         return {"cer": cer, "empty_pred_rate": empty_pred / max(1, len(pred_str))}
 
     return compute_metrics
@@ -376,20 +409,53 @@ def compute_metrics_builder(tokenizer: Wav2Vec2CTCTokenizer):
 # Main
 # -----------------------------------------------------------------------------
 
+
 def main():
-    parser = argparse.ArgumentParser(description="Train DistilHuBERT+CTC on gesture features")
-    parser.add_argument("--train-manifest", type=str, default=DEFAULT_CONFIG["data"]["train_manifest"])
-    parser.add_argument("--val-manifest", type=str, default=DEFAULT_CONFIG["data"]["val_manifest"])
-    parser.add_argument("--pretrained-model", type=str, default=DEFAULT_CONFIG["pretrained_model"])
+    parser = argparse.ArgumentParser(
+        description="Train DistilHuBERT+CTC on gesture features"
+    )
+    parser.add_argument(
+        "--train-manifest", type=str, default=DEFAULT_CONFIG["data"]["train_manifest"]
+    )
+    parser.add_argument(
+        "--val-manifest", type=str, default=DEFAULT_CONFIG["data"]["val_manifest"]
+    )
+    parser.add_argument(
+        "--pretrained-model", type=str, default=DEFAULT_CONFIG["pretrained_model"]
+    )
     parser.add_argument("--output-dir", type=str, default=DEFAULT_CONFIG["model_name"])
-    parser.add_argument("--batch-size", type=int, default=DEFAULT_CONFIG["training"]["batch_size"])
-    parser.add_argument("--epochs", type=int, default=DEFAULT_CONFIG["training"]["max_epochs"])
-    parser.add_argument("--lr", type=float, default=DEFAULT_CONFIG["training"]["learning_rate"])
-    parser.add_argument("--warmup-steps", type=int, default=DEFAULT_CONFIG["training"]["warmup_steps"])
-    parser.add_argument("--no-fp16", action="store_true", help="Disable fp16 even if CUDA is available")
-    parser.add_argument("--no-auto-resume", action="store_true", help="Do not auto-resume from latest checkpoint")
-    parser.add_argument("--subset-train", type=int, default=0, help="Use only the first N training samples (for quick smoke runs)")
-    parser.add_argument("--subset-val", type=int, default=0, help="Use only the first N validation samples (for quick smoke runs)")
+    parser.add_argument(
+        "--batch-size", type=int, default=DEFAULT_CONFIG["training"]["batch_size"]
+    )
+    parser.add_argument(
+        "--epochs", type=int, default=DEFAULT_CONFIG["training"]["max_epochs"]
+    )
+    parser.add_argument(
+        "--lr", type=float, default=DEFAULT_CONFIG["training"]["learning_rate"]
+    )
+    parser.add_argument(
+        "--warmup-steps", type=int, default=DEFAULT_CONFIG["training"]["warmup_steps"]
+    )
+    parser.add_argument(
+        "--no-fp16", action="store_true", help="Disable fp16 even if CUDA is available"
+    )
+    parser.add_argument(
+        "--no-auto-resume",
+        action="store_true",
+        help="Do not auto-resume from latest checkpoint",
+    )
+    parser.add_argument(
+        "--subset-train",
+        type=int,
+        default=0,
+        help="Use only the first N training samples (for quick smoke runs)",
+    )
+    parser.add_argument(
+        "--subset-val",
+        type=int,
+        default=0,
+        help="Use only the first N validation samples (for quick smoke runs)",
+    )
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir)
@@ -429,25 +495,40 @@ def main():
             batch["input_values"] = feats
 
         # Use processor's target processor for labels (letters only)
-        clean_word = "".join(c for c in batch.get("word", "").lower() if c in allowed_chars)
+        clean_word = "".join(
+            c for c in batch.get("word", "").lower() if c in allowed_chars
+        )
         with processor.as_target_processor():
             batch["labels"] = processor.tokenizer(clean_word).input_ids
         # Provide length column for grouped sampling
-        batch["input_length"] = int(batch["input_values"].shape[0]) if isinstance(batch["input_values"], np.ndarray) else 0
+        batch["input_length"] = (
+            int(batch["input_values"].shape[0])
+            if isinstance(batch["input_values"], np.ndarray)
+            else 0
+        )
         return batch
 
     # Optional subsetting for quick pipeline checks (do this BEFORE map for speed)
     if args.subset_train and len(train_ds) > args.subset_train:
-        logger.info(f"Subsetting train dataset to first {args.subset_train} samples (from {len(train_ds)})")
+        logger.info(
+            f"Subsetting train dataset to first {args.subset_train} samples (from {len(train_ds)})"
+        )
         train_ds = train_ds.select(range(args.subset_train))
     if args.subset_val and len(val_ds) > args.subset_val:
-        logger.info(f"Subsetting val dataset to first {args.subset_val} samples (from {len(val_ds)})")
+        logger.info(
+            f"Subsetting val dataset to first {args.subset_val} samples (from {len(val_ds)})"
+        )
         val_ds = val_ds.select(range(args.subset_val))
 
     # Filter out samples with too few points or that clean to empty label
     def _filter_fn(example):
-        has_points = example.get("points") and len(example["points"]) >= DEFAULT_CONFIG["preprocess"]["min_points"]
-        word_clean = "".join(c for c in example.get("word", "").lower() if c in allowed_chars)
+        has_points = (
+            example.get("points")
+            and len(example["points"]) >= DEFAULT_CONFIG["preprocess"]["min_points"]
+        )
+        word_clean = "".join(
+            c for c in example.get("word", "").lower() if c in allowed_chars
+        )
         return bool(has_points and len(word_clean) > 0)
 
     train_ds = train_ds.filter(_filter_fn)
@@ -456,7 +537,9 @@ def main():
     logger.info("Featurizing and tokenizing...")
     train_ds = train_ds.map(preprocess_function, remove_columns=train_ds.column_names)
     val_ds = val_ds.map(preprocess_function, remove_columns=val_ds.column_names)
-    logger.info(f"Training samples: {len(train_ds)} | Validation samples: {len(val_ds)}")
+    logger.info(
+        f"Training samples: {len(train_ds)} | Validation samples: {len(val_ds)}"
+    )
 
     # Model
     logger.info(f"Loading backbone: {args.pretrained_model}")
@@ -476,7 +559,9 @@ def main():
             ignore_mismatched_sizes=True,
         )
     else:
-        raise ValueError(f"Unsupported encoder model_type for CTC adaptation: {cfg.model_type}")
+        raise ValueError(
+            f"Unsupported encoder model_type for CTC adaptation: {cfg.model_type}"
+        )
 
     # Disable masking which expects longer sequences in HuBERT/Wav2Vec2 pretraining
     if hasattr(model, "config"):
@@ -507,7 +592,7 @@ def main():
         learning_rate=args.lr,
         warmup_steps=args.warmup_steps,
         save_total_limit=DEFAULT_CONFIG["training"]["save_total_limit"],
-        evaluation_strategy="epoch",
+        eval_strategy="epoch",
         save_strategy="epoch",
         load_best_model_at_end=True,
         metric_for_best_model="cer",
@@ -531,7 +616,9 @@ def main():
     # Auto-resume from latest checkpoint
     resume_from_checkpoint = None
     if not args.no_auto_resume:
-        ckpts = sorted(output_dir.glob("checkpoint-*"), key=os.path.getmtime, reverse=True)
+        ckpts = sorted(
+            output_dir.glob("checkpoint-*"), key=os.path.getmtime, reverse=True
+        )
         if ckpts:
             resume_from_checkpoint = str(ckpts[0])
             logger.info(f"Auto-resuming from: {resume_from_checkpoint}")
