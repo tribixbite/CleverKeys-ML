@@ -44,6 +44,7 @@ from transformers import (
     Wav2Vec2Processor,
     HubertForCTC,
     AutoConfig,
+    TrainerCallback,
 )
 
 
@@ -483,6 +484,11 @@ def main():
         action="store_true",
         help="Run a fast test: small subset, 1 epoch, small batch, no resume",
     )
+    parser.add_argument(
+        "--debug-shapes",
+        action="store_true",
+        help="Log first-batch input keys and tensor shapes before model forward",
+    )
     args = parser.parse_args()
 
     # Fast test overrides
@@ -642,6 +648,23 @@ def main():
     data_collator = DataCollatorCTCWithPadding(processor=processor, padding=True)
     compute_metrics = compute_metrics_builder(tokenizer)
 
+    # Optional debug callback
+    callbacks = []
+    if args.debug_shapes:
+        class DebugShapesCallback(TrainerCallback):
+            def on_train_batch_begin(self, args, state, control, **kwargs):
+                if state.global_step == 0:
+                    batch = kwargs.get("inputs", {})
+                    try:
+                        keys = list(batch.keys())
+                        logger.info(f"[DEBUG] Batch keys: {keys}")
+                        for k, v in batch.items():
+                            if hasattr(v, "shape"):
+                                logger.info(f"[DEBUG] {k}.shape = {tuple(v.shape)} {v.dtype}")
+                    except Exception as e:
+                        logger.warning(f"[DEBUG] Failed to log shapes: {e}")
+        callbacks.append(DebugShapesCallback())
+
     trainer = Trainer(
         model=model,
         data_collator=data_collator,
@@ -649,6 +672,7 @@ def main():
         compute_metrics=compute_metrics,
         train_dataset=train_ds,
         eval_dataset=val_ds,
+        callbacks=callbacks,
     )
 
     # Auto-resume from latest checkpoint
