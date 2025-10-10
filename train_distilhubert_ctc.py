@@ -489,6 +489,11 @@ def main():
         action="store_true",
         help="Log first-batch input keys and tensor shapes before model forward",
     )
+    parser.add_argument(
+        "--dry-run-first-batch",
+        action="store_true",
+        help="Build one train batch and run a forward+loss once, then exit",
+    )
     args = parser.parse_args()
 
     # Fast test overrides
@@ -674,6 +679,22 @@ def main():
         eval_dataset=val_ds,
         callbacks=callbacks,
     )
+
+    # Optional: dry-run a single batch to surface shape/forward issues immediately
+    if args.dry_run_first_batch:
+        from torch.utils.data import DataLoader
+        logger.info("Dry-running first batch...")
+        dl = DataLoader(train_ds, batch_size=args.batch_size, shuffle=False,
+                        collate_fn=data_collator, num_workers=0)
+        first = next(iter(dl))
+        for k, v in first.items():
+            if hasattr(v, "shape"):
+                logger.info(f"[DRY] {k}.shape={tuple(v.shape)} {v.dtype}")
+        model.eval()
+        with torch.no_grad():
+            out = model(**{k: v for k, v in first.items() if k in ("input_values", "labels")})
+        logger.info(f"[DRY] loss={float(out.loss)}")
+        return
 
     # Auto-resume from latest checkpoint
     resume_from_checkpoint = None
