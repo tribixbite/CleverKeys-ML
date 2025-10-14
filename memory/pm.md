@@ -31,7 +31,38 @@ Date: 2025-10-07
 - Upgraded `train_transformer_1.py` (lightweight Transformer + CTC) for mobile-feasible training:
   - Added CLI args: `--lr`, `--warmup-steps`, `--subset-train`, `--subset-val`, `--fast-test`, `--dry-run-first-batch`.
   - Switched to manual collator padding to strict `(B, T, 37)` with `attention_mask`.
-  - Enabled length grouping via `length_column_name="input_length"`.
-  - Replaced deprecated `evaluation_strategy` with `eval_strategy`.
-  - Added optional subset-before-map to speed fast tests.
-  - Preserved dataset paths: `data/train_final_train.jsonl`, `data/train_final_val.jsonl`.
+- Enabled length grouping via `length_column_name="input_length"`.
+- Replaced deprecated `evaluation_strategy` with `eval_strategy`.
+- Added optional subset-before-map to speed fast tests.
+- Preserved dataset paths: `data/train_final_train.jsonl`, `data/train_final_val.jsonl`.
+
+2025-10-14
+
+- Improved CUDA probing in `new/train_transducer_personalized.py`:
+  - `_has_usable_cuda()` now returns `torch.cuda.device_count() > 0 and torch.cuda.is_initialized()` to avoid lazy-init quirks.
+- Optional mixed precision with autocast:
+  - Added CLI flag `--autocast-bf16`. When provided and BF16 is supported, wraps training/validation/test forward paths in `torch.cuda.amp.autocast(dtype=torch.bfloat16)`.
+  - When enabled, Trainer precision is forced to `"32-true"` to avoid double autocast with Lightning; otherwise, existing precision config remains (default `bf16-mixed`).
+  - Does not alter data logging/dry-run helpers beyond core forward path.
+- Decoupled feature dimension from model config and vectorized featurization:
+   - Removed hardcoded `FINAL_FEATURE_COUNT=37` and padding in `PersonalizedSwipeFeaturizer`.
+   - `PersonalizedSwipeFeaturizer.feature_dim` now reports the active feature count dynamically based on `FEATURE_NAMES` (mobile vs full).
+   - `build_dataloaders()` now returns `(train_loader, val_loader, feature_dim)` and `build_model_config(..., feature_dim)` wires `encoder.feat_in` to the dynamic value.
+   - Rewrote featurizer to use NumPy vectorized ops for velocity/acceleration, angles/curvature, nearest-key distances, and 5-frame window stats (with a safe fallback). This significantly reduces per-batch CPU overhead.
+ - Small structure refactor:
+  - Extracted `try_compile_model(model, resume_from)` and `build_callbacks(cfg, args, root_dir)` to simplify `main()`.
+  - Added basic logging via Python `logging` and converted several key prints to `log.info` for cleaner long-run logs.
+  - Improved checkpoint selection semantics: prefer explicit `--checkpoint` if it exists; otherwise fall back to latest discovered checkpoint.
+  - Added `DISABLE_COMPILE` env var guard with explicit skip message.
+  - Fast test now reduces validation load (`limit_batches=0.1`).
+  - `load_key_centers` is now memoized with `lru_cache(maxsize=1)` to avoid redundant loads across workers.
+
+2025-10-14 (update)
+
+- Added conditional coordinate normalization to `new/train_transducer_personalized.py`:
+  - Added `--normalize` CLI flag to control coordinate normalization behavior.
+  - When `--normalize` is passed, coordinates are transformed from [0,1] to [-1,1] (original behavior).
+  - When `--normalize` is NOT passed, assumes data is already in [-1,1] coordinate system and skips normalization.
+  - Updated `PersonalizedSwipeDataset` to accept `normalize_coords` parameter and pass it to `_prepare_points()`.
+  - Modified `_prepare_points()` to conditionally apply normalization based on flag.
+  - Still applies clamping to [-1.5, 1.5] in both cases for safety.

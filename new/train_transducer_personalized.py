@@ -145,11 +145,11 @@ CONFIG: Dict[str, Any] = {
     # These are now default values, overrideable via command-line arguments
     # for better portability and experiment management.
     "data": {
-        "train_manifest": "data/train_final_train.jsonl",
-        "val_manifest": "data/train_final_val.jsonl",
+        "train_manifest": "data/val_futo_filtered_norm.jsonl",
+        "val_manifest": "data/train_futo_filtered_norm.jsonl",
         "vocab_path": None,  # Inline alphabet vocab by default; can be overridden via CLI
         "key_centers_path": None,  # Optional: Path to a JSON file defining keyboard layout for featurization.
-        "max_trace_len": 256,  # Safety limit to prevent excessively long traces from consuming too much memory.
+        "max_trace_len": 512,  # Safety limit to prevent excessively long traces from consuming too much memory.
     },
     # --- Training Hyperparameters ---
     "training": {
@@ -184,10 +184,10 @@ CONFIG: Dict[str, Any] = {
     # --- Preprocessing ---
     "preprocess": {
         # Adaptive resampling normalizes gesture length for robustness and efficient batching.
-        "resample_short_target": 56,  # Target frame count for shorter swipes. Ensures a minimum information density.
-        "resample_long_target": 96,  # Target frame count for longer swipes. Compresses long gestures to a manageable length.
-        "resample_short_threshold": 48,  # Gestures shorter than this are considered "short".
-        "resample_long_threshold": 112,  # Gestures longer than this are considered "long".
+        "resample_short_target": 64,  # Target frame count for shorter swipes. Ensures a minimum information density.
+        "resample_long_target": 160,  # Target frame count for longer swipes. Compresses long gestures to a manageable length.
+        "resample_short_threshold": 64,  # Gestures shorter than this are considered "short".
+        "resample_long_threshold": 180,  # Gestures longer than this are considered "long".
     },
     # --- Weighted Sampling Strategy ---
     # This is critical for building a robust model that handles rare words well.
@@ -617,6 +617,7 @@ class PersonalizedSwipeDataset(Dataset):
         featurizer: PersonalizedSwipeFeaturizer,
         augmenter: Optional["SwipeAugmentation"] = None,
         is_training: bool = False,
+        normalize_coords: bool = True,
     ) -> None:
         super().__init__()
         self.manifest_path = manifest_path
@@ -626,6 +627,7 @@ class PersonalizedSwipeDataset(Dataset):
         self.featurizer = featurizer
         self.augmenter = augmenter
         self.is_training = is_training
+        self.normalize_coords = normalize_coords
         self.samples: List[Dict[str, Any]] = []
 
         try:
@@ -652,7 +654,7 @@ class PersonalizedSwipeDataset(Dataset):
 
         raw_points = item["points"][: self.max_trace_len]
 
-        normalized = self._prepare_points(raw_points)
+        normalized = self._prepare_points(raw_points, self.normalize_coords)
         target_len = determine_resample_target(len(normalized), self.preprocess_cfg)
         processed = resample_points(normalized, target_len)
 
@@ -728,8 +730,8 @@ class PersonalizedSwipeDataset(Dataset):
         return weights_arr
 
     @staticmethod
-    def _prepare_points(points: List[Dict[str, Any]]) -> List[Dict[str, float]]:
-        """Prepares raw points by transforming from [0, 1] to [-1, 1] and making time relative."""
+    def _prepare_points(points: List[Dict[str, Any]], normalize_coords: bool = True) -> List[Dict[str, float]]:
+        """Prepares raw points by optionally transforming from [0, 1] to [-1, 1] and making time relative."""
         if not points:
             return []
         start_t = float(points[0].get("t", 0.0))
@@ -738,15 +740,21 @@ class PersonalizedSwipeDataset(Dataset):
             raw_x = float(pt.get("x", 0.0))
             raw_y = float(pt.get("y", 0.0))
 
-            # Transform coordinates from [0, 1] to [-1, 1]
-            # Dataset has (0,0) at top-left Q key, we need (0,0) at keyboard center
-            centered_x = raw_x * 2.0 - 1.0
-            centered_y = raw_y * 2.0 - 1.0
+            if normalize_coords:
+                # Transform coordinates from [0, 1] to [-1, 1]
+                # Dataset has (0,0) at top-left Q key, we need (0,0) at keyboard center
+                centered_x = raw_x * 2.0 - 1.0
+                centered_y = raw_y * 2.0 - 1.0
 
-            # Allow for out-of-bounds gestures (finger went off keyboard)
-            # but cap at reasonable limits to prevent extreme values
-            centered_x = clamp(centered_x, -1.5, 1.5)
-            centered_y = clamp(centered_y, -1.5, 1.5)
+                # Allow for out-of-bounds gestures (finger went off keyboard)
+                # but cap at reasonable limits to prevent extreme values
+                centered_x = clamp(centered_x, -1.5, 1.5)
+                centered_y = clamp(centered_y, -1.5, 1.5)
+            else:
+                # Assume data is already in [-1, 1] coordinate system
+                # Still apply clamping for safety
+                centered_x = clamp(raw_x, -1.5, 1.5)
+                centered_y = clamp(raw_y, -1.5, 1.5)
 
             raw_t = float(pt.get("t", idx * 10.0))
             prepared.append(
@@ -810,7 +818,9 @@ class PersonalizedRNNTModel(nemo_asr.models.EncDecRNNTModel):
 
     def _init_teacher(self, checkpoint: str) -> None:
         """Initializes a frozen teacher model for knowledge distillation."""
-        logging.getLogger("train_rnnt").info(f"Loading teacher model from: {checkpoint}")
+        logging.getLogger("train_rnnt").info(
+            f"Loading teacher model from: {checkpoint}"
+        )
         self.teacher = nemo_asr.models.EncDecRNNTModel.restore_from(
             checkpoint, map_location="cpu"
         )
@@ -1046,6 +1056,7 @@ def build_dataloaders(
     vocab: Dict[str, int],
     subset_train: int = 0,
     subset_val: int = 0,
+    normalize_coords: bool = True,
 ):
     """Builds and configures the training and validation DataLoaders."""
     featurizer = PersonalizedSwipeFeaturizer(
@@ -1073,6 +1084,7 @@ def build_dataloaders(
         featurizer=featurizer,
         augmenter=augmenter,
         is_training=True,
+        normalize_coords=normalize_coords,
     )
     val_ds = PersonalizedSwipeDataset(
         manifest_path=cfg.data.val_manifest,
@@ -1082,6 +1094,7 @@ def build_dataloaders(
         featurizer=featurizer,
         augmenter=None,
         is_training=False,
+        normalize_coords=normalize_coords,
     )
 
     # Compute sampling weights only if training dataset is base dataset (not Subset)
@@ -1288,7 +1301,9 @@ def try_compile_model(model, resume_from: Optional[str]) -> None:
     """Attempt to compile model with torch.compile for speed if safe to do so."""
     if resume_from or os.environ.get("DISABLE_COMPILE", "0") != "0":
         if resume_from:
-            print("Skipping torch.compile when resuming from checkpoint (avoids state dict issues)")
+            print(
+                "Skipping torch.compile when resuming from checkpoint (avoids state dict issues)"
+            )
         elif os.environ.get("DISABLE_COMPILE", "0") != "0":
             print("Skipping torch.compile (disabled via DISABLE_COMPILE env var)")
         return
@@ -1587,6 +1602,11 @@ def main() -> None:
         default=None,
         help="Override maximum training epochs",
     )
+    parser.add_argument(
+        "--normalize",
+        action="store_true",
+        help="Normalize coordinates from [0,1] to [-1,1]. If not set, assumes data is already in [-1,1]",
+    )
     args = parser.parse_args()
 
     # --- Seeding & matmul precision ---
@@ -1656,12 +1676,16 @@ def main() -> None:
         prof = load_sampling_profile(args.profile)
         if prof:
             cfg.sampling.update(prof)
-            logging.getLogger("train_rnnt").info(f"Applied training sampling profile: {args.profile}")
+            logging.getLogger("train_rnnt").info(
+                f"Applied training sampling profile: {args.profile}"
+            )
     if args.val_profile:
         vprof = load_sampling_profile(args.val_profile)
         if vprof:
             cfg.validation.update(vprof)
-            logging.getLogger("train_rnnt").info(f"Applied validation sampling profile: {args.val_profile}")
+            logging.getLogger("train_rnnt").info(
+                f"Applied validation sampling profile: {args.val_profile}"
+            )
 
     # --- Fast test & subsetting overrides ---
     subset_train = int(args.subset_train or (2000 if args.fast_test else 0))
@@ -1682,7 +1706,7 @@ def main() -> None:
     # --- Build Model and DataLoaders ---
     vocab = load_vocab(cfg.data.vocab_path)
     train_loader, val_loader, feature_dim = build_dataloaders(
-        cfg, vocab, subset_train=subset_train, subset_val=subset_val
+        cfg, vocab, subset_train=subset_train, subset_val=subset_val, normalize_coords=args.normalize
     )
     nemo_cfg = build_model_config(cfg, list(vocab.keys()), feature_dim)
     # Avoid Numba JIT/caching issues in librosa on restricted environments
@@ -1774,7 +1798,9 @@ def main() -> None:
             ckpt_path = maybe
             print(f"Using specified checkpoint: {ckpt_path}")
         else:
-            print(f"Warning: specified checkpoint not found: {maybe}. Falling back to latest.")
+            print(
+                f"Warning: specified checkpoint not found: {maybe}. Falling back to latest."
+            )
     if ckpt_path is None:
         ckpt_path = find_latest_checkpoint(None)
 
@@ -1811,5 +1837,5 @@ def main() -> None:
 
 if __name__ == "__main__":
     # Basic logging setup for CLI runs
-    logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(message)s')
+    logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(message)s")
     main()
