@@ -26,9 +26,12 @@ import math
 import os
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
+import logging
+from functools import lru_cache
 
 import lightning.pytorch as pl
 from lightning.pytorch.callbacks import ModelCheckpoint
+from numba import njit
 from torch.utils.data import WeightedRandomSampler
 from omegaconf import DictConfig
 import random
@@ -39,6 +42,9 @@ from collections import Counter
 import re
 
 import nemo.collections.asr as nemo_asr
+import torch.nn as nn
+
+# (Helper functions clamp and load_key_centers are assumed to exist as in the original script)
 
 try:
     from nemo.collections.asr.data.audio_to_text import DALIOutputs  # type: ignore
@@ -239,16 +245,28 @@ CONFIG: Dict[str, Any] = {
 
 
 def _has_usable_cuda() -> bool:
-    """Robust CUDA availability check that tolerates driver hiccups."""
+    """More conservative CUDA check to avoid lazy-init side effects.
+
+    Uses device_count() and is_initialized() to decide if CUDA is already
+    initialized and has visible devices, which helps skip first-touch lazy
+    initialization quirks in some environments.
+    """
     try:
-        if not torch.cuda.is_available():
-            return False
-        if torch.cuda.device_count() <= 0:
-            return False
-        _ = torch.cuda.current_device()
-        return True
+        return bool(torch.cuda.device_count() > 0 and torch.cuda.is_initialized())
     except Exception as exc:  # pragma: no cover - defensive guard
         print(f"CUDA probe failed ({exc}); falling back to CPU")
+        return False
+
+
+def _supports_bf16() -> bool:
+    """Checks whether the current CUDA device stack supports BF16 autocast."""
+    try:
+        return bool(
+            torch.cuda.is_available()
+            and hasattr(torch.cuda, "is_bf16_supported")
+            and torch.cuda.is_bf16_supported()
+        )
+    except Exception:
         return False
 
 
@@ -324,6 +342,7 @@ def resample_points(
     return resampled
 
 
+@lru_cache(maxsize=1)
 def load_key_centers(path: Optional[str]) -> List[Tuple[str, float, float]]:
     """Loads key centers from a JSON file or returns a default QWERTY layout."""
     if path:
@@ -331,8 +350,8 @@ def load_key_centers(path: Optional[str]) -> List[Tuple[str, float, float]]:
             with open(_resolve_path(path), "r") as f:
                 return json.load(f)
         except Exception as e:
-            print(
-                f"Warning: Could not load key centers from {path}. Using default. Error: {e}"
+            logging.getLogger("train_rnnt").warning(
+                f"Could not load key centers from {path}. Using default. Error: {e}"
             )
 
     layout = ["qwertyuiop", "asdfghjkl", "zxcvbnm"]
@@ -422,104 +441,114 @@ class PersonalizedSwipeFeaturizer:
         self.FEATURE_NAMES = (
             self.MOBILE_FEATURE_NAMES if mobile_features else self.FULL_FEATURE_NAMES
         )
-        # Expected final feature width for the model
-        self.FINAL_FEATURE_COUNT = 37
-        self.feature_dim = len(self.FEATURE_NAMES)
+
+    @property
+    def feature_dim(self) -> int:
+        return len(self.FEATURE_NAMES)
 
     def __call__(self, points: Iterable[Dict[str, float]]) -> np.ndarray:
         pts = list(points)
         if not pts:
-            return np.zeros((1, self.FINAL_FEATURE_COUNT), dtype=np.float32)
+            return np.zeros((1, self.feature_dim), dtype=np.float32)
 
-        vectors: List[np.ndarray] = []
-        for idx in range(len(pts)):
-            vectors.append(self._compute_feature_vector(pts, idx))
-        return np.stack(vectors, axis=0).astype(np.float32)
-
-    def _compute_feature_vector(
-        self, points: List[Dict[str, float]], idx: int
-    ) -> np.ndarray:
-        # This method computes a single feature vector for one point in the swipe.
-        # It captures kinematics, trajectory shape, and spatial/temporal context.
-        total = len(points)
-        curr = points[idx]
-        prev = points[idx - 1] if idx > 0 else None
-        prev2 = points[idx - 2] if idx > 1 else None
-
-        # --- Basic Kinematics ---
-        x = clamp(float(curr.get("x", 0.0)), -1.0, 1.0)
-        y = clamp(float(curr.get("y", 0.0)), -1.0, 1.0)
-        t_ms = float(curr.get("t", idx * 10.0))
+        # Convert to arrays
+        x = np.asarray(
+            [clamp(float(p.get("x", 0.0)), -1.0, 1.0) for p in pts], dtype=np.float32
+        )
+        y = np.asarray(
+            [clamp(float(p.get("y", 0.0)), -1.0, 1.0) for p in pts], dtype=np.float32
+        )
+        t_ms = np.asarray(
+            [float(p.get("t", i * 10.0)) for i, p in enumerate(pts)], dtype=np.float32
+        )
         t_seconds = t_ms / 1000.0
 
-        # --- Velocity ---
-        vx = vy = speed = 0.0
-        if prev:
-            dt = max((t_ms - float(prev.get("t", 0.0))) / 1000.0, 1e-6)
-            vx = (x - float(prev.get("x", x))) / dt
-            vy = (y - float(prev.get("y", y))) / dt
-            speed = math.hypot(vx, vy)
+        # dt with safe epsilon
+        dt = np.diff(t_seconds, prepend=t_seconds[0])
+        dt[dt == 0] = 1e-6
 
-        # --- Acceleration ---
-        ax = ay = acc = 0.0
-        if prev and prev2:
-            dt1 = max((t_ms - float(prev.get("t", 0.0))) / 1000.0, 1e-6)
-            dt2 = max(
-                (float(prev.get("t", 0.0)) - float(prev2.get("t", 0.0))) / 1000.0, 1e-6
-            )
-            vx_prev = (float(prev.get("x", 0.0)) - float(prev2.get("x", 0.0))) / dt2
-            vy_prev = (float(prev.get("y", 0.0)) - float(prev2.get("y", 0.0))) / dt2
-            ax = (vx - vx_prev) / dt1
-            ay = (vy - vy_prev) / dt1
-            acc = math.hypot(ax, ay)
+        # Velocity
+        dx = np.diff(x, prepend=x[0])
+        dy = np.diff(y, prepend=y[0])
+        vx = dx / dt
+        vy = dy / dt
+        speed = np.sqrt(vx * vx + vy * vy)
 
-        # --- Trajectory Shape ---
-        angle = math.atan2(vy, vx) if prev else 0.0
-        curvature = 0.0
-        if prev and prev2:
-            prev_angle = math.atan2(
-                float(prev.get("y", 0.0)) - float(prev2.get("y", 0.0)),
-                float(prev.get("x", 0.0)) - float(prev2.get("x", 0.0)),
-            )
-            curvature = angle - prev_angle
-            while curvature > math.pi:
-                curvature -= 2 * math.pi
-            while curvature < -math.pi:
-                curvature += 2 * math.pi
+        # Acceleration
+        dvx = np.diff(vx, prepend=vx[0])
+        dvy = np.diff(vy, prepend=vy[0])
+        ax = dvx / dt
+        ay = dvy / dt
+        acc = np.sqrt(ax * ax + ay * ay)
 
-        # --- Spatial Context: Distances to 5 nearest keyboard keys ---
-        key_distances = sorted(
-            [math.hypot(x - kx, y - ky) for _, kx, ky in self.key_centers]
-        )[:5]
-        while len(key_distances) < 5:
-            key_distances.append(1.0)
+        # Angles and curvature
+        angle = np.arctan2(vy, vx)
+        angle_sin = np.sin(angle)
+        angle_cos = np.cos(angle)
+        prev_angle = np.roll(angle, 1)
+        prev_angle[0] = angle[0]
+        curvature = angle - prev_angle
+        curvature = (curvature + np.pi) % (2 * np.pi) - np.pi
 
-        # --- Temporal Context ---
-        progress = idx / max(total - 1, 1)
-        is_start = 1.0 if idx == 0 else 0.0
-        is_end = 1.0 if idx == total - 1 else 0.0
-
-        # --- Windowed Stats: Captures local trajectory stability and shape ---
-        win_pts = points[max(0, idx - 2) : min(total, idx + 3)]
-        if len(win_pts) > 1:
-            xs = [p["x"] for p in win_pts]
-            ys = [p["y"] for p in win_pts]
-            win_mean_x, win_std_x = float(np.mean(xs)), float(np.std(xs))
-            win_mean_y, win_std_y = float(np.mean(ys)), float(np.std(ys))
-            win_range_x, win_range_y = max(xs) - min(xs), max(ys) - min(ys)
+        # Distances to nearest keys (vectorized)
+        if len(self.key_centers) > 0:
+            kc = np.asarray(
+                [[kx, ky] for _, kx, ky in self.key_centers], dtype=np.float32
+            )  # (K,2)
+            pts_xy = np.stack([x, y], axis=1)  # (N,2)
+            diffs = pts_xy[:, None, :] - kc[None, :, :]  # (N,K,2)
+            dists = np.sqrt(np.sum(diffs * diffs, axis=2))  # (N,K)
+            nearest = np.sort(dists, axis=1)[:, :5]
+            # Pad if fewer than 5 keys
+            if nearest.shape[1] < 5:
+                pad = np.full(
+                    (nearest.shape[0], 5 - nearest.shape[1]), 1.0, dtype=np.float32
+                )
+                nearest = np.concatenate([nearest, pad], axis=1)
+            dist_key1, dist_key2, dist_key3, dist_key4, dist_key5 = [
+                nearest[:, i] for i in range(5)
+            ]
         else:
-            win_mean_x, win_std_x, win_mean_y, win_std_y, win_range_x, win_range_y = (
-                x,
-                0.0,
-                y,
-                0.0,
-                0.0,
-                0.0,
-            )
+            dist_key1 = dist_key2 = dist_key3 = dist_key4 = dist_key5 = np.ones_like(x)
 
-        # --- Assemble Feature Vector ---
-        # This dictionary-based approach is more robust than a simple list.
-        feature_dict = {
+        # Temporal context
+        n = x.shape[0]
+        if n > 1:
+            progress = np.linspace(0.0, 1.0, n, dtype=np.float32)
+        else:
+            progress = np.zeros(1, dtype=np.float32)
+        is_start = np.zeros(n, dtype=np.float32)
+        is_end = np.zeros(n, dtype=np.float32)
+        is_start[0] = 1.0
+        is_end[-1] = 1.0
+
+        # Windowed stats (size=5) using sliding windows
+        try:
+            from numpy.lib.stride_tricks import sliding_window_view
+
+            win = 5
+            pad = win // 2
+            x_pad = np.pad(x, (pad, pad), mode="edge")
+            y_pad = np.pad(y, (pad, pad), mode="edge")
+            x_win = sliding_window_view(x_pad, win)  # (N,win)
+            y_win = sliding_window_view(y_pad, win)
+            win_mean_x = np.mean(x_win, axis=1)
+            win_mean_y = np.mean(y_win, axis=1)
+            win_std_x = np.std(x_win, axis=1)
+            win_std_y = np.std(y_win, axis=1)
+            win_range_x = np.max(x_win, axis=1) - np.min(x_win, axis=1)
+            win_range_y = np.max(y_win, axis=1) - np.min(y_win, axis=1)
+        except Exception:
+            # Fallback: zeros if sliding_window_view unavailable
+            win_mean_x = x
+            win_mean_y = y
+            win_std_x = np.zeros_like(x)
+            win_std_y = np.zeros_like(y)
+            win_range_x = np.zeros_like(x)
+            win_range_y = np.zeros_like(y)
+
+        # Build feature map and assemble in configured order
+        fmap = {
             "x": x,
             "y": y,
             "t_seconds": t_seconds,
@@ -530,14 +559,14 @@ class PersonalizedSwipeFeaturizer:
             "ay": ay,
             "acc": acc,
             "angle": angle,
-            "angle_sin": math.sin(angle),
-            "angle_cos": math.cos(angle),
+            "angle_sin": angle_sin,
+            "angle_cos": angle_cos,
             "curvature": curvature,
-            "dist_key1": key_distances[0],
-            "dist_key2": key_distances[1],
-            "dist_key3": key_distances[2],
-            "dist_key4": key_distances[3],
-            "dist_key5": key_distances[4],
+            "dist_key1": dist_key1,
+            "dist_key2": dist_key2,
+            "dist_key3": dist_key3,
+            "dist_key4": dist_key4,
+            "dist_key5": dist_key5,
             "progress": progress,
             "is_start": is_start,
             "is_end": is_end,
@@ -549,11 +578,28 @@ class PersonalizedSwipeFeaturizer:
             "win_range_y": win_range_y,
         }
 
-        feature_vector = [feature_dict.get(name, 0.0) for name in self.FEATURE_NAMES]
+        out_cols = []
+        for name in self.FEATURE_NAMES:
+            arr = fmap.get(name)
+            if arr is None:
+                arr = np.zeros_like(x)
+            out_cols.append(arr.astype(np.float32, copy=False))
+        return np.stack(out_cols, axis=1)
 
-        # Pad with zeros to match the model's expected input dimension (37).
-        padding = [0.0] * (self.FINAL_FEATURE_COUNT - len(feature_vector))
-        return np.array(feature_vector + padding, dtype=np.float32)
+
+# ---------------------------------------------------------------------------
+# Minimal Identity Preprocessor (bypass audio deps)
+# ---------------------------------------------------------------------------
+
+
+class IdentityPreprocessor(nn.Module):
+    """No-op preprocessor to satisfy NeMo instantiation when feeding features directly."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+
+    def forward(self, audio_signal, length):
+        return audio_signal, length
 
 
 # ---------------------------------------------------------------------------
@@ -739,13 +785,21 @@ class PersonalizedRNNTModel(nemo_asr.models.EncDecRNNTModel):
         kd_lambda: float = 0.0,
         kd_temperature: float = 1.0,
         teacher_checkpoint: Optional[str] = None,
+        use_autocast_bf16: bool = False,
     ):
         super().__init__(cfg=cfg)
         self.kd_lambda = kd_lambda
         self.kd_temperature = kd_temperature
         self.teacher = None
+        self.use_autocast_bf16 = bool(use_autocast_bf16 and _supports_bf16())
         if teacher_checkpoint:
-            self._init_teacher(teacher_checkpoint)
+            p = Path(teacher_checkpoint)
+            if p.exists():
+                self._init_teacher(teacher_checkpoint)
+            else:
+                logging.getLogger("train_rnnt").warning(
+                    f"Teacher checkpoint not found at {teacher_checkpoint}, skipping distillation"
+                )
 
         # Disable Nemo's random sample logging; we'll log mismatches manually
         if hasattr(self, "wer") and self.wer is not None:
@@ -756,7 +810,7 @@ class PersonalizedRNNTModel(nemo_asr.models.EncDecRNNTModel):
 
     def _init_teacher(self, checkpoint: str) -> None:
         """Initializes a frozen teacher model for knowledge distillation."""
-        print(f"Loading teacher model from: {checkpoint}")
+        logging.getLogger("train_rnnt").info(f"Loading teacher model from: {checkpoint}")
         self.teacher = nemo_asr.models.EncDecRNNTModel.restore_from(
             checkpoint, map_location="cpu"
         )
@@ -801,13 +855,18 @@ class PersonalizedRNNTModel(nemo_asr.models.EncDecRNNTModel):
 
     def training_step(self, batch, batch_idx):
         signal, signal_len, transcript, transcript_len = batch
-        encoded, encoded_len = self.forward(
-            input_signal=signal, input_signal_length=signal_len
+        # Autocast forward path for speed on BF16-capable GPUs when enabled
+        amp_ctx = torch.cuda.amp.autocast(
+            enabled=self.use_autocast_bf16, dtype=torch.bfloat16
         )
-        decoder, target_length, _ = self.decoder(
-            targets=transcript, target_length=transcript_len
-        )
-        joint = self.joint(encoder_outputs=encoded, decoder_outputs=decoder)
+        with amp_ctx:
+            encoded, encoded_len = self.forward(
+                input_signal=signal, input_signal_length=signal_len
+            )
+            decoder, target_length, _ = self.decoder(
+                targets=transcript, target_length=transcript_len
+            )
+            joint = self.joint(encoder_outputs=encoded, decoder_outputs=decoder)
 
         # --- Standard RNN-T Loss ---
         loss_value = self.loss(
@@ -822,7 +881,14 @@ class PersonalizedRNNTModel(nemo_asr.models.EncDecRNNTModel):
         kd_loss = None
         if self.teacher is not None and self.kd_lambda > 0:
             with torch.no_grad():
-                teacher_joint = self._compute_joint(self.teacher, batch, detach=True)
+                # Teacher forward can also benefit from autocast
+                t_amp_ctx = torch.cuda.amp.autocast(
+                    enabled=self.use_autocast_bf16, dtype=torch.bfloat16
+                )
+                with t_amp_ctx:
+                    teacher_joint = self._compute_joint(
+                        self.teacher, batch, detach=True
+                    )
 
             student_log_probs = torch.nn.functional.log_softmax(
                 joint / self.kd_temperature, dim=-1
@@ -885,13 +951,16 @@ class PersonalizedRNNTModel(nemo_asr.models.EncDecRNNTModel):
             print(f"Could not log batch errors: {e}")
 
     def validation_step(self, *args, **kwargs):
+        # Validation forward can be autocast BF16 when enabled
         with torch.cuda.amp.autocast(
-            enabled=False
-        ):  # Run validation in fp32 for stability
+            enabled=self.use_autocast_bf16, dtype=torch.bfloat16
+        ):
             return super().validation_step(*args, **kwargs)
 
     def test_step(self, *args, **kwargs):
-        with torch.cuda.amp.autocast(enabled=False):  # Run tests in fp32 for stability
+        with torch.cuda.amp.autocast(
+            enabled=self.use_autocast_bf16, dtype=torch.bfloat16
+        ):
             return super().test_step(*args, **kwargs)
 
 
@@ -962,7 +1031,9 @@ def load_vocab(vocab_path: Optional[str]) -> Dict[str, int]:
                 vocab["<unk>"] = len(vocab)
             return vocab
         except FileNotFoundError:
-            print(f"Warning: Vocab file not found at {vocab_path}. Falling back to inline alphabet.")
+            print(
+                f"Warning: Vocab file not found at {vocab_path}. Falling back to inline alphabet."
+            )
     # Inline alphabet vocab
     letters = list("abcdefghijklmnopqrstuvwxyz")
     vocab = {ch: i for i, ch in enumerate(letters)}
@@ -990,7 +1061,7 @@ def build_dataloaders(
             for line in f:
                 train_word_counts[json.loads(line).get("word", "")] += 1
         augmenter.set_word_frequencies(dict(train_word_counts))
-        print(
+        logging.getLogger("train_rnnt").info(
             f"Data augmentation enabled for rare words (threshold={cfg.augmentation.rare_threshold})"
         )
 
@@ -1023,7 +1094,7 @@ def build_dataloaders(
             num_samples=len(train_weights),
             replacement=True,
         )
-        print(
+        logging.getLogger("train_rnnt").info(
             f"Enabled '{cfg.sampling.strategy}' sampling (weight range {train_weights.min():.3f}–{train_weights.max():.3f})"
         )
 
@@ -1071,11 +1142,17 @@ def build_dataloaders(
         persistent_workers=val_workers > 0,
         prefetch_factor=2 if val_workers > 0 else None,
     )
-    return train_loader, val_loader
+    return train_loader, val_loader, featurizer.feature_dim
 
 
-def build_model_config(cfg: DictConfig, labels: List[str]) -> DictConfig:
-    """Builds the full NeMo model configuration from the script's config."""
+def build_model_config(
+    cfg: DictConfig, labels: List[str], feature_dim: int
+) -> DictConfig:
+    """Builds the full NeMo model configuration from the script's config.
+
+    Uses a dynamic input feature dimension from the featurizer to avoid
+    brittle coupling with hardcoded values.
+    """
     return DictConfig(
         {
             "labels": labels,
@@ -1084,20 +1161,14 @@ def build_model_config(cfg: DictConfig, labels: List[str]) -> DictConfig:
                 "enc_hidden": cfg.model.encoder.d_model,
                 "pred_hidden": cfg.model.decoder.pred_hidden,
             },
+            # Preprocessor config is present but effectively unused since we feed features directly.
+            # Keeping this avoids NeMo instantiation errors.
             "preprocessor": {
-                "_target_": "nemo.collections.asr.modules.AudioToMelSpectrogramPreprocessor",
-                "features": cfg.model.encoder.feat_in,
-                "normalize": "per_feature",
-                "sample_rate": 16000,
-                "window_size": 0.025,
-                "window_stride": 0.01,
-                "n_fft": 512,
-                "frame_splicing": 1,
-                "dither": 0.0,
+                "_target_": "new.train_transducer_personalized.IdentityPreprocessor",
             },
             "encoder": {
                 "_target_": "nemo.collections.asr.modules.SqueezeformerEncoder",
-                "feat_in": cfg.model.encoder.feat_in,
+                "feat_in": int(feature_dim),
                 "n_layers": cfg.model.encoder.num_layers,
                 "d_model": cfg.model.encoder.d_model,
                 "feat_out": -1,
@@ -1213,6 +1284,193 @@ def load_sampling_profile(profile_name: Optional[str]) -> Optional[Dict[str, Any
         return None
 
 
+def try_compile_model(model, resume_from: Optional[str]) -> None:
+    """Attempt to compile model with torch.compile for speed if safe to do so."""
+    if resume_from or os.environ.get("DISABLE_COMPILE", "0") != "0":
+        if resume_from:
+            print("Skipping torch.compile when resuming from checkpoint (avoids state dict issues)")
+        elif os.environ.get("DISABLE_COMPILE", "0") != "0":
+            print("Skipping torch.compile (disabled via DISABLE_COMPILE env var)")
+        return
+    try:
+        if hasattr(torch, "compile") and hasattr(torch, "_dynamo"):
+            import torch._dynamo
+
+            torch._dynamo.config.suppress_errors = True
+            torch._dynamo.config.cache_size_limit = 256
+            torch._dynamo.config.capture_scalar_outputs = True
+            torch._dynamo.config.guard_nn_modules = False
+
+            compile_success = False
+            try:
+                print("Attempting to compile encoder with torch.compile...")
+                model.encoder = torch.compile(
+                    model.encoder,
+                    mode="reduce-overhead",
+                    backend="inductor",
+                    fullgraph=False,
+                    dynamic=True,
+                )
+                compile_success = True
+                print("✓ Successfully compiled encoder")
+            except Exception as e:
+                print(f"Could not compile encoder: {e}")
+
+            try:
+                print("Attempting to compile joint network...")
+                model.joint = torch.compile(
+                    model.joint, mode="reduce-overhead", fullgraph=False, dynamic=True
+                )
+                compile_success = True
+                print("✓ Successfully compiled joint network")
+            except Exception as e:
+                print(f"Could not compile joint: {e}")
+
+            if not compile_success:
+                try:
+                    print("Attempting to compile full model with compatibility mode...")
+                    model = torch.compile(
+                        model,
+                        mode="default",
+                        fullgraph=False,
+                        dynamic=True,
+                        backend="inductor",
+                        disable=False,
+                    )  # type: ignore[arg-type]
+                    print("✓ Successfully compiled full model")
+                except Exception as e:
+                    print(f"Could not compile model: {e}")
+                    print("Continuing without torch.compile optimizations")
+    except ImportError:
+        print("torch.compile not available (requires PyTorch 2.0+)")
+
+
+def build_callbacks(
+    cfg: DictConfig, args: argparse.Namespace, root_dir: str
+) -> List[pl.Callback]:
+    """Builds training callbacks for logging, checkpointing, and periodic saves."""
+    checkpoint_callback = AnnounceCheckpoint(
+        monitor="val_wer",
+        mode="min",
+        save_top_k=3,
+        filename="epoch={epoch:02d}-wer={val_wer:.3f}",
+        save_last=True,
+        save_on_train_epoch_end=True,
+    )
+
+    class SamplePredictionsLogger(pl.Callback):
+        def __init__(
+            self, train_manifest: str, val_limit: int = 2, train_sample: int = 15
+        ):
+            self.train_manifest = train_manifest
+            self.val_limit = val_limit
+            self.train_sample = train_sample
+            self._val_batches_logged = 0
+
+        def on_validation_epoch_start(self, trainer, pl_module):
+            self._val_batches_logged = 0
+
+        def on_validation_batch_end(
+            self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0
+        ):
+            if self._val_batches_logged >= self.val_limit:
+                return
+            try:
+                signal, signal_len, transcript, transcript_len = batch
+                with torch.no_grad():
+                    encoded, encoded_len = pl_module.forward(
+                        input_signal=signal, input_signal_length=signal_len
+                    )
+                    hyps = pl_module.decoding.rnnt_decoder_predictions_tensor(
+                        encoded, encoded_len
+                    )
+                for ref_tokens, ref_len, hyp in zip(transcript, transcript_len, hyps):
+                    ids = (
+                        ref_tokens[: int(ref_len.item())]
+                        .detach()
+                        .cpu()
+                        .numpy()
+                        .tolist()
+                    )
+                    ref_text = pl_module.decoding.decode_tokens_to_str(ids)
+                    if isinstance(hyp, list) and hyp:
+                        hyp = hyp[0]
+                    hyp_text = hyp.text if hasattr(hyp, "text") else str(hyp)
+                    mark = (
+                        "\033[1;32m✓\033[0m"
+                        if hyp_text == ref_text
+                        else "\033[1;31m✗\033[0m"
+                    )
+                    print(f"  {mark} ref='{ref_text}' pred='{hyp_text}'")
+                self._val_batches_logged += 1
+            except Exception as e:
+                print(f"Could not log val predictions: {e}")
+
+        def on_validation_epoch_end(self, trainer, pl_module):
+            try:
+                words = []
+                with open(self.train_manifest, "r", encoding="utf-8") as fh:
+                    for i, line in enumerate(fh):
+                        if i >= self.train_sample:
+                            break
+                        try:
+                            w = json.loads(line).get("word", "")
+                            if w:
+                                words.append(w)
+                        except Exception:
+                            pass
+                if words:
+                    print("\033[1;36mtrain sample words:\033[0m ", ", ".join(words))
+            except Exception as e:
+                print(f"Could not read training manifest for samples: {e}")
+
+    callbacks: List[pl.Callback] = [
+        checkpoint_callback,
+        ValidationErrorLogger(
+            max_batches=int(cfg.validation.get("log_error_batches", 1))
+        ),
+        PeriodicNeMoSaver(save_interval=50, save_dir=root_dir),
+        SamplePredictionsLogger(
+            train_manifest=cfg.data.train_manifest, val_limit=2, train_sample=15
+        ),
+    ]
+
+    class ValWERBanner(pl.Callback):
+        def __init__(self):
+            self.best = None
+
+        def on_validation_epoch_end(self, trainer, pl_module):
+            try:
+                metrics = trainer.callback_metrics
+                if "val_wer" in metrics:
+                    cur = float(metrics["val_wer"])
+                    if self.best is None or cur < self.best:
+                        self.best = cur
+                        print(f"\033[1;35m★★ BEST val_wer updated: {cur:.4f} ★★\033[0m")
+            except Exception:
+                pass
+
+    callbacks.append(ValWERBanner())
+    if UNFREEZING_AVAILABLE and cfg.unfreezing.get("enabled", False):
+        schedule = None
+        if args.profile:
+            try:
+                from progressive_unfreezing import (
+                    create_unfreezing_schedule_for_profile,
+                )
+
+                schedule = create_unfreezing_schedule_for_profile(args.profile)
+            except (ImportError, AttributeError):
+                schedule = None
+        callbacks.append(
+            ProgressiveUnfreezingCallback(
+                unfreeze_schedule=schedule,
+                warmup_epochs=cfg.unfreezing.get("warmup_epochs", 2),
+            )
+        )
+    return callbacks
+
+
 def main() -> None:
     # Ensure torch is available in function scope
     import torch
@@ -1228,7 +1486,7 @@ def main() -> None:
         "--model-size",
         type=str,
         choices=["mobile", "tablet", "server"],
-        default="mobile",
+        default="tablet",
         help="Model size preset: mobile (fast, <20MB), tablet (balanced), server (accurate)",
     )
     # Feature toggles
@@ -1290,10 +1548,27 @@ def main() -> None:
         help="Path to vocab.txt",
     )
     # Fast test and subsetting
-    parser.add_argument("--subset-train", type=int, default=0, help="Use only first N training samples")
-    parser.add_argument("--subset-val", type=int, default=0, help="Use only first N validation samples")
-    parser.add_argument("--fast-test", action="store_true", help="Use small subset (2000/400) and 1 epoch for quick verification")
-    parser.add_argument("--dry-run-first-batch", action="store_true", help="Build one train batch and run forward+loss, then exit")
+    parser.add_argument(
+        "--subset-train", type=int, default=0, help="Use only first N training samples"
+    )
+    parser.add_argument(
+        "--subset-val", type=int, default=0, help="Use only first N validation samples"
+    )
+    parser.add_argument(
+        "--fast-test",
+        action="store_true",
+        help="Use small subset (2000/400) and 1 epoch for quick verification",
+    )
+    parser.add_argument(
+        "--dry-run-first-batch",
+        action="store_true",
+        help="Build one train batch and run forward+loss, then exit",
+    )
+    parser.add_argument(
+        "--autocast-bf16",
+        action="store_true",
+        help="Wrap forward passes with torch.cuda.amp.autocast(dtype=bfloat16) when supported",
+    )
     parser.add_argument(
         "--batch-size", type=int, default=None, help="Override training batch size"
     )
@@ -1322,7 +1597,7 @@ def main() -> None:
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
     try:
-        torch.set_float32_matmul_precision('high')
+        torch.set_float32_matmul_precision("high")
     except Exception:
         pass
 
@@ -1348,6 +1623,8 @@ def main() -> None:
         cfg.data.vocab_path = _resolve_path(args.vocab_path)
 
     if not _has_usable_cuda():
+        # Force CPU-only execution to avoid torch querying broken CUDA state
+        os.environ["CUDA_VISIBLE_DEVICES"] = ""
         cfg.training.accelerator, cfg.training.precision, cfg.training.num_workers = (
             "cpu",
             "32-true",
@@ -1379,12 +1656,12 @@ def main() -> None:
         prof = load_sampling_profile(args.profile)
         if prof:
             cfg.sampling.update(prof)
-            print(f"Applied training sampling profile: {args.profile}")
+            logging.getLogger("train_rnnt").info(f"Applied training sampling profile: {args.profile}")
     if args.val_profile:
         vprof = load_sampling_profile(args.val_profile)
         if vprof:
             cfg.validation.update(vprof)
-            print(f"Applied validation sampling profile: {args.val_profile}")
+            logging.getLogger("train_rnnt").info(f"Applied validation sampling profile: {args.val_profile}")
 
     # --- Fast test & subsetting overrides ---
     subset_train = int(args.subset_train or (2000 if args.fast_test else 0))
@@ -1393,12 +1670,28 @@ def main() -> None:
         cfg.training.max_epochs = 1
         if cfg.training.batch_size > 64:
             cfg.training.batch_size = 64
-        cfg.training.num_workers = 0 if not _has_usable_cuda() else cfg.training.num_workers
+        cfg.training.num_workers = (
+            0 if not _has_usable_cuda() else cfg.training.num_workers
+        )
+        # Lighter validation for quick passes
+        try:
+            cfg.validation.limit_batches = 0.1
+        except Exception:
+            pass
 
     # --- Build Model and DataLoaders ---
     vocab = load_vocab(cfg.data.vocab_path)
-    train_loader, val_loader = build_dataloaders(cfg, vocab, subset_train=subset_train, subset_val=subset_val)
-    nemo_cfg = build_model_config(cfg, list(vocab.keys()))
+    train_loader, val_loader, feature_dim = build_dataloaders(
+        cfg, vocab, subset_train=subset_train, subset_val=subset_val
+    )
+    nemo_cfg = build_model_config(cfg, list(vocab.keys()), feature_dim)
+    # Avoid Numba JIT/caching issues in librosa on restricted environments
+    os.environ.setdefault("NUMBA_DISABLE_JIT", "1")
+    cache_dir = Path(
+        os.environ.get("NUMBA_CACHE_DIR", str(Path("./.numba_cache").resolve()))
+    )
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    os.environ["NUMBA_CACHE_DIR"] = str(cache_dir)
 
     # --- Scheduler max_steps computation ---
     try:
@@ -1416,6 +1709,14 @@ def main() -> None:
         # Fall back silently if any attribute missing
         pass
 
+    # If manual autocast is requested, disable Lightning's mixed precision to avoid double contexts
+    use_manual_autocast = bool(args.autocast_bf16 and _supports_bf16())
+    if use_manual_autocast:
+        cfg.training.precision = "32-true"
+        print(
+            "Enabling manual BF16 autocast for forward passes; Trainer precision set to 32-true"
+        )
+
     model = PersonalizedRNNTModel(
         cfg=nemo_cfg,
         kd_lambda=cfg.training.kd_lambda,
@@ -1423,6 +1724,7 @@ def main() -> None:
         teacher_checkpoint=_resolve_path(cfg.training.teacher_checkpoint)
         if cfg.training.teacher_checkpoint
         else None,
+        use_autocast_bf16=use_manual_autocast,
     )
 
     # Note: torch.compile will be attempted later if not resuming from checkpoint
@@ -1434,107 +1736,7 @@ def main() -> None:
     root_dir = f"{run_base}/rnnt_checkpoints_{profile_tag}_{runtime_id}"
 
     # --- Callbacks ---
-    checkpoint_callback = AnnounceCheckpoint(
-        monitor="val_wer",
-        mode="min",
-        save_top_k=3,
-        filename="epoch={epoch:02d}-wer={val_wer:.3f}",
-        save_last=True,
-        save_on_train_epoch_end=True,  # Save at epoch end to avoid resumption warnings
-    )
-    class SamplePredictionsLogger(pl.Callback):
-        def __init__(self, train_manifest: str, val_limit: int = 2, train_sample: int = 15):
-            self.train_manifest = train_manifest
-            self.val_limit = val_limit
-            self.train_sample = train_sample
-            self._val_batches_logged = 0
-        def on_validation_epoch_start(self, trainer, pl_module):
-            self._val_batches_logged = 0
-        def on_validation_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0):
-            if self._val_batches_logged >= self.val_limit:
-                return
-            try:
-                signal, signal_len, transcript, transcript_len = batch
-                with torch.no_grad():
-                    # Use model.forward to avoid data shape mismatches; it handles transpose
-                    encoded, encoded_len = pl_module.forward(
-                        input_signal=signal, input_signal_length=signal_len
-                    )
-                    hyps = pl_module.decoding.rnnt_decoder_predictions_tensor(encoded, encoded_len)
-                for ref_tokens, ref_len, hyp in zip(transcript, transcript_len, hyps):
-                    ids = ref_tokens[: int(ref_len.item())].detach().cpu().numpy().tolist()
-                    ref_text = pl_module.decoding.decode_tokens_to_str(ids)
-                    if isinstance(hyp, list) and hyp:
-                        hyp = hyp[0]
-                    hyp_text = hyp.text if hasattr(hyp, 'text') else str(hyp)
-                    mark = "\033[1;32m✓\033[0m" if hyp_text == ref_text else "\033[1;31m✗\033[0m"
-                    print(f"  {mark} ref='{ref_text}' pred='{hyp_text}'")
-                self._val_batches_logged += 1
-            except Exception as e:
-                print(f"Could not log val predictions: {e}")
-        def on_validation_epoch_end(self, trainer, pl_module):
-            # Show a small sample of training words seen
-            try:
-                words = []
-                with open(self.train_manifest, 'r', encoding='utf-8') as fh:
-                    for i, line in enumerate(fh):
-                        if i >= self.train_sample:
-                            break
-                        try:
-                            w = json.loads(line).get('word','')
-                            if w:
-                                words.append(w)
-                        except Exception:
-                            pass
-                if words:
-                    print("\033[1;36mtrain sample words:\033[0m ", ', '.join(words))
-            except Exception as e:
-                print(f"Could not read training manifest for samples: {e}")
-
-    callbacks = [
-        checkpoint_callback,
-        ValidationErrorLogger(
-            max_batches=int(cfg.validation.get("log_error_batches", 1))
-        ),
-        PeriodicNeMoSaver(
-            save_interval=50,  # Save NeMo every 50 epochs
-            save_dir=root_dir,
-        ),
-        SamplePredictionsLogger(train_manifest=cfg.data.train_manifest, val_limit=2, train_sample=15),
-    ]
-
-    # Colored banner when val_wer improves
-    class ValWERBanner(pl.Callback):
-        def __init__(self):
-            self.best = None
-        def on_validation_epoch_end(self, trainer, pl_module):
-            try:
-                metrics = trainer.callback_metrics
-                if 'val_wer' in metrics:
-                    cur = float(metrics['val_wer'])
-                    if self.best is None or cur < self.best:
-                        self.best = cur
-                        print(f"\033[1;35m★★ BEST val_wer updated: {cur:.4f} ★★\033[0m")
-            except Exception:
-                pass
-    callbacks.append(ValWERBanner())
-    if UNFREEZING_AVAILABLE and cfg.unfreezing.get("enabled", False):
-        schedule = None
-        if args.profile:
-            try:
-                from progressive_unfreezing import (
-                    create_unfreezing_schedule_for_profile,
-                )
-
-                schedule = create_unfreezing_schedule_for_profile(args.profile)
-            except (ImportError, AttributeError):
-                pass
-        callbacks.append(
-            ProgressiveUnfreezingCallback(
-                unfreeze_schedule=schedule,
-                warmup_epochs=cfg.unfreezing.get("warmup_epochs", 2),
-            )
-        )
+    callbacks = build_callbacks(cfg, args, root_dir)
 
     # --- Dry-run first batch (optional) ---
     if args.dry_run_first_batch:
@@ -1556,15 +1758,25 @@ def main() -> None:
                     input_lengths=encoded_len,
                     target_lengths=target_length,
                 )
-            print(f"[DRY] Batch shapes: signal={tuple(signal.shape)} tokens={tuple(transcript.shape)}; RNNT loss={float(loss_value)}")
+            print(
+                f"[DRY] Batch shapes: signal={tuple(signal.shape)} tokens={tuple(transcript.shape)}; RNNT loss={float(loss_value)}"
+            )
         except Exception as e:
             print(f"Dry-run failed: {e}")
         return
 
     # --- Trainer ---
-    # Find the latest checkpoint to resume from
-    prefer_ckpt = _resolve_path(args.checkpoint) if args.checkpoint else None
-    resume_from = find_latest_checkpoint(prefer_ckpt)
+    # Checkpoint selection with explicit preference for user-specified path
+    ckpt_path = None
+    if args.checkpoint:
+        maybe = _resolve_path(args.checkpoint)
+        if Path(maybe).exists():
+            ckpt_path = maybe
+            print(f"Using specified checkpoint: {ckpt_path}")
+        else:
+            print(f"Warning: specified checkpoint not found: {maybe}. Falling back to latest.")
+    if ckpt_path is None:
+        ckpt_path = find_latest_checkpoint(None)
 
     trainer = pl.Trainer(
         accelerator=cfg.training.accelerator,
@@ -1581,83 +1793,15 @@ def main() -> None:
         fast_dev_run=bool(int(os.environ.get("FAST_DEV_RUN", "0"))),
     )
 
-    # Try torch.compile ONLY when not resuming (to avoid state dict mismatch)
-    # When resuming, the model state will be loaded inside trainer.fit
-    if not resume_from and not os.environ.get("DISABLE_COMPILE"):
-        try:
-            if hasattr(torch, "compile") and hasattr(torch, "_dynamo"):
-                import torch._dynamo
+    # Optional torch.compile
+    try_compile_model(model, ckpt_path)
 
-                # Configure dynamo for better NeMo compatibility
-                torch._dynamo.config.suppress_errors = True
-                torch._dynamo.config.cache_size_limit = 256
-                torch._dynamo.config.capture_scalar_outputs = True
-                torch._dynamo.config.guard_nn_modules = False
-
-                # Try different approaches based on what works
-                compile_success = False
-
-                # Approach 1: Try to compile just the encoder (most compute-intensive part)
-                try:
-                    print("Attempting to compile encoder with torch.compile...")
-                    model.encoder = torch.compile(
-                        model.encoder,
-                        mode="reduce-overhead",  # or "default" or "max-autotune"
-                        backend="inductor",
-                        fullgraph=False,
-                        dynamic=True,
-                    )
-                    compile_success = True
-                    print("✓ Successfully compiled encoder")
-                except Exception as e:
-                    print(f"Could not compile encoder: {e}")
-
-                # Approach 2: Try to compile the joint network
-                try:
-                    print("Attempting to compile joint network...")
-                    model.joint = torch.compile(
-                        model.joint,
-                        mode="reduce-overhead",
-                        fullgraph=False,
-                        dynamic=True,
-                    )
-                    compile_success = True
-                    print("✓ Successfully compiled joint network")
-                except Exception as e:
-                    print(f"Could not compile joint: {e}")
-
-                # Approach 3: If component compilation failed, try whole model with max compatibility
-                if not compile_success:
-                    try:
-                        print(
-                            "Attempting to compile full model with compatibility mode..."
-                        )
-                        model = torch.compile(
-                            model,
-                            mode="default",  # Most compatible mode
-                            fullgraph=False,  # Allow graph breaks
-                            dynamic=True,  # Handle dynamic shapes
-                            backend="inductor",
-                            disable=False,
-                        )  # type: ignore[arg-type]
-                        print("✓ Successfully compiled full model")
-                    except Exception as e:
-                        print(f"Could not compile model: {e}")
-                        print("Continuing without torch.compile optimizations")
-
-        except ImportError:
-            print("torch.compile not available (requires PyTorch 2.0+)")
-    elif resume_from:
-        print(
-            "Skipping torch.compile when resuming from checkpoint (avoids state dict issues)"
-        )
-
-    print(f"Starting trainer... Attempting to resume from: {resume_from}")
+    print(f"Starting trainer... Attempting to resume from: {ckpt_path}")
     trainer.fit(
         model,
         train_dataloaders=train_loader,
         val_dataloaders=val_loader,
-        ckpt_path=resume_from,
+        ckpt_path=ckpt_path,
     )
 
     nemo_path = Path(f"{root_dir}/conformer_rnnt_final.nemo")
@@ -1666,9 +1810,6 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    # Basic logging setup for CLI runs
+    logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(message)s')
     main()
-    # Optional subsetting
-    if subset_train and subset_train > 0 and len(train_ds) > subset_train:
-        train_ds = Subset(train_ds, list(range(subset_train)))
-    if subset_val and subset_val > 0 and len(val_ds) > subset_val:
-        val_ds = Subset(val_ds, list(range(subset_val)))
