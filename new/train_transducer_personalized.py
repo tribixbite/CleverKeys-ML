@@ -138,7 +138,7 @@ MODEL_PRESETS = {
 }
 
 # Select model size (can be overridden via CLI)
-SELECTED_MODEL = "mobile"  # Default to mobile-optimized
+SELECTED_MODEL = "tablet"  # Default to mobile-optimized
 
 CONFIG: Dict[str, Any] = {
     # --- Data and Vocabulary Paths ---
@@ -185,9 +185,9 @@ CONFIG: Dict[str, Any] = {
     "preprocess": {
         # Adaptive resampling normalizes gesture length for robustness and efficient batching.
         "resample_short_target": 64,  # Target frame count for shorter swipes. Ensures a minimum information density.
-        "resample_long_target": 160,  # Target frame count for longer swipes. Compresses long gestures to a manageable length.
+        "resample_long_target": 192,  # Target frame count for longer swipes. Compresses long gestures to a manageable length.
         "resample_short_threshold": 64,  # Gestures shorter than this are considered "short".
-        "resample_long_threshold": 180,  # Gestures longer than this are considered "long".
+        "resample_long_threshold": 256,  # Gestures longer than this are considered "long".
     },
     # --- Weighted Sampling Strategy ---
     # This is critical for building a robust model that handles rare words well.
@@ -211,8 +211,8 @@ CONFIG: Dict[str, Any] = {
         "rare_word_boost": 6.0,
         "max_weight_factor": 28.0,
         "batch_size_factor": 0.35,  # Use a smaller batch size for validation.
-        "limit_batches": 0.35,  # To speed up validation, run on a random 15% subset of the validation set each time.
-        "check_interval": 1.0,  # Run validation 3 times per training epoch.
+        "limit_batches": 0.1,  # Validate on 10% of val set per run by default.
+        "check_interval": 0.25,  # Run validation 4x per epoch (lighter each time).
         "max_samples": 500,  # Limit the number of validation samples used.
         "log_error_batches": 3,  # Print mispredictions from the first 3 validation batches for qualitative analysis.
     },
@@ -850,7 +850,10 @@ class PersonalizedRNNTModel(nemo_asr.models.EncDecRNNTModel):
             sd = checkpoint.get("state_dict", {})
             if not isinstance(sd, dict) or not sd:
                 return
-            needs_fix = any("._orig_mod." in k or k.startswith("encoder._orig_mod") for k in sd.keys())
+            needs_fix = any(
+                "._orig_mod." in k or k.startswith("encoder._orig_mod")
+                for k in sd.keys()
+            )
             if not needs_fix:
                 return
             new_sd = {}
@@ -1618,6 +1621,18 @@ def main() -> None:
         help="Build one train batch and run forward+loss, then exit",
     )
     parser.add_argument(
+        "--val-limit-batches",
+        type=float,
+        default=None,
+        help="Fraction [0,1] of validation set per run (overrides config)",
+    )
+    parser.add_argument(
+        "--val-check-interval",
+        type=float,
+        default=None,
+        help="Validation check interval as fraction of an epoch (overrides config)",
+    )
+    parser.add_argument(
         "--autocast-bf16",
         action="store_true",
         help="Wrap forward passes with torch.cuda.amp.autocast(dtype=bfloat16) when supported",
@@ -1703,6 +1718,16 @@ def main() -> None:
     if args.max_epochs is not None and args.max_epochs > 0:
         cfg.training.max_epochs = int(args.max_epochs)
         print(f"Overriding max_epochs to {args.max_epochs}")
+    if args.val_limit_batches is not None:
+        try:
+            cfg.validation.limit_batches = float(args.val_limit_batches)
+        except Exception:
+            pass
+    if args.val_check_interval is not None:
+        try:
+            cfg.validation.check_interval = float(args.val_check_interval)
+        except Exception:
+            pass
 
     # Load sampling profiles for training/validation when provided
     if args.profile:
@@ -1794,6 +1819,50 @@ def main() -> None:
 
     # --- Callbacks ---
     callbacks = build_callbacks(cfg, args, root_dir)
+
+    # Add a lightweight validation stats logger to surface metrics more often
+    class QuickValStats(pl.Callback):
+        def on_validation_epoch_start(self, trainer, pl_module):
+            self._sum_T = 0
+            self._sum_tokens = 0
+            self._batches = 0
+
+        def on_validation_batch_end(
+            self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0
+        ):
+            try:
+                signal, signal_len, transcript, transcript_len = batch
+                self._sum_T += int(signal_len.sum().item())
+                self._sum_tokens += int(transcript_len.sum().item())
+                self._batches += 1
+            except Exception:
+                pass
+
+        def on_validation_epoch_end(self, trainer, pl_module):
+            try:
+                metrics = trainer.callback_metrics
+                val_wer = metrics.get("val_wer", None)
+                val_loss = metrics.get("val_loss", None)
+                avg_T = (self._sum_T / max(self._batches, 1)) if self._batches else None
+                avg_tokens = (
+                    (self._sum_tokens / max(self._batches, 1))
+                    if self._batches
+                    else None
+                )
+                msg = "[val]"
+                if val_wer is not None:
+                    msg += f" wer={float(val_wer):.4f}"
+                if val_loss is not None:
+                    msg += f" loss={float(val_loss):.4f}"
+                if avg_T is not None:
+                    msg += f" avg_T={avg_T:.1f}"
+                if avg_tokens is not None:
+                    msg += f" avg_tokens={avg_tokens:.1f}"
+                print(msg)
+            except Exception:
+                pass
+
+    callbacks.append(QuickValStats())
 
     # --- Dry-run first batch (optional) ---
     if args.dry_run_first_batch:
