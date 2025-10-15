@@ -213,7 +213,7 @@ CONFIG: Dict[str, Any] = {
         "batch_size_factor": 0.35,  # Use a smaller batch size for validation.
         "limit_batches": 0.35,  # To speed up validation, run on a random 15% subset of the validation set each time.
         "check_interval": 1.0,  # Run validation 3 times per training epoch.
-        "max_samples": 1500,  # Limit the number of validation samples used.
+        "max_samples": 500,  # Limit the number of validation samples used.
         "log_error_batches": 3,  # Print mispredictions from the first 3 validation batches for qualitative analysis.
     },
     # --- Data Augmentation ---
@@ -730,10 +730,25 @@ class PersonalizedSwipeDataset(Dataset):
         return weights_arr
 
     @staticmethod
-    def _prepare_points(points: List[Dict[str, Any]], normalize_coords: bool = True) -> List[Dict[str, float]]:
+    def _prepare_points(
+        points: List[Dict[str, Any]], normalize_coords: bool = True
+    ) -> List[Dict[str, float]]:
         """Prepares raw points by optionally transforming from [0, 1] to [-1, 1] and making time relative."""
         if not points:
             return []
+        # Guard against rare non-monotonic timestamps by sorting by 't' when present
+        try:
+            if any(
+                (
+                    float(points[i + 1].get("t", (i + 1) * 10.0))
+                    < float(points[i].get("t", i * 10.0))
+                )
+                for i in range(len(points) - 1)
+            ):
+                points = sorted(points, key=lambda p: float(p.get("t", 0.0)))
+        except Exception:
+            pass
+
         start_t = float(points[0].get("t", 0.0))
         prepared: List[Dict[str, float]] = []
         for idx, pt in enumerate(points):
@@ -826,6 +841,29 @@ class PersonalizedRNNTModel(nemo_asr.models.EncDecRNNTModel):
         )
         self.teacher.freeze()
         self.teacher.eval()
+
+    # Handle state dicts saved from compiled modules (e.g., torch.compile) where
+    # parameters are nested under "_orig_mod". Lightning calls this prior to
+    # applying the state dict, letting us normalize keys safely.
+    def on_load_checkpoint(self, checkpoint: Dict[str, Any]) -> None:  # type: ignore[override]
+        try:
+            sd = checkpoint.get("state_dict", {})
+            if not isinstance(sd, dict) or not sd:
+                return
+            needs_fix = any("._orig_mod." in k or k.startswith("encoder._orig_mod") for k in sd.keys())
+            if not needs_fix:
+                return
+            new_sd = {}
+            for k, v in sd.items():
+                nk = k.replace("encoder._orig_mod.", "encoder.")
+                nk = nk.replace("decoder._orig_mod.", "decoder.")
+                nk = nk.replace("joint._orig_mod.", "joint.")
+                nk = nk.replace("._orig_mod.", ".")
+                new_sd[nk] = v
+            checkpoint["state_dict"] = new_sd
+            print("Normalized checkpoint keys by stripping _orig_mod wrappers")
+        except Exception as e:
+            print(f"Warning: could not normalize checkpoint keys: {e}")
 
     def forward(
         self,
@@ -1177,7 +1215,17 @@ def build_model_config(
             # Preprocessor config is present but effectively unused since we feed features directly.
             # Keeping this avoids NeMo instantiation errors.
             "preprocessor": {
-                "_target_": "new.train_transducer_personalized.IdentityPreprocessor",
+                "_target_": "nemo.collections.asr.modules.AudioToMelSpectrogramPreprocessor",
+                "sample_rate": 16000,
+                "normalize": "per_feature",
+                "window_size": 0.02,
+                "window_stride": 0.01,
+                "window": "hann",
+                "features": int(feature_dim),
+                "n_fft": 512,
+                "frame_splicing": 1,
+                "dither": 0.0,
+                "stft_conv": False,
             },
             "encoder": {
                 "_target_": "nemo.collections.asr.modules.SqueezeformerEncoder",
@@ -1251,7 +1299,8 @@ def find_latest_checkpoint(prefer_checkpoint: Optional[str] = None) -> Optional[
         print(f"Using specified checkpoint: {prefer_checkpoint}")
         return prefer_checkpoint
 
-    run_base = Path(os.environ.get("CKS_RUN_BASE", "./9292025script")).resolve()
+    # Search within the standard runs base unless overridden
+    run_base = Path(os.environ.get("CKS_RUN_BASE", "./runs")).resolve()
     base_dirs = {run_base}
     patterns = [
         "rnnt_checkpoints_*/**/*.ckpt",
@@ -1299,6 +1348,8 @@ def load_sampling_profile(profile_name: Optional[str]) -> Optional[Dict[str, Any
 
 def try_compile_model(model, resume_from: Optional[str]) -> None:
     """Attempt to compile model with torch.compile for speed if safe to do so."""
+    import torch
+
     if resume_from or os.environ.get("DISABLE_COMPILE", "0") != "0":
         if resume_from:
             print(
@@ -1311,51 +1362,38 @@ def try_compile_model(model, resume_from: Optional[str]) -> None:
         if hasattr(torch, "compile") and hasattr(torch, "_dynamo"):
             import torch._dynamo
 
+            # More conservative settings to avoid memory corruption
             torch._dynamo.config.suppress_errors = True
-            torch._dynamo.config.cache_size_limit = 256
-            torch._dynamo.config.capture_scalar_outputs = True
-            torch._dynamo.config.guard_nn_modules = False
+            torch._dynamo.config.cache_size_limit = 64  # Reduced from 256
+            torch._dynamo.config.capture_scalar_outputs = False  # Changed from True
+            torch._dynamo.config.guard_nn_modules = True  # Changed from False
+
+            # Skip compilation if CUDA graphs are enabled (potential conflict)
+            if hasattr(model, "wer") and hasattr(model.wer, "use_cuda_graph_decoder"):
+                print("Skipping torch.compile due to CUDA graphs compatibility")
+                return
 
             compile_success = False
+            # Only try encoder compilation with safer settings
             try:
-                print("Attempting to compile encoder with torch.compile...")
+                print("Attempting to compile encoder with safe settings...")
                 model.encoder = torch.compile(
                     model.encoder,
-                    mode="reduce-overhead",
+                    mode="default",  # Changed from reduce-overhead
                     backend="inductor",
                     fullgraph=False,
-                    dynamic=True,
+                    dynamic=False,  # Changed from True
                 )
                 compile_success = True
                 print("✓ Successfully compiled encoder")
             except Exception as e:
                 print(f"Could not compile encoder: {e}")
+                print("Continuing without torch.compile optimizations")
+                return
 
-            try:
-                print("Attempting to compile joint network...")
-                model.joint = torch.compile(
-                    model.joint, mode="reduce-overhead", fullgraph=False, dynamic=True
-                )
-                compile_success = True
-                print("✓ Successfully compiled joint network")
-            except Exception as e:
-                print(f"Could not compile joint: {e}")
+            # Skip joint and full model compilation to avoid memory issues
+            print("Skipping joint/full model compilation to avoid memory corruption")
 
-            if not compile_success:
-                try:
-                    print("Attempting to compile full model with compatibility mode...")
-                    model = torch.compile(
-                        model,
-                        mode="default",
-                        fullgraph=False,
-                        dynamic=True,
-                        backend="inductor",
-                        disable=False,
-                    )  # type: ignore[arg-type]
-                    print("✓ Successfully compiled full model")
-                except Exception as e:
-                    print(f"Could not compile model: {e}")
-                    print("Continuing without torch.compile optimizations")
     except ImportError:
         print("torch.compile not available (requires PyTorch 2.0+)")
 
@@ -1642,19 +1680,14 @@ def main() -> None:
     if args.vocab_path:
         cfg.data.vocab_path = _resolve_path(args.vocab_path)
 
-    if not _has_usable_cuda():
-        # Force CPU-only execution to avoid torch querying broken CUDA state
-        os.environ["CUDA_VISIBLE_DEVICES"] = ""
-        cfg.training.accelerator, cfg.training.precision, cfg.training.num_workers = (
-            "cpu",
-            "32-true",
-            0,
-        )
-    else:
-        # Optimizations for modern GPUs (RTX 4090M)
-        torch.backends.cudnn.benchmark = True
-        torch.backends.cuda.matmul.allow_tf32 = True
-        torch.backends.cudnn.allow_tf32 = True
+    # Configure CUDA backends if available; avoid forcing CPU based on conservative probe
+    if torch.cuda.is_available():
+        try:
+            torch.backends.cudnn.benchmark = True
+            torch.backends.cuda.matmul.allow_tf32 = True
+            torch.backends.cudnn.allow_tf32 = True
+        except Exception:
+            pass
 
     # --- Apply CLI overrides ---
     if args.augment:
@@ -1706,7 +1739,7 @@ def main() -> None:
     # --- Build Model and DataLoaders ---
     vocab = load_vocab(cfg.data.vocab_path)
     train_loader, val_loader, feature_dim = build_dataloaders(
-        cfg, vocab, subset_train=subset_train, subset_val=subset_val, normalize_coords=args.normalize
+        cfg, vocab, subset_train=subset_train, subset_val=subset_val
     )
     nemo_cfg = build_model_config(cfg, list(vocab.keys()), feature_dim)
     # Avoid Numba JIT/caching issues in librosa on restricted environments

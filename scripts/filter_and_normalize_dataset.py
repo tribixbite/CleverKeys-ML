@@ -150,10 +150,10 @@ def normalize_points(points):
         stats["too_fast_speed"] += 1
         return None
 
-    x = np.clip(x, -MAX_OVERSHOOT, 1 + MAX_OVERSHOOT)
-    y = np.clip(y, -MAX_OVERSHOOT, 1 + MAX_OVERSHOOT)
-    x = (x * 2) - 1
-    y = (y * 2) - 1
+    # x = np.clip(x, -MAX_OVERSHOOT, 1 + MAX_OVERSHOOT)
+    # y = np.clip(y, -MAX_OVERSHOOT, 1 + MAX_OVERSHOOT)
+    # x = (x * 2) - 1
+    # y = (y * 2) - 1
     x = np.clip(x, -OUT_CLAMP, OUT_CLAMP)
     y = np.clip(y, -OUT_CLAMP, OUT_CLAMP)
 
