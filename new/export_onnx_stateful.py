@@ -17,7 +17,13 @@ from omegaconf import DictConfig
 
 sys.path.append(str(Path(__file__).parent.absolute()))
 
-from train_transducer_personalized import PersonalizedRNNTModel, CONFIG, build_model_config, load_vocab
+from train_transducer_personalized import (
+    PersonalizedRNNTModel,
+    CONFIG,
+    build_model_config,
+    load_vocab,
+    PersonalizedSwipeFeaturizer,
+)
 
 
 class StatefulRNNTDecoder(nn.Module):
@@ -104,6 +110,40 @@ class StatefulRNNTJoint(nn.Module):
         return joint_out
 
 
+def _infer_feature_dim_from_state_dict(state_dict: dict) -> int | None:
+    """Infer input feature dimension from checkpoint parameters.
+
+    Prefer Linear pre-encode projection weight: [d_model, feat_in].
+    Fallback to first conv input channels if present.
+    """
+    # 1) Linear pre-encode projection
+    for key in list(state_dict.keys()):
+        if key.endswith("pre_encode.out.weight"):
+            w = state_dict[key]
+            try:
+                return int(w.shape[1])
+            except Exception:
+                pass
+    # 2) Compiled variant may have _orig_mod in the path
+    for key in list(state_dict.keys()):
+        if key.endswith("_orig_mod.pre_encode.out.weight"):
+            w = state_dict[key]
+            try:
+                return int(w.shape[1])
+            except Exception:
+                pass
+    # 3) First conv input channels (less reliable, but a fallback)
+    for suffix in ("pre_encode.conv.0.weight", "_orig_mod.pre_encode.conv.0.weight"):
+        for key in list(state_dict.keys()):
+            if key.endswith(suffix):
+                w = state_dict[key]
+                try:
+                    return int(w.shape[1])
+                except Exception:
+                    pass
+    return None
+
+
 def export_stateful_onnx(model, output_dir, quantize_int8=False, verbose=False):
     """Export the model as separate stateful ONNX components."""
     output_dir = Path(output_dir)
@@ -119,7 +159,10 @@ def export_stateful_onnx(model, output_dir, quantize_int8=False, verbose=False):
     # Example inputs for encoder
     batch_size = 1
     time_steps = 96
-    feat_dim = 37
+    # Derive feature dim from the instantiated model when possible
+    feat_dim = getattr(model.encoder, 'feat_in', None) or getattr(model, 'feat_in', None)
+    if feat_dim is None:
+        feat_dim = PersonalizedSwipeFeaturizer().feature_dim
 
     dummy_audio = torch.randn(batch_size, feat_dim, time_steps)
     dummy_length = torch.tensor([time_steps], dtype=torch.long)
@@ -301,6 +344,42 @@ def validate_exported_models(output_dir):
         return False
 
 
+def _safe_load_checkpoint(path: str) -> dict:
+    import torch, omegaconf
+    with torch.serialization.safe_globals([omegaconf.dictconfig.DictConfig]):
+        return torch.load(path, weights_only=False)
+
+
+def _write_runtime_helper(output_dir: Path, model: PersonalizedRNNTModel, vocab: dict, feature_dim: int, feature_names: list[str]):
+    md = []
+    md.append("# CleverKeys RNNT Runtime Helper\n")
+    md.append("\n## Dimensions\n")
+    md.append(f"- feature_dim: {feature_dim}\n")
+    md.append(f"- encoder d_model: {getattr(model.encoder, 'd_model', 'unknown')}\n")
+    lstm = model.decoder.prediction.dec_rnn.lstm
+    md.append(f"- decoder LSTM: layers={lstm.num_layers}, hidden_size={lstm.hidden_size}\n")
+    md.append(f"- vocab_size (w/o blank): {len(vocab)}\n")
+    md.append(f"- blank_id: {model.decoder.blank_idx}\n")
+    md.append("\n## Feature Columns (order)\n")
+    for i, name in enumerate(feature_names):
+        md.append(f"- {i}: {name}\n")
+    md.append("\n## Encoder ONNX I/O\n")
+    md.append("- Inputs: `audio_signal` [batch, feature_dim, time], `length` [batch]\n")
+    md.append("- Outputs: `encoded` [batch, time, encoder_dim], `encoded_lengths` [batch]\n")
+    md.append("\n## Decoder ONNX (stateful)\n")
+    md.append("- Inputs: `input_tokens` [batch, 1], `h_in` [layers, batch, hidden], `c_in` [layers, batch, hidden]\n")
+    md.append("- Outputs: `decoder_output` [batch, 1, decoder_dim], `h_out`, `c_out`\n")
+    md.append("\n## Joint ONNX\n")
+    md.append("- Inputs: `encoder_output` [batch, 1, encoder_dim], `decoder_output` [batch, 1, decoder_dim]\n")
+    md.append("- Output: `logits` [batch, 1, vocab_size_with_blank]\n")
+    md.append("\n## Greedy Decoding Outline\n")
+    md.append("1. Featurize points to [T, feature_dim], transpose to [1, feature_dim, T], pass through encoder.\n")
+    md.append("2. Initialize decoder states (zeros) and token=blank (or BOS if used).\n")
+    md.append("3. Loop: joint(encoder_t, decoder) -> argmax token; if blank, advance time; else emit token and feed back to decoder.\n")
+    md.append("4. Stop after max_symbols or EOS.\n")
+    (output_dir / "runtime_helper.md").write_text("".join(md), encoding="utf-8")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Stateful ONNX Export for RNN-T")
     parser.add_argument("--checkpoint", required=True, type=str, help="Path to .ckpt file")
@@ -313,18 +392,26 @@ def main():
     output_dir = Path(args.output_dir)
     output_dir.mkdir(exist_ok=True, parents=True)
 
-    print("Building model from configuration...")
+    print("Loading checkpoint to infer shapes...")
+    ckpt = _safe_load_checkpoint(args.checkpoint)
+    state_dict = ckpt.get('state_dict', {})
+    # Normalize keys if compiled
+    norm_sd = {}
+    for k,v in state_dict.items():
+        nk = k.replace('encoder._orig_mod.', 'encoder.').replace('decoder._orig_mod.', 'decoder.').replace('joint._orig_mod.', 'joint.').replace('._orig_mod.', '.')
+        norm_sd[nk] = v
+    state_dict = norm_sd
+
+    # Build config using inferred feature dim
+    feat_dim = _infer_feature_dim_from_state_dict(state_dict) or PersonalizedSwipeFeaturizer().feature_dim
+    print(f"Inferred feature_dim={feat_dim}")
     cfg = DictConfig(CONFIG)
     vocab = load_vocab(cfg.data.vocab_path)
     labels = list(vocab.keys())
-    nemo_cfg = build_model_config(cfg, labels)
+    nemo_cfg = build_model_config(cfg, labels, int(feat_dim))
     model = PersonalizedRNNTModel(cfg=nemo_cfg)
-
-    print(f"Loading weights from checkpoint: {args.checkpoint}")
-    import omegaconf
-    with torch.serialization.safe_globals([omegaconf.dictconfig.DictConfig]):
-        checkpoint = torch.load(args.checkpoint, weights_only=False)
-        model.load_state_dict(checkpoint['state_dict'])
+    print(f"Loading weights into model")
+    model.load_state_dict(state_dict, strict=False)
     model.eval()
 
     # Export models
@@ -332,6 +419,10 @@ def main():
 
     # Generate runtime metadata
     generate_runtime_meta(model, vocab, output_dir)
+
+    # Write runtime helper documentation
+    feature_names = PersonalizedSwipeFeaturizer().FEATURE_NAMES
+    _write_runtime_helper(output_dir, model, vocab, int(feat_dim), feature_names)
 
     # Validate if requested
     if args.validate:
