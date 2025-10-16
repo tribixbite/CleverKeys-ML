@@ -47,6 +47,7 @@ from transformers import (
     AutoConfig,
     TrainerCallback,
 )
+from transformers.models.hubert.modeling_hubert import HubertPreTrainedModel, HubertEncoder
 
 
 # -----------------------------------------------------------------------------

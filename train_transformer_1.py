@@ -52,6 +52,8 @@ from transformers import (
     Wav2Vec2Processor,
     Wav2Vec2ForCTC,
     Wav2Vec2Config,
+)
+from transformers.models.wav2vec2.modeling_wav2vec2 import (
     Wav2Vec2Encoder,
     Wav2Vec2PreTrainedModel,
 )
@@ -292,10 +294,26 @@ class DataCollatorCTCWithPadding:
 
 
 class CustomTrainer(Trainer):
-    def _get_eval_sampler(
-        self, eval_dataset: Dataset
-    ) -> Optional[torch.utils.data.Sampler]:
+    def _get_eval_sampler(self, eval_dataset: Dataset) -> Optional[torch.utils.data.Sampler]:
         return SequentialSampler(eval_dataset)
+
+    def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
+        labels = inputs.pop("labels")
+        attention_mask = inputs.get("attention_mask", None)
+        outputs = model(input_values=inputs["input_values"], attention_mask=attention_mask)
+        logits = outputs.logits  # (B, T, V)
+        log_probs = torch.nn.functional.log_softmax(logits, dim=-1).transpose(0, 1)  # (T, B, V)
+        if attention_mask is not None:
+            input_lengths = attention_mask.sum(dim=1).to(dtype=torch.long)
+        else:
+            input_lengths = torch.full((logits.size(0),), logits.size(1), dtype=torch.long, device=logits.device)
+        target_lengths = (labels != -100).sum(-1)
+        targets = labels.masked_fill(labels == -100, model.config.pad_token_id)
+        loss_fct = torch.nn.CTCLoss(blank=model.config.pad_token_id, zero_infinity=True)
+        loss = loss_fct(log_probs, targets, input_lengths, target_lengths)
+        if return_outputs:
+            return loss, outputs
+        return loss
 
 
 def build_tokenizer_and_processor(vocab_chars: str, workdir: Path) -> Wav2Vec2Processor:
@@ -512,7 +530,6 @@ def main():
         compute_metrics=compute_metrics,
         train_dataset=train_ds,
         eval_dataset=val_ds,
-        processor=processor,
     )
 
     if args.dry_run_first_batch:
@@ -525,8 +542,20 @@ def main():
                 logger.info(f"[DRY] {k}.shape={tuple(v.shape)} {v.dtype}")
         model.eval()
         with torch.no_grad():
-            out = model(input_values=batch["input_values"], attention_mask=batch["attention_mask"], labels=batch["labels"]) 
-        logger.info(f"[DRY] loss={float(out.loss)}")
+            outputs = model(input_values=batch["input_values"], attention_mask=(batch.get("attention_mask") if hasattr(batch, "get") else None))
+            logits = outputs.logits
+            log_probs = torch.nn.functional.log_softmax(logits, dim=-1).transpose(0, 1)
+            am = batch.get("attention_mask") if hasattr(batch, "get") else None
+            if am is not None:
+                input_lengths = am.sum(dim=1).to(dtype=torch.long)
+            else:
+                input_lengths = torch.full((logits.size(0),), logits.size(1), dtype=torch.long)
+            labels = batch["labels"]
+            target_lengths = (labels != -100).sum(-1)
+            targets = labels.masked_fill(labels == -100, model.config.pad_token_id)
+            loss_fct = torch.nn.CTCLoss(blank=model.config.pad_token_id, zero_infinity=True)
+            loss = loss_fct(log_probs, targets, input_lengths, target_lengths)
+        logger.info(f"[DRY] loss={float(loss)}")
         return
 
     # Auto-resume from latest checkpoint if available
