@@ -145,15 +145,15 @@ CONFIG: Dict[str, Any] = {
     # These are now default values, overrideable via command-line arguments
     # for better portability and experiment management.
     "data": {
-        "train_manifest": "data/val_futo_filtered_norm.jsonl",
-        "val_manifest": "data/train_futo_filtered_norm.jsonl",
+        "train_manifest": "data/val_leon_filtered_norm.jsonl",
+        "val_manifest": "data/train_leon_filtered_norm.jsonl",
         "vocab_path": None,  # Inline alphabet vocab by default; can be overridden via CLI
         "key_centers_path": None,  # Optional: Path to a JSON file defining keyboard layout for featurization.
         "max_trace_len": 512,  # Safety limit to prevent excessively long traces from consuming too much memory.
     },
     # --- Training Hyperparameters ---
     "training": {
-        "batch_size": 512,  # Safer default for 16GB GPUs and RNNT
+        "batch_size": 384,  # Safer default for 16GB GPUs and RNNT
         "num_workers": 4,  # Safer default; can be overridden via CLI
         "learning_rate": 2e-4,  # A conservative learning rate for the AdamW optimizer, good for stable convergence.
         "max_epochs": 500,  # Total number of training epochs (increased for multi-day training).
@@ -210,7 +210,7 @@ CONFIG: Dict[str, Any] = {
         "rare_frequency_threshold": 40,
         "rare_word_boost": 6.0,
         "max_weight_factor": 28.0,
-        "batch_size_factor": 0.35,  # Use a smaller batch size for validation.
+        "batch_size_factor": 0.25,  # Use a smaller batch size for validation.
         "limit_batches": 0.1,  # Validate on 10% of val set per run by default.
         "check_interval": 0.25,  # Run validation 4x per epoch (lighter each time).
         "max_samples": 500,  # Limit the number of validation samples used.
@@ -1266,7 +1266,8 @@ def build_model_config(
                     "activation": cfg.model.joint.activation,
                     "dropout": cfg.model.joint.dropout,
                 },
-                "num_classes": len(labels),
+                # RNNT joint must include blank class in num_classes
+                "num_classes": len(labels) + 1,
                 "vocabulary": labels,
                 "log_softmax": True,
             },
@@ -1658,7 +1659,7 @@ def main() -> None:
     parser.add_argument(
         "--normalize",
         action="store_true",
-        help="Normalize coordinates from [0,1] to [-1,1]. If not set, assumes data is already in [-1,1]",
+        help="Normalize coordinates from [0,1] to [-1,1]. Pass false if data is already in [-1,1]",
     )
     args = parser.parse_args()
 
@@ -1667,6 +1668,13 @@ def main() -> None:
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
+    # Prefer file_system sharing to avoid BrokenPipe in multiprocessing resource sharer
+    try:
+        import torch.multiprocessing as mp
+
+        mp.set_sharing_strategy("file_system")
+    except Exception:
+        pass
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
     try:

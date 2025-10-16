@@ -56,6 +56,14 @@ Date: 2025-10-07
   - Added `DISABLE_COMPILE` env var guard with explicit skip message.
   - Fast test now reduces validation load (`limit_batches=0.1`).
   - `load_key_centers` is now memoized with `lru_cache(maxsize=1)` to avoid redundant loads across workers.
+  - Robust resume from compiled checkpoints: `PersonalizedRNNTModel.on_load_checkpoint` normalizes `state_dict` keys by stripping `._orig_mod.` wrappers (from torch.compile), preventing mismatch on resume.
+  - ONNX exporter now performs shape inference:
+    - Infers `feature_dim` from checkpoint weights (prefers `pre_encode.out.weight`), builds matching config, and loads weights with normalized keys.
+    - Exports a `runtime_helper.md` alongside ONNX files documenting dims, feature columns, and decoding steps.
+  - Faster, more frequent validation logging:
+    - Default validation reduced to `limit_batches=0.1` and `check_interval=0.25` (4×/epoch, lighter each time).
+    - Added CLI overrides: `--val-limit-batches`, `--val-check-interval`.
+    - Added `QuickValStats` callback to print `val_wer`, `val_loss`, average input length (`avg_T`) and average target length per validation run.
 
 2025-10-14 (update)
 
