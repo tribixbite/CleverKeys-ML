@@ -22,7 +22,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
-import math
+from torch.nn.utils.rnn import pad_sequence
 import os
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
@@ -31,7 +31,6 @@ from functools import lru_cache
 
 import lightning.pytorch as pl
 from lightning.pytorch.callbacks import ModelCheckpoint
-from numba import njit
 from torch.utils.data import WeightedRandomSampler
 from omegaconf import DictConfig
 import random
@@ -53,8 +52,51 @@ except ImportError:  # pragma: no cover - DALI optional dependency
         "DALIOutputsPlaceholder", (object,), {"has_processed_signal": False}
     )
 
-# Local script dependencies are now expected in the same directory.
-from swipe_data_utils import collate_fn
+
+def _stack_time(x, lengths, factor=2):
+    """Frame stacking for effective sequence length reduction.
+
+    Args:
+        x: (B, T, F) tensor
+        lengths: (B,) tensor of sequence lengths
+        factor: stacking factor (default 2)
+
+    Returns:
+        x_stacked: (B, T//factor, F*factor) tensor
+        lengths_stacked: (B,) tensor with adjusted lengths
+    """
+    B, T, F = x.shape
+    T_trim = (T // factor) * factor
+    x = x[:, :T_trim, :]  # Trim to multiple of factor
+    x = x.view(B, T_trim // factor, F * factor)  # Stack adjacent frames
+    lengths = torch.div(lengths, factor, rounding_mode="floor")
+    return x, lengths
+
+
+def collate_fn(batch, use_frame_stacking=False, stack_factor=2):
+    """Pads traces and tokens to create uniform batches."""
+    features, feature_lengths, tokens, token_lengths = zip(*batch)
+
+    # Pad features to max length in batch
+    padded_features = pad_sequence(features, batch_first=True, padding_value=0.0)
+
+    # Apply frame stacking if enabled (for small config)
+    if use_frame_stacking:
+        padded_features, feature_lengths = _stack_time(
+            padded_features, torch.stack(feature_lengths), stack_factor
+        )
+    else:
+        # Stack lengths normally
+        feature_lengths = torch.stack(feature_lengths)
+
+    # Pad tokens to max length in batch
+    padded_tokens = pad_sequence(tokens, batch_first=True, padding_value=0)
+
+    # Stack token lengths
+    token_lengths = torch.stack(token_lengths)
+
+    return padded_features, feature_lengths, padded_tokens, token_lengths
+
 
 # Import augmentation and progressive unfreezing
 try:
@@ -145,8 +187,8 @@ CONFIG: Dict[str, Any] = {
     # These are now default values, overrideable via command-line arguments
     # for better portability and experiment management.
     "data": {
-        "train_manifest": "data/val_leon_filtered_norm.jsonl",
-        "val_manifest": "data/train_leon_filtered_norm.jsonl",
+        "train_manifest": "data/train_leon_filtered_norm.jsonl",
+        "val_manifest": "data/val_leon_filtered_norm.jsonl",
         "vocab_path": None,  # Inline alphabet vocab by default; can be overridden via CLI
         "key_centers_path": None,  # Optional: Path to a JSON file defining keyboard layout for featurization.
         "max_trace_len": 512,  # Safety limit to prevent excessively long traces from consuming too much memory.
@@ -154,10 +196,11 @@ CONFIG: Dict[str, Any] = {
     # --- Training Hyperparameters ---
     "training": {
         "batch_size": 384,  # Safer default for 16GB GPUs and RNNT
-        "num_workers": 4,  # Safer default; can be overridden via CLI
+        "num_workers": 0,  # Safer default; can be overridden via CLI
+        "persistent_workers": False,  # Whether to use persistent workers.
         "learning_rate": 2e-4,  # A conservative learning rate for the AdamW optimizer, good for stable convergence.
         "max_epochs": 500,  # Total number of training epochs (increased for multi-day training).
-        "gradient_accumulation": 1,  # Accumulate gradients over multiple batches. Useful for simulating larger batch sizes on smaller GPUs.
+        "gradient_accumulation": 2,  # Accumulate gradients over multiple batches. Useful for simulating larger batch sizes on smaller GPUs.
         "accelerator": "gpu",  # Use 'gpu' if available, will auto-fallback to 'cpu'.
         "devices": 1,  # Number of GPUs to use.
         "precision": "bf16-mixed",  # Best performance on modern (Ampere+) GPUs. Avoids CUDA graph issues seen with fp16.
@@ -210,11 +253,12 @@ CONFIG: Dict[str, Any] = {
         "rare_frequency_threshold": 40,
         "rare_word_boost": 6.0,
         "max_weight_factor": 28.0,
-        "batch_size_factor": 0.25,  # Use a smaller batch size for validation.
+        "batch_size_factor": 0.35,  # Use a smaller batch size for validation.
         "limit_batches": 0.1,  # Validate on 10% of val set per run by default.
-        "check_interval": 0.25,  # Run validation 4x per epoch (lighter each time).
-        "max_samples": 500,  # Limit the number of validation samples used.
-        "log_error_batches": 3,  # Print mispredictions from the first 3 validation batches for qualitative analysis.
+        "check_val_every_n_epoch": 1,
+        # "check_interval": 1,  # Run validation 4x per epoch (lighter each time).
+        "max_samples": 1500,  # Limit the number of validation samples used.
+        "log_error_batches": 2,  # Print mispredictions from the first 3 validation batches for qualitative analysis.
     },
     # --- Data Augmentation ---
     # Creates more diverse training data to make the model more robust to real-world gesture variations.
@@ -1161,8 +1205,8 @@ def build_dataloaders(
         collate_fn=collate_fn,
         pin_memory=_has_usable_cuda(),
         drop_last=True,
-        persistent_workers=cfg.training.num_workers > 0,
-        prefetch_factor=(4 if cfg.training.num_workers > 0 else None),
+        persistent_workers=cfg.training.persistent_workers,
+        prefetch_factor=(2 if cfg.training.num_workers > 0 else None),
     )
 
     val_sampler = None
@@ -1193,7 +1237,7 @@ def build_dataloaders(
         collate_fn=collate_fn,
         pin_memory=_has_usable_cuda(),
         drop_last=False,  # drop_last=False is important for validation
-        persistent_workers=val_workers > 0,
+        persistent_workers=cfg.training.persistent_workers,
         prefetch_factor=2 if val_workers > 0 else None,
     )
     return train_loader, val_loader, featurizer.feature_dim
@@ -1634,6 +1678,12 @@ def main() -> None:
         help="Validation check interval as fraction of an epoch (overrides config)",
     )
     parser.add_argument(
+        "--check-val-every-n-epoch",
+        type=float,
+        default=1,
+        help="Check validation every n epochs (overrides config)",
+    )
+    parser.add_argument(
         "--autocast-bf16",
         action="store_true",
         help="Wrap forward passes with torch.cuda.amp.autocast(dtype=bfloat16) when supported",
@@ -1731,9 +1781,9 @@ def main() -> None:
             cfg.validation.limit_batches = float(args.val_limit_batches)
         except Exception:
             pass
-    if args.val_check_interval is not None:
+    if args.check_val_every_n_epoch is not None:
         try:
-            cfg.validation.check_interval = float(args.val_check_interval)
+            cfg.validation.check_val_every_n_epoch = int(args.check_val_every_n_epoch)
         except Exception:
             pass
 
@@ -1924,7 +1974,8 @@ def main() -> None:
         accumulate_grad_batches=cfg.training.gradient_accumulation,
         callbacks=callbacks,
         default_root_dir=root_dir,
-        val_check_interval=cfg.validation.check_interval,
+        check_val_every_n_epoch=cfg.validation.check_val_every_n_epoch,
+        # val_check_interval=cfg.validation.check_interval,
         limit_val_batches=cfg.validation.limit_batches,
         fast_dev_run=bool(int(os.environ.get("FAST_DEV_RUN", "0"))),
     )
