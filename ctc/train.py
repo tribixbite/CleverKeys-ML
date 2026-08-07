@@ -84,7 +84,8 @@ class SwipeDataset(Dataset):
     """
 
     def __init__(self, npz_path: Path, centers: np.ndarray, augment: bool,
-                 permute: bool = True) -> None:
+                 permute: bool = True, path_offset_sigma: float = 0.0,
+                 path_scale_sigma: float = 0.0) -> None:
         with np.load(npz_path) as d:                    # audit fix #14: close handle
             self.features = np.array(d["features"])     # [N,2,64]
             self.tgt_flat = np.array(d["targets"])
@@ -93,6 +94,8 @@ class SwipeDataset(Dataset):
         self.centers = centers                          # [K,2]
         self.augment = augment
         self.permute = permute
+        self.path_offset_sigma = path_offset_sigma
+        self.path_scale_sigma = path_scale_sigma
         self.k = centers.shape[0]
 
     def __len__(self) -> int:
@@ -128,6 +131,19 @@ class SwipeDataset(Dataset):
                 arr_y[:] = (arr_y - 0.5) * sy + 0.5 + ty
                 if mirror:
                     arr_x[:] = 1.0 - arr_x
+            if self.path_offset_sigma > 0.0 or self.path_scale_sigma > 0.0:
+                # Independent path-vs-layout misalignment (Phase C1). The shared
+                # affine above moves the path AND the key centers together, so the
+                # model never sees the two frames disagree — yet in the wild they
+                # do: the HWS half sits ~0.064 off the FUTO half in y against the
+                # same layout. Perturbing the path alone, with the keys untouched,
+                # is the only augmentation that trains that tolerance.
+                jx = 1.0 + np.random.normal(0.0, self.path_scale_sigma)
+                jy = 1.0 + np.random.normal(0.0, self.path_scale_sigma)
+                ox = np.random.normal(0.0, self.path_offset_sigma)
+                oy = np.random.normal(0.0, self.path_offset_sigma)
+                feats[0] = (feats[0] - 0.5) * jx + 0.5 + ox
+                feats[1] = (feats[1] - 0.5) * jy + 0.5 + oy
             feats += np.random.normal(0.0, PATH_NOISE, feats.shape).astype(np.float32)
             centers += np.random.normal(0.0, CENTER_NOISE, centers.shape).astype(np.float32)
             np.clip(feats, 0.0, 1.0, out=feats)     # path only; centers stay exact
@@ -200,6 +216,44 @@ def greedy_accuracy(model: torch.nn.Module, loader: DataLoader, device: str,
     return hit / max(n, 1)
 
 
+class ModelEMA:
+    """Exponential moving average of the model's float state (Phase C2).
+
+    Evaluated and exported in place of the live weights: the average of the last
+    few thousand steps is a flatter, lower-variance point than whichever step the
+    validation grid happened to land on, which matters here because Phase B showed
+    checkpoint choice alone moves beam top-1 by ~0.5 pt.
+
+    The decay is warmed up as ``min(decay, (1+step)/(10+step))`` so the average is
+    not anchored to the random initialisation for its first few hundred steps.
+    Integer buffers are copied, not averaged.
+    """
+
+    def __init__(self, model: torch.nn.Module, decay: float) -> None:
+        self.decay = decay
+        self.shadow = {k: v.detach().clone().float() if v.is_floating_point()
+                       else v.detach().clone()
+                       for k, v in model.state_dict().items()}
+
+    @torch.no_grad()
+    def update(self, model: torch.nn.Module, step: int) -> None:
+        d = min(self.decay, (1.0 + step) / (10.0 + step))
+        for k, v in model.state_dict().items():
+            if v.is_floating_point():
+                self.shadow[k].mul_(d).add_(v.detach().float(), alpha=1.0 - d)
+            else:
+                self.shadow[k].copy_(v.detach())
+
+    def state_dict(self) -> Dict[str, torch.Tensor]:
+        return {k: v.clone() for k, v in self.shadow.items()}
+
+    def copy_to(self, model: torch.nn.Module) -> None:
+        """Load the averaged weights into *model* (used for the val pass)."""
+        model.load_state_dict({k: v.to(dtype=p.dtype) if p.is_floating_point() else v
+                               for (k, v), p in zip(self.shadow.items(),
+                                                    model.state_dict().values())})
+
+
 # ── checkpointing (audit fix #5) ────────────────────────────────────────────────
 
 def rng_state() -> Dict[str, object]:
@@ -244,10 +298,18 @@ def atomic_save(payload: Dict[str, object], path: Path) -> None:
 
 def build_checkpoint(model, opt, sched, step: int, epoch: int, best: float,
                      best_epoch: int, args: argparse.Namespace,
-                     val_greedy: float) -> Dict[str, object]:
-    """Assemble the full resumable checkpoint payload."""
-    return {
-        "model": model.state_dict(),
+                     val_greedy: float, ema: "Optional[ModelEMA]" = None
+                     ) -> Dict[str, object]:
+    """Assemble the full resumable checkpoint payload.
+
+    When EMA is on, ``model`` holds the AVERAGED weights — that is what every
+    downstream consumer (export, eval, latency) should see, and it is what the
+    reported val number was measured on. The live weights are kept under
+    ``model_raw`` so a resume continues the actual trajectory rather than the
+    average.
+    """
+    payload = {
+        "model": (ema.state_dict() if ema is not None else model.state_dict()),
         "optimizer": opt.state_dict(),
         "scheduler": sched.state_dict(),
         "step": step,
@@ -264,6 +326,10 @@ def build_checkpoint(model, opt, sched, step: int, epoch: int, best: float,
         "block": args.block,
         "dilations": tuple(int(v) for v in args.dilations.split(",")),
     }
+    if ema is not None:
+        payload["model_raw"] = model.state_dict()
+        payload["ema_decay"] = ema.decay
+    return payload
 
 
 def main() -> int:
@@ -297,6 +363,15 @@ def main() -> int:
                          "measured in optimizer steps, not epochs (0 = use --epochs)")
     ap.add_argument("--val-every", type=int, default=0, dest="val_every",
                     help="validate/checkpoint every N steps (0 = once per epoch)")
+    ap.add_argument("--path-offset-sigma", type=float, default=0.0,
+                    dest="path_offset_sigma",
+                    help="C1: per-trace gaussian offset applied to the PATH only, "
+                         "keys untouched (0 = off)")
+    ap.add_argument("--path-scale-sigma", type=float, default=0.0,
+                    dest="path_scale_sigma",
+                    help="C1: per-trace gaussian scale jitter on the PATH only")
+    ap.add_argument("--ema-decay", type=float, default=0.0, dest="ema_decay",
+                    help="C2: EMA decay for the evaluated/exported weights (0 = off)")
     ap.add_argument("--patience", type=int, default=40)
     ap.add_argument("--seed", type=int, default=1234)
     ap.add_argument("--workers", type=int, default=8)
@@ -315,7 +390,9 @@ def main() -> int:
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     centers = load_layout_centers(args.layout)
-    train_ds = SwipeDataset(cache_dir / args.train_npz, centers, augment=True)
+    train_ds = SwipeDataset(cache_dir / args.train_npz, centers, augment=True,
+                            path_offset_sigma=args.path_offset_sigma,
+                            path_scale_sigma=args.path_scale_sigma)
     val_ds = SwipeDataset(cache_dir / "val.npz", centers, augment=False)
     train_dl = DataLoader(train_ds, args.batch, shuffle=True, collate_fn=collate,
                           num_workers=args.workers, pin_memory=True, drop_last=True,
@@ -333,6 +410,16 @@ def main() -> int:
     print(f"run {args.run_name}  params: {n_params / 1e6:.3f}M ({n_params})  "
           f"device: {device}  feat_v{args.feat_version} block={args.block} "
           f"ch={args.ch} dil={dilations}  train {len(train_ds)}  val {len(val_ds)}")
+
+    # EMA shadow + a second module to run the val pass on the averaged weights.
+    ema = ModelEMA(model, args.ema_decay) if args.ema_decay > 0 else None
+    eval_model = model
+    if ema is not None:
+        eval_model = CtcSwipeEncoder(ch=args.ch, embed_hid=args.embed_hid,
+                                     dilations=dilations,
+                                     feat_version=args.feat_version,
+                                     block=args.block).to(device)
+        print(f"EMA on (decay {args.ema_decay}); val and export use averaged weights")
 
     ctc = torch.nn.CTCLoss(blank=BLANK, zero_infinity=True)
     opt = torch.optim.AdamW(model.parameters(), lr=args.lr,
@@ -362,7 +449,11 @@ def main() -> int:
             if k in prev and prev[k] != getattr(args, k):
                 raise SystemExit(f"--resume {rpath}: arch mismatch on '{k}' "
                                  f"(checkpoint {prev[k]} != requested {getattr(args, k)})")
-        model.load_state_dict(ck["model"])
+        model.load_state_dict(ck.get("model_raw") or ck["model"])
+        if ema is not None:
+            ema.shadow = {k: v.detach().clone().float() if v.is_floating_point()
+                          else v.detach().clone()
+                          for k, v in ck["model"].items()}
         opt.load_state_dict(ck["optimizer"])
         sched.load_state_dict(ck["scheduler"])
         step = int(ck["step"])
@@ -399,9 +490,13 @@ def main() -> int:
             running += loss.item()
             nb += 1
             step += 1
+            if ema is not None:
+                ema.update(model, step)
 
             if step % val_every == 0 or step >= total_steps:
-                acc = greedy_accuracy(model, val_dl, device)
+                if ema is not None:
+                    ema.copy_to(eval_model)
+                acc = greedy_accuracy(eval_model, val_dl, device)
                 lr_now = sched.get_last_lr()[0]
                 secs = time.time() - t0
                 mean_loss = running / max(nb, 1)
@@ -417,7 +512,7 @@ def main() -> int:
                 if acc > best:
                     best, best_epoch, best_eval = acc, epoch, evals
                 ckpt = build_checkpoint(model, opt, sched, step, epoch, best,
-                                        best_epoch, args, acc)
+                                        best_epoch, args, acc, ema)
                 atomic_save(ckpt, run_dir / "last.pt")
                 if best_eval == evals:
                     atomic_save(ckpt, run_dir / "best.pt")
