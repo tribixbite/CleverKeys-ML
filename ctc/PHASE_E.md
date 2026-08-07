@@ -1,0 +1,135 @@
+# Phase E — closing the gap to the FUTO ceiling on val-9918
+
+Phase D ended at a seed-mean full-val top-1 of **84.81** against a FUTO ceiling of
+84.83 measured on *test*-2400, and recommended not spending the test seal. Phase E
+starts from a better-specified target: the ceiling re-measured on **our** val-9918.
+
+## 0. The bar
+
+FUTO's encoder+refinement ceiling, decoded on val-9918 (the app repo's committed
+eval), is the five-number vector every Phase-E result is quoted against:
+
+| metric | FUTO ceiling on val-9918 | Phase-D `D1` seed-mean | deficit |
+|---|---|---|---|
+| overall t1 | **85.52** | 84.81 | −0.71 |
+| t3 | **91.54** | 91.01 | −0.53 |
+| t5 | **92.80** | 92.33 | −0.47 |
+| ≤3-char t1 (n=3,389) | **89.29** | 88.01 | −1.28 |
+| 4+-char t1 (n=6,529) | **83.57** | 83.15 | −0.42 |
+
+The gate for unsealing test-2400 is a **3-seed seed-mean on full val that beats all
+five**. **test-2400 was not decoded in this phase**, whatever the gate says —
+`eval_arms.py` and `train.py` both still refuse any split whose filename contains
+`test`.
+
+---
+
+## 1. E1 — the scoring preset was the largest lever in the campaign
+
+### What was measured
+
+`sweep_scoring.py` re-tunes the trie beam's five scoring parameters on val rows
+`0:4959`, confirms the winner on the untouched `4959:9918`, and reports full val.
+Run on `phaseD-D1` (ch 128 on T3, seed 1234), five successive grids were needed
+because the first four all put the optimum **on a grid boundary**:
+
+| grid | γ span | β span | λ span | winner (γ, λ, β) | holdout-half Δt1 | full-val t1 |
+|---|---|---|---|---|---|---|
+| 1 (Phase-B width) | 0.20–0.51 | 0.79–1.08 | 0–0.035 | 0.4056, 0.035, 0.79 | **+0.50** | 84.67 |
+| 2 | 0.25–0.56 | 0.50–0.99 | 0.026–0.10 | 0.61, 0.10, 0.50 | **+1.03** | 85.14 |
+| 3 | 0.45–1.20 | 0.00–0.65 | 0.07–0.32 | 1.25, 0.32, 0.075 | **+2.98** | 86.76 |
+| 4 | 1.00–3.00 | 0.00–0.20 | 0.25–1.50 | 1.225, 0.80, 0.125 | **+3.09** | 86.96 |
+| 5 (fine, interior) | 1.10–1.40 | 0.05–0.25 | 0.50–1.30 | **1.05, 1.1, 0.2** | **+3.04** | **86.96** |
+
+Grid 5 is the first whose winner is not on an edge, and grids 4 and 5 agree to
+0.00 pt on full val, so the search is converged. The **adopted E1 preset** is
+
+```
+gamma = 1.05   lambda = 1.1   beta = 0.2   gammaPrune = 0.3734   betaPrune = 0.9882
+```
+
+against the published `encoderOnly`
+`(0.4056, 0.0176, 0.9866, 0.4234, 1.0382)`.
+
+### `phaseD-D1` under both presets, full val-9918
+
+| preset | t1 | t3 | t5 | ≤3 | 4+ |
+|---|---|---|---|---|---|
+| published `enc` | 84.22 | 90.74 | 92.22 | 87.40 | 82.57 |
+| **E1 tuned** | **86.96** | **91.85** | **92.78** | **89.70** | **85.54** |
+| Δ | **+2.74** | **+1.11** | **+0.56** | **+2.30** | **+2.97** |
+
+The gain is +2.44 on the rows it was fitted to and **+3.04 on the 4,959 rows it
+never saw** — it is larger on the holdout half than on the tuning half, which is
+the opposite of what sweep overfit looks like.
+
+### The fast path was verified at the tuned preset, not just the published one
+
+`sweep_scoring`/`eval_arms` re-score the terminal beam analytically instead of
+re-running it per grid point. That identity was previously checked only at the
+published preset, where the multipliers are small. Re-checked here at the tuned
+preset through `eval_beam.py`'s **real per-row decoder** on val rows `0:2000`:
+
+| path | t1 | t3 | t5 | ≤3 | 4+ |
+|---|---|---|---|---|---|
+| `eval_beam.py` (real beam, per row) | 87.15 | 92.05 | 92.80 | 89.40 | 85.94 |
+| `sweep_scoring.py` (analytic re-score) | 87.15 | 92.05 | 92.80 | 89.40 | 85.94 |
+
+Identical to the digit. The identity holds because `futo_viterbi_beam`'s per-frame
+pruning key is a function of `(gammaPrune, betaPrune)` alone — `gamma`, `beta` and
+`lambda` enter only the final score — which is visible directly in the vendored
+source, and both prune params are held fixed between the two runs above.
+
+### ⚠ Retraction — "there is no free win" was a grid-width artifact
+
+`README.md` §"Scoring sweep" and `PHASE_B.md` §4 both concluded that the published
+preset was already optimal for our emissions. `README.md` went further and quoted a
+**headroom bound**: a grid run directly on all 9,918 val rows (selection on the
+scored rows, an optimistic upper bound) "tops out at 81.78 top-1 vs 81.57
+baseline, i.e. +0.21 pt maximum".
+
+Every one of those grids spanned γ ∈ [0.30, 0.51], β ∈ [0.89, 1.08], λ ≤ 0.026 —
+all centred on the published preset. The optimum for our emissions is at
+γ ≈ 1.05, β ≈ 0.2, λ ≈ 1.1, which is **outside every grid the campaign had ever
+run**. Re-swept on the *same* `r2` model with a wide grid, honest halves:
+
+| `r2`, val-9918 | t1 | t3 | t5 | ≤3 | 4+ |
+|---|---|---|---|---|---|
+| published `enc` (the committed number) | 81.57 | 89.84 | 91.37 | 86.28 | 79.12 |
+| re-tuned (γ 1.125, λ 1.2, β 0.25) | **86.14** | **91.01** | **92.12** | **89.94** | **84.16** |
+| Δ full val | **+4.57** | +1.17 | +0.75 | +3.66 | +5.04 |
+| Δ on the untouched holdout half | **+4.25** | +1.33 | +0.75 | +2.83 | +4.99 |
+
+**The +0.21 pt "headroom bound" understated the real gain by a factor of ~20.**
+The claim in `README.md` must be read as bounded by its grid, and is withdrawn.
+So is `PHASE_B.md`'s "re-tuning does not rescue them" framing: the per-arm gains
+it measured (0.08–1.03 pt) were all inside the same too-narrow box.
+
+This does not change any Phase A–D **arm-vs-arm** conclusion — every arm in those
+tables was decoded at the same published preset, so the mis-tuning is common-mode
+and cancels. It changes every **absolute** number in the campaign, and it changes
+the distance to the FUTO ceiling.
+
+### `D1` at three seeds under the E1 preset
+
+The preset was tuned on seed 1234's emissions; seeds 4321 and 7777 are a transfer
+test for it.
+
+| arm | seed | t1 | t3 | t5 | ≤3 | 4+ | FUTO | HWS |
+|---|---|---|---|---|---|---|---|---|
+| `phaseD-D1` | 1234 | 86.96 | 91.85 | 92.78 | 89.70 | 85.54 | 94.60 | 79.38 |
+| `phaseD-D1` | 4321 | 87.23 | 91.92 | 92.68 | 89.97 | 85.80 | 94.94 | 79.56 |
+| `phaseD-D1` | 7777 | 87.45 | 92.03 | 92.91 | 90.06 | 86.09 | 95.00 | 79.94 |
+| **seed-mean** | | **87.21** | **91.93** | **92.79** | **89.91** | **85.81** | 94.85 | 79.63 |
+| — the bar | | 85.52 | 91.54 | 92.80 | 89.29 | 83.57 | — | — |
+| **Δ vs bar** | | **+1.69** | **+0.39** | **−0.01** | **+0.62** | **+2.24** | | |
+
+**Four of the five bars clear on E1 alone; t5 misses by 0.01 pt** — one row in
+9,918, averaged over three seeds. The gate is not passed.
+
+A t5-favoured point inside the flat region (γ 1.10, λ 1.1, β 0.15, at the
+*published* prune params) was tested rather than assumed: it wins t5 on the tuning
+half (92.92 vs 92.88) and **loses** it on full val (92.75 vs 92.78). The t5
+differences across the flat region are not resolvable, so the preset was left at
+the t1 optimum its own protocol selected, and no point was chosen for clearing a
+bar it was measured against.
