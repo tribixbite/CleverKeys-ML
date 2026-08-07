@@ -82,7 +82,96 @@ hold remain inside every tier. The session-field masks above account for this; t
 
 ## 4. Results
 
-<!-- RESULTS_TABLE -->
+Scoring preset: the published encoder-only `enc` preset, unchanged. Beam width 100.
+`eval_arms.py` reproduces `eval_beam.py` exactly (checked on r2: 81.57 / 89.84 / 91.37
+both ways), so these are directly comparable to every committed number.
+
+### Aggregate and per-source
+
+| arm | rows | wall | best greedy | val t1 | t3 | t5 | FUTO t1 | HWS t1 |
+|---|---|---|---|---|---|---|---|---|
+| `phaseA-T0` | 109,600 | 6.0 min | 58.42 | **82.12** | 90.27 | 91.60 | 88.00 | **76.29** |
+| `phaseA-T1` | 372,726 | 7.0 min | **64.69** | **82.47** | **90.62** | **91.96** | 89.26 | 75.72 |
+| `phaseA-T1strict` | 319,421 | 6.1 min | 61.09 | 80.67 | 88.61 | 90.41 | 91.24 | 70.18 |
+| `phaseA-T2` | 385,021 | 6.9 min | 59.62 | 80.86 | 88.52 | 90.48 | **92.59** | 69.21 |
+| `phaseA-T2b` | 285,929 | 6.3 min | 60.26 | 79.91 | 88.51 | 90.32 | 90.98 | 68.91 |
+
+Reference: `r2` (the pre-Phase-A run, same recipe on T0 with an epoch budget) scores
+81.57 / 89.84 / 91.37 with 58.57 greedy.
+
+### On the contributor-clean subsets
+
+`T2∩T2b` (n=9,300) is the only subset every arm can be scored on that is also large
+enough to mean anything, so it is the cross-arm column. Split by source, because 4,976
+of its 9,300 rows are HWS and three of the five arms contain almost no HWS.
+
+| arm | own clean t1 (n) | shared-clean t1 (n=9,300) | shared FUTO (4,324) | shared HWS (4,976) |
+|---|---|---|---|---|
+| `phaseA-T0` | 83.54 (164) | 81.80 | 88.14 | **76.29** |
+| `phaseA-T1` | 80.43 (46) | **81.91** | 89.04 | 75.72 |
+| `phaseA-T1strict` | 70.31 (5,019) | 79.89 | 91.07 | 70.18 |
+| `phaseA-T2` | 79.99 (9,300) | **79.99** | **92.39** | 69.21 |
+| `phaseA-T2b` | 79.55 (9,669) | 79.03 | 90.68 | 68.91 |
+
+### What the ladder actually measured
+
+**The dominant variable is corpus mix, not corpus size.** Ordering the arms by how much
+How-We-Swipe they contain — T0 and T1 (55,438 rows), T1strict (888), T2/T2b (0) — the two
+halves of the holdout move in opposite directions and almost monotonically:
+
+```
+HWS in train:  55,438   55,438      888        0        0
+FUTO t1:        88.00    89.26    91.24    92.59    90.98
+HWS  t1:        76.29    75.72    70.18    69.21    68.91
+```
+
+Aggregate val is a ~50/50 mixture of the two, so it falls as FUTO accuracy rises. Going
+from T0 to T2 buys **+4.6 pt on FUTO and costs −7.1 pt on HWS**. None of the aggregate
+differences between T0, T1 and T2 are a statement about "more data"; they are a statement
+about which corpus the training set is drawn from.
+
+**T2 vs T2b is the one clean, unconfounded contrast** — same corpus, same contamination
+control, same step budget, differing only by the recovered quality cascade. On the shared
+clean subset **T2 beats T2b by 0.96 pt overall and 1.71 pt on the FUTO half** (n=4,324,
+unpaired SE ≈ 0.43 pt, so ~4 SE; the paired comparison is tighter still). The cascade's
+own gates reject 152,603 rows — overwhelmingly motion/geometry: `not_portrait` (53,464),
+`bad_speed` (40,865), `too_many_points` (26,722), `bad_duration` (19,528), with the
+lexical gates contributing only 11,567 — and leave T2b 99,526 rows smaller than T2 net.
+It buys negative accuracy. **The quality cascade does not earn its keep.**
+
+**Scale at fixed curation (T0 → T1) is worth about +0.35 pt aggregate** (+1.26 FUTO,
+−0.57 HWS) for 3.4x the data, and both arms are contaminated, so even that is generous.
+Greedy accuracy moves far more (58.42 → 64.69) than beam top-1 (82.12 → 82.47): the
+lexicon beam already recovers most of what better emissions provide, so **greedy is a
+poor proxy for the metric that ships**.
+
+### Caveat on resolution — read before ranking anything
+
+Re-evaluating a *single* arm's own checkpoints spans as much as the gaps between arms.
+`phaseA-T0`'s final-step checkpoint scores 81.68 full-val t1 against 82.12 for its
+best-greedy checkpoint, and the r2 reference — same data, same recipe, epoch budget —
+scores 81.57. That is a **0.55 pt spread from checkpoint selection alone**, larger than
+the T0→T1 difference. Aggregate differences below ~0.6 pt in this table are not
+resolvable; the T2-vs-T2b FUTO gap (1.71 pt) and the corpus-mix effects (4–7 pt) are.
+
+Related: the `seconds` field in `metrics.jsonl` is not the interval between validations —
+`t0` is also reset at each epoch boundary, so with `--val-every` smaller than an epoch it
+under-reports. Wall-clock above is taken from log file timestamps instead.
+
+### Recommendation for Phase B
+
+* **Drop the T2b quality cascade.** It is measurably harmful at fixed step budget.
+* **Do not adopt T2 as-is.** It is the best FUTO model in the ladder and the worst HWS
+  model; shipping it trades 7 pt on one user population for 4.6 pt on another.
+* **Base tier should be the T2 FUTO pool re-merged with the HWS half**, with contamination
+  control applied properly on *both* sides — `--strict-session` on FUTO (to close the
+  102,826-unmapped-row hole that leaves T1 with 46 clean val rows) and participant
+  exclusion on HWS. That is the arm this ladder implies but none of the five actually is.
+* **Fix the holdout before Phase B ranks anything.** With a proper contributor-disjoint
+  tier on both sides, val_clean should reach ~90 %+ for a mixed tier, which is what makes
+  a mixed arm comparable to T2 at all. Today only T2/T2b have a usable clean subset.
+* Re-run the winner at 2–3 seeds; a single seed cannot resolve the sub-1-pt differences
+  this table is full of.
 
 ## 5. Protocol going forward
 
