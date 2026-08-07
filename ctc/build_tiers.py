@@ -127,16 +127,36 @@ def build_t1(args, holdout: Set[bytes], h2s, tainted) -> None:
     """HWS half of T0 + the full filtered FUTO pool, contamination-controlled."""
     hws_pool = load_pool_hashes(NST / "hws" / "train_hws_filtered.jsonl") | \
         load_pool_hashes(NST / "hws" / "val_hws_filtered.jsonl")
+    # HWS participants are NOT disjoint from the holdout (98.4 % of the HWS half
+    # shares a participant with val/test), so the HWS side needs its own session
+    # exclusion or T1 inherits T0's contamination. Build participant -> rows and
+    # the set of participants that produced a holdout trace.
+    hws_sess = {}
+    for f in ("train_hws_filtered", "val_hws_filtered"):
+        with open(NST / "hws" / f"{f}.jsonl") as fh:
+            for line in fh:
+                o = json.loads(line)
+                hws_sess[hash_row(o["word"], o["points"])] = str(o.get("session"))
+    hws_tainted = {hws_sess[k] for k in holdout if k in hws_sess}
+    print(f"[T1] HWS participants touching holdout: {len(hws_tainted)}")
     out = resolve(args.workdir, "data/tier_t1.jsonl")
-    stats = dict(hws_kept=0, futo_in=0, futo_leak=0, futo_taint=0,
+    stats = dict(hws_kept=0, hws_leak=0, hws_taint=0, futo_in=0, futo_leak=0, futo_taint=0,
                  futo_unmapped=0, futo_kept=0)
     t0 = time.time()
     with open(out, "w") as w:
         for line in open(NST / "train_hwsfuto.jsonl"):
             o = json.loads(line)
-            if hash_row(o["word"], o["points"]) in hws_pool:
-                w.write(json.dumps({"word": o["word"], "points": o["points"]}) + "\n")
-                stats["hws_kept"] += 1
+            hh = hash_row(o["word"], o["points"])
+            if hh not in hws_pool:
+                continue
+            if hh in holdout:
+                stats["hws_leak"] += 1
+                continue
+            if not args.keep_hws_overlap and hws_sess.get(hh) in hws_tainted:
+                stats["hws_taint"] += 1
+                continue
+            w.write(json.dumps({"word": o["word"], "points": o["points"]}) + "\n")
+            stats["hws_kept"] += 1
         for line in open(CCO / "train_futo_filtered_norm.jsonl"):
             o = json.loads(line)
             stats["futo_in"] += 1
@@ -240,6 +260,9 @@ def main() -> int:
                     default=NST / "futo" / "train.jsonl",
                     help="HF swipe-1 train.jsonl (raw schema) for T2/T2b")
     ap.add_argument("--tiers", default="t1,t2,t2b")
+    ap.add_argument("--keep-hws-overlap", action="store_true", dest="keep_hws_overlap",
+                    help="keep HWS rows from participants who also appear in the "
+                         "holdout (reproduces the original, contaminated T1)")
     ap.add_argument("--strict-session", action="store_true", dest="strict_session",
                     help="also drop rows whose session cannot be recovered")
     args = ap.parse_args()
