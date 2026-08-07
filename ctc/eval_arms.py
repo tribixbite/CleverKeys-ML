@@ -40,7 +40,7 @@ from futo_decoder_ceiling import (ENC_BETA, ENC_BETA_PRUNE, ENC_GAMMA,  # noqa: 
 from futo_decoder_eval import load_combined_vocab, load_test  # noqa: E402
 from paths import DEFAULT_LAYOUT, DEFAULT_WORKDIR, resolve  # noqa: E402
 from sweep_scoring import (TraceCandidates, _init_worker, build_emissions,  # noqa: E402
-                           collect, score_grid)
+                           collect, score_grid, strata)
 
 #: The published encoder-only preset every committed number is quoted at.
 PRESET = (ENC_GAMMA, ENC_LAMBDA, ENC_BETA, ENC_GAMMA_PRUNE, ENC_BETA_PRUNE)
@@ -180,8 +180,15 @@ def main() -> int:
         rec: Dict[str, object] = {}
         t1, t3, t5 = top(traces)
         rec["full"] = {"n": n, "t1": t1, "t3": t3, "t5": t5}
+        # The FUTO baselines are published per length stratum (<=3 / 4+) and the
+        # two strata move in opposite directions under several of the levers this
+        # campaign has tried, so an aggregate alone cannot be compared to them.
+        st = strata(list(traces), PRESET[0], PRESET[2], PRESET[1])
+        rec["strata"] = {k: {"n": v[0], "t1": v[1]} for k, v in st.items()}
         print(f"=== {arm} ===")
-        print(f"  {'FULL val':<24} n={n:<5} t1 {t1:5.2f}  t3 {t3:5.2f}  t5 {t5:5.2f}")
+        print(f"  {'FULL val':<24} n={n:<5} t1 {t1:5.2f}  t3 {t3:5.2f}  t5 {t5:5.2f}"
+              f"   (<=3 {st['<=3'][1]:5.2f} n={st['<=3'][0]} / "
+              f"4+ {st['4+'][1]:5.2f} n={st['4+'][0]})")
         for name, sel in (("futo", is_futo), ("hws", ~is_futo)):
             s = top(subset(traces, sel))
             rec[name] = {"n": int(sel.sum()), "t1": s[0], "t3": s[1], "t5": s[2]}
