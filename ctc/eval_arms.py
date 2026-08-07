@@ -218,11 +218,22 @@ def main() -> int:
         if ck.exists():
             import torch
             meta = torch.load(ck, map_location="cpu", weights_only=True)
-            rec["best_val_greedy"] = float(meta["best"])
+            # Pre-Phase-D runs select on val_greedy (a fraction); Phase D selects
+            # on beam top-1 over a 2,000-row val prefix (a percent). Report both
+            # the metric name and the checkpoint's own greedy/beam values so a
+            # mixed table cannot be misread.
+            sel = str(meta.get("select_metric", "val_greedy"))
+            rec["select_metric"] = sel
+            rec["best_select"] = float(meta["best"])
             rec["best_epoch"] = int(meta["best_epoch"])
             rec["step"] = int(meta["step"])
-            print(f"  best val_greedy {meta['best'] * 100:.2f}% @ epoch "
-                  f"{meta['best_epoch']} (step {meta['step']})")
+            rec["ckpt_val_greedy"] = float(meta.get("val_greedy", float("nan")))
+            rec["ckpt_beam2000_t1"] = float(meta.get("val_beam_t1", float("nan")))
+            shown = (meta["best"] * 100 if sel == "val_greedy" else meta["best"])
+            print(f"  selected on {sel} = {shown:.2f} @ epoch {meta['best_epoch']} "
+                  f"(step {meta['step']}); ckpt greedy "
+                  f"{rec['ckpt_val_greedy'] * 100:.2f}%  beam2000 t1 "
+                  f"{rec['ckpt_beam2000_t1']:.2f}")
         print(f"  [{time.time() - t0:.1f}s]\n")
         results[arm] = rec
 

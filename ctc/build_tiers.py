@@ -12,6 +12,15 @@ Tiers (all evaluated against the SAME canonical val-9918 / test-2400):
        that discarded ~250 k rows was net-positive.
   T2b  T2 plus the recoverable quality rules (duration window, point cap), so the
        curation question decomposes into "which filter earned its keep".
+  T3   the **benchmark** arm (Phase D): the full FUTO swipe-1 train pool with
+       hygiene only, **NO session exclusion**, plus the FULL How-We-Swipe release
+       (1,338 participants, not the 1,052-log local subset). Exact-trace dedup vs
+       the canonical holdout is the *only* contamination control. See the
+       disclosure in ``PHASE_D.md`` §2: the published FUTO baselines were trained
+       on the literal test traces, so a tier that is exact-deduped is already
+       strictly more conservative than they are — but T3 is contributor-dirty by
+       construction and can therefore NOT support a generalization claim. It
+       exists to be comparable with published numbers, nothing else.
 
 Contamination control (applied to every tier):
   a. **Exact-trace dedup** against canonical val/test — also re-applied inside
@@ -40,10 +49,21 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from paths import DEFAULT_WORKDIR, resolve  # noqa: E402
+from prepare_data import trace_hash as trace_hash_xyt  # noqa: E402
 from scan_futo_sessions import trace_hash  # noqa: E402
 
 NST = Path("/home/will/git/swype/neural-swipe-typing/data")
 CCO = Path("/home/will/git/swype/cc-old-data")
+
+#: Full How-We-Swipe release (fetch_hws_full.py). 1,338 participants; the pool the
+#: canonical splits were built from is the 1,052-log local subset of this.
+HWS_FULL_LOGS = Path.home() / "ctc-train" / "data" / "hws_full" / "swipelogs"
+
+#: Column offsets of the 12-field space-separated swipetraces .log rows
+#: (sentence timestamp keyb_width keyb_height event x_pos y_pos x_radius
+#:  y_radius angle word is_err), documented in the OSF wiki.
+LOG_TS, LOG_KW, LOG_KH = 1, 2, 3
+LOG_EVENT, LOG_X, LOG_Y, LOG_WORD, LOG_IS_ERR = 4, 5, 6, 10, 11
 
 #: Quality rules recovered VERBATIM from the user's actual FUTO filter
 #: (scripts/filter_and_normalize_dataset.py, whose stats file reproduces the
@@ -95,6 +115,23 @@ def load_pool_hashes(path: Path) -> Set[bytes]:
         for line in f:
             o = json.loads(line)
             out.add(hash_row(o["word"], o["points"]))
+    return out
+
+
+def load_pool_hashes_xyt(path: Path) -> Set[bytes]:
+    """As :func:`load_pool_hashes`, under ``prepare_data``'s ``word+x+y+t`` hash.
+
+    The two conventions differ in two ways: this one includes the timestamps and
+    does **not** lowercase the word. Applying both and taking the union means a
+    tier row is dropped if it matches a holdout trace under either.
+    """
+    out = set()
+    with open(path) as f:
+        for line in f:
+            o = json.loads(line)
+            pts = o["points"]
+            out.add(trace_hash_xyt(o["word"], [p["x"] for p in pts],
+                                   [p["y"] for p in pts], [p["t"] for p in pts]))
     return out
 
 
@@ -263,6 +300,128 @@ def build_t2(args, holdout: Set[bytes], h2s, tainted, quality: bool) -> None:
     (out.with_suffix(".stats.json")).write_text(json.dumps(st, indent=1))
 
 
+def parse_hws_log(path: Path):
+    """One swipetraces ``.log`` -> canonical ``(word, points)`` rows.
+
+    Bit-exact replica of ``neural-swipe-typing/process_swipe_logs.py``, which is
+    what produced the HWS half of the canonical splits:
+
+    * skip the header line and any row with fewer than 12 space-separated fields
+      or a non-integer in a numeric column;
+    * drop every row flagged ``is_err == 1`` **before** trace assembly, so an
+      error row silently disappears from the middle of a trace rather than
+      splitting it;
+    * a trace opens on ``touchstart`` and closes on its ``touchend`` or on the
+      next ``touchstart``, and is kept only at ``>= 3`` points;
+    * ``t = timestamp - trace_start``, ``x = x_pos / keyb_width``,
+      ``y = y_pos / keyb_height`` — the same float division, so the output is
+      bit-identical to the canonical rows (verified: all 60,303 unique traces of
+      the 61,597-row canonical pool are reproduced exactly from the release).
+
+    The caller applies the ``len(word) >= 2`` drop, exactly as the original
+    pipeline did downstream of this function.
+    """
+    out = []
+    cur: list = []
+    start = kw = kh = None
+    word = None
+
+    def flush() -> None:
+        nonlocal cur
+        if len(cur) >= 3 and word is not None:
+            out.append((word, [{"t": float(ts - start),
+                                "x": float(x) / float(kw),
+                                "y": float(y) / float(kh)} for ts, x, y in cur]))
+        cur = []
+
+    with path.open(errors="replace") as fh:
+        fh.readline()                                   # header
+        for line in fh:
+            parts = line.split()
+            if len(parts) < 12:
+                continue
+            try:
+                ts = int(parts[LOG_TS])
+                w_, h_ = int(parts[LOG_KW]), int(parts[LOG_KH])
+                x, y = int(parts[LOG_X]), int(parts[LOG_Y])
+                is_err = int(parts[LOG_IS_ERR])
+            except (ValueError, IndexError):
+                continue
+            if is_err == 1:
+                continue
+            event = parts[LOG_EVENT]
+            if event == "touchstart":
+                flush()
+                cur = [(ts, x, y)]
+                start, kw, kh, word = ts, w_, h_, parts[LOG_WORD]
+            elif event in ("touchmove", "touchend") and cur:
+                cur.append((ts, x, y))
+                if event == "touchend":
+                    flush()
+    flush()
+    return out
+
+
+def build_t3(args, holdout: Set[bytes], holdout_xyt: Set[bytes]) -> None:
+    """The Phase-D benchmark tier: full FUTO + full HWS, exact-trace dedup only.
+
+    Deliberately **no session/participant exclusion** — see the module docstring
+    and ``PHASE_D.md`` §2. Both hash forms are applied to every candidate row:
+    ``(word.lower(), x, y)`` from ``scan_futo_sessions`` and
+    ``(word, x, y, t)`` from ``prepare_data``. The first ignores timing, so it is
+    the stricter of the two; taking their union means a row is dropped if it
+    matches a holdout trace under *either* convention.
+    """
+    out = resolve(args.workdir, f"data/tier_t3{args.suffix}.jsonl")
+    st = dict(futo_in=0, futo_invalid_sentence=0, futo_leak_xy=0, futo_leak_xyt=0,
+              futo_kept=0, hws_logs=0, hws_traces=0, hws_len1=0,
+              hws_leak_xy=0, hws_leak_xyt=0, hws_kept=0)
+    t0 = time.time()
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with open(out, "w") as w:
+        # ── FUTO: the full swipe-1 train corpus, hygiene gate only ──────────────
+        with open(args.corpus) as f:
+            for line in f:
+                o = json.loads(line)
+                st["futo_in"] += 1
+                if o.get("potentially_invalid_sentence"):
+                    st["futo_invalid_sentence"] += 1
+                    continue
+                pts = canonical_points(o["data"])
+                word = o["word"].lower()
+                if hash_row(word, pts) in holdout:
+                    st["futo_leak_xy"] += 1
+                    continue
+                if trace_hash_xyt(word, [p["x"] for p in pts], [p["y"] for p in pts],
+                                  [p["t"] for p in pts]) in holdout_xyt:
+                    st["futo_leak_xyt"] += 1
+                    continue
+                w.write(json.dumps({"word": word, "points": pts}) + "\n")
+                st["futo_kept"] += 1
+        print(f"[T3] futo pass done ({time.time() - t0:.0f}s): {st}", flush=True)
+
+        # ── HWS: every participant in the release, not just the 1,052 local logs ─
+        for log in sorted(HWS_FULL_LOGS.glob("*.log")):
+            st["hws_logs"] += 1
+            for word, pts in parse_hws_log(log):
+                st["hws_traces"] += 1
+                if len(word) < 2:
+                    st["hws_len1"] += 1
+                    continue
+                if hash_row(word, pts) in holdout:
+                    st["hws_leak_xy"] += 1
+                    continue
+                if trace_hash_xyt(word, [p["x"] for p in pts], [p["y"] for p in pts],
+                                  [p["t"] for p in pts]) in holdout_xyt:
+                    st["hws_leak_xyt"] += 1
+                    continue
+                w.write(json.dumps({"word": word, "points": pts}) + "\n")
+                st["hws_kept"] += 1
+    st["total"] = st["futo_kept"] + st["hws_kept"]
+    print(f"[T3] {st}  ({time.time() - t0:.0f}s) -> {out}")
+    (out.with_suffix(".stats.json")).write_text(json.dumps(st, indent=1))
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -285,10 +444,21 @@ def main() -> int:
     holdout = load_pool_hashes(NST / "val_hwsfuto.jsonl") | \
         load_pool_hashes(NST / "test_hwsfuto.jsonl")
     print(f"canonical holdout traces: {len(holdout)}")
+
+    want = set(args.tiers.split(","))
+    if "t3" in want:
+        # T3 is the only tier with no session exclusion, so it needs no corpus
+        # index — but it applies BOTH hash conventions instead of one.
+        holdout_xyt = load_pool_hashes_xyt(NST / "val_hwsfuto.jsonl") | \
+            load_pool_hashes_xyt(NST / "test_hwsfuto.jsonl")
+        print(f"canonical holdout traces (word+x+y+t hash): {len(holdout_xyt)}")
+        build_t3(args, holdout, holdout_xyt)
+    if not (want - {"t3"}):
+        return 0
+
     h2s, tainted = session_lookup(args.workdir)
     print(f"corpus hash->session entries: {len(h2s)}; tainted sessions: {len(tainted)}")
 
-    want = set(args.tiers.split(","))
     if "t1" in want:
         build_t1(args, holdout, h2s, tainted)
     if "t2" in want:

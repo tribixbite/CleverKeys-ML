@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import multiprocessing as mp
 import os
 import random
 import sys
@@ -36,7 +37,11 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader, Dataset
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from model import MAX_KEYS, T_OUT, CtcSwipeEncoder  # noqa: E402
+from futo_decoder_ceiling import (ENC_BETA, ENC_BETA_PRUNE, ENC_GAMMA,  # noqa: E402
+                                  ENC_GAMMA_PRUNE, ENC_LAMBDA, futo_viterbi_beam)
+from futo_decoder_eval import (load_combined_vocab, load_layout,  # noqa: E402
+                               load_test)
+from model import MAX_KEYS, T_OUT, CtcSwipeEncoder, slice_head_torch  # noqa: E402
 from paths import DEFAULT_LAYOUT, DEFAULT_WORKDIR, resolve  # noqa: E402
 
 BLANK = MAX_KEYS  # 64 — full-head blank index (the Kotlin slice relocates it to K)
@@ -216,6 +221,143 @@ def greedy_accuracy(model: torch.nn.Module, loader: DataLoader, device: str,
     return hit / max(n, 1)
 
 
+# ── beam-t1 checkpoint selection (Phase D) ─────────────────────────────────────
+#
+# Phase B measured greedy accuracy moving +5.16 pt while beam top-1 moved −1.38 pt
+# on the same arm, so `best val_greedy` selects checkpoints by a metric that
+# ANTI-CORRELATES with the metric that ships. From Phase D on, `best.pt` is chosen
+# by lexicon-beam top-1 over a fixed val prefix.
+#
+# Worker globals: populated once in the parent and inherited through fork, so the
+# 147 k-word trie is never pickled and never copied (copy-on-write). The emission
+# buffer is a shared RawArray the parent overwrites in place at every validation,
+# which is what lets the pool be forked ONCE — before CUDA is initialised — and
+# reused for the whole run.
+_BV_TRIE = None
+_BV_LETTERS: List[str] = []
+_BV_TARGETS: List[str] = []
+_BV_EM: Optional[np.ndarray] = None
+_BV_WIDTH = 100
+
+
+def _beam_init(trie, letters: List[str], targets: List[str], shm, n: int,
+               width: int) -> None:
+    global _BV_TRIE, _BV_LETTERS, _BV_TARGETS, _BV_EM, _BV_WIDTH
+    _BV_TRIE, _BV_LETTERS, _BV_TARGETS, _BV_WIDTH = trie, letters, targets, width
+    _BV_EM = np.frombuffer(shm, np.float32).reshape(n, T_OUT, len(letters) + 1)
+
+
+def _beam_chunk(bounds: Tuple[int, int]) -> Tuple[int, int, int]:
+    """Decode rows ``[lo,hi)`` from the shared buffer -> ``(hits1, hits3, hits5)``.
+
+    The beam is called with the published ``enc`` preset and ``top_k=5``, which is
+    exactly what ``eval_beam.py`` does; ``sweep_scoring``'s raw-score trick is not
+    needed here because the preset is fixed, and ``top_k=5`` is cheaper than
+    returning the whole terminal beam.
+    """
+    lo, hi = bounds
+    n_letters = len(_BV_LETTERS)
+    h1 = h3 = h5 = 0
+    for i in range(lo, hi):
+        cands = futo_viterbi_beam(_BV_EM[i], _BV_LETTERS, n_letters, _BV_TRIE,
+                                  _BV_WIDTH, 5, ENC_GAMMA, ENC_LAMBDA, ENC_BETA,
+                                  ENC_GAMMA_PRUNE, ENC_BETA_PRUNE)
+        words = [w for w, _ in cands]
+        tgt = _BV_TARGETS[i]
+        try:
+            r = words.index(tgt)
+        except ValueError:
+            continue
+        h1 += r < 1
+        h3 += r < 3
+        h5 += r < 5
+    return h1, h3, h5
+
+
+class BeamValidator:
+    """Lexicon-beam top-1/3/5 over a fixed val prefix, run in-process during training.
+
+    :param cache_dir: holds ``val.npz`` (the featurized canonical val split, in
+        jsonl row order — asserted against the jsonl here so a re-prepared cache
+        cannot silently misalign the targets).
+    :param n_rows: prefix length. 2,000 rows carry a binomial SE of ~0.87 pt on a
+        ~80 % rate, which is noisy in absolute terms but is used only to rank
+        checkpoints *within* one run, where the comparison is paired.
+    :param jobs: fork-pool size. The pool is created once, at construction time,
+        and reused for every validation.
+    """
+
+    def __init__(self, workdir: Path, layout: Path, cache_dir: Path,
+                 val_jsonl: Path, vocab: Path, n_rows: int, beam_width: int,
+                 jobs: int) -> None:
+        letters, centers = load_layout(layout)
+        rows = load_test(val_jsonl)
+        with np.load(cache_dir / "val.npz") as d:
+            feats = np.array(d["features"])
+            cached_words = [str(w) for w in d["words"]]
+        if len(feats) != len(rows):
+            raise SystemExit(
+                f"beam-val: val.npz has {len(feats)} rows but {val_jsonl.name} has "
+                f"{len(rows)}; re-run prepare_data.py (row order must match)")
+        self.n = min(n_rows, len(rows))
+        # Targets are the jsonl words lowercased — identical to eval_arms.py, so
+        # the selection metric and the reported metric are the same quantity.
+        self.targets = [w.lower() for w, _, _, _ in rows[:self.n]]
+        mismatch = sum(1 for a, b in zip(self.targets, cached_words[:self.n])
+                       if a != b)
+        self.features = torch.from_numpy(feats[:self.n])          # [N,2,64]
+        self.n_letters = len(letters)
+        keys = np.zeros((MAX_KEYS, 2), np.float32)
+        keys[:self.n_letters] = centers
+        mask = np.zeros((MAX_KEYS,), bool)
+        mask[:self.n_letters] = True
+        self.keys = torch.from_numpy(keys)[None]                  # [1,64,2]
+        self.mask = torch.from_numpy(mask)[None]                  # [1,64]
+
+        trie = load_combined_vocab(vocab)
+        self._shm = mp.RawArray("f", self.n * T_OUT * (self.n_letters + 1))
+        self._view = np.frombuffer(self._shm, np.float32).reshape(
+            self.n, T_OUT, self.n_letters + 1)
+        step = max(1, (self.n + jobs - 1) // jobs)
+        self.chunks = [(a, min(a + step, self.n)) for a in range(0, self.n, step)]
+        ctx = mp.get_context("fork")
+        self.pool = ctx.Pool(jobs, initializer=_beam_init,
+                             initargs=(trie, letters, self.targets, self._shm,
+                                       self.n, beam_width))
+        print(f"beam-val: {self.n} rows, trie {trie.num_words} words, "
+              f"width {beam_width}, {jobs} procs"
+              + (f"  ({mismatch} targets differ from the a-z-normalised cache)"
+                 if mismatch else ""))
+
+    @torch.no_grad()
+    def run(self, model: torch.nn.Module, device: str, batch: int = 512
+            ) -> Tuple[float, float, float]:
+        """-> ``(t1, t3, t5)`` percentages for *model* on the fixed prefix."""
+        was_training = model.training
+        model.eval()
+        off = 0
+        for s in range(0, self.n, batch):
+            f = self.features[s:s + batch].to(device)
+            b = f.shape[0]
+            log_e, _, _ = model(f, self.keys.to(device).expand(b, -1, -1),
+                                self.mask.to(device).expand(b, -1))
+            sliced = slice_head_torch(log_e, self.n_letters)       # [b,32,27]
+            self._view[off:off + b] = sliced.detach().cpu().numpy()
+            off += b
+        if was_training:
+            model.train()
+        h1 = h3 = h5 = 0
+        for a, b_, c in self.pool.map(_beam_chunk, self.chunks):
+            h1 += a
+            h3 += b_
+            h5 += c
+        return (h1 / self.n * 100.0, h3 / self.n * 100.0, h5 / self.n * 100.0)
+
+    def close(self) -> None:
+        self.pool.close()
+        self.pool.join()
+
+
 class ModelEMA:
     """Exponential moving average of the model's float state (Phase C2).
 
@@ -298,8 +440,9 @@ def atomic_save(payload: Dict[str, object], path: Path) -> None:
 
 def build_checkpoint(model, opt, sched, step: int, epoch: int, best: float,
                      best_epoch: int, args: argparse.Namespace,
-                     val_greedy: float, ema: "Optional[ModelEMA]" = None
-                     ) -> Dict[str, object]:
+                     val_greedy: float, ema: "Optional[ModelEMA]" = None,
+                     val_beam: "Optional[Tuple[float, float, float]]" = None,
+                     select_metric: str = "val_greedy") -> Dict[str, object]:
     """Assemble the full resumable checkpoint payload.
 
     When EMA is on, ``model`` holds the AVERAGED weights — that is what every
@@ -307,6 +450,10 @@ def build_checkpoint(model, opt, sched, step: int, epoch: int, best: float,
     reported val number was measured on. The live weights are kept under
     ``model_raw`` so a resume continues the actual trajectory rather than the
     average.
+
+    ``best``/``best_epoch`` track whichever metric ``select_metric`` names — from
+    Phase D that is ``val_beam_t1`` (percent), not ``val_greedy`` (fraction), so
+    the field is recorded explicitly rather than left to be inferred from scale.
     """
     payload = {
         "model": (ema.state_dict() if ema is not None else model.state_dict()),
@@ -317,6 +464,10 @@ def build_checkpoint(model, opt, sched, step: int, epoch: int, best: float,
         "best": best,
         "best_epoch": best_epoch,
         "val_greedy": val_greedy,
+        "select_metric": select_metric,
+        "val_beam_t1": float(val_beam[0]) if val_beam else float("nan"),
+        "val_beam_t3": float(val_beam[1]) if val_beam else float("nan"),
+        "val_beam_t5": float(val_beam[2]) if val_beam else float("nan"),
         "args": {k: (str(v) if isinstance(v, Path) else v) for k, v in vars(args).items()},
         "rng": rng_state(),
         # Convenience duplicates so eval/export can read the arch without --args.
@@ -372,10 +523,25 @@ def main() -> int:
                     help="C1: per-trace gaussian scale jitter on the PATH only")
     ap.add_argument("--ema-decay", type=float, default=0.0, dest="ema_decay",
                     help="C2: EMA decay for the evaluated/exported weights (0 = off)")
+    ap.add_argument("--beam-val-rows", type=int, default=2000, dest="beam_val_rows",
+                    help="Phase D: select best.pt on lexicon-beam top-1 over this "
+                         "many val rows instead of greedy accuracy (0 = greedy, "
+                         "the pre-Phase-D behaviour). Phase B showed greedy "
+                         "anti-correlates with beam top-1.")
+    ap.add_argument("--beam-width", type=int, default=100, dest="beam_width")
+    ap.add_argument("--beam-jobs", type=int, default=12, dest="beam_jobs")
+    ap.add_argument("--vocab", default="data/futo_en_wordlist.combined",
+                    help="AOSP lexicon for the selection beam")
+    ap.add_argument("--val-jsonl", default="data/val_hwsfuto.jsonl", dest="val_jsonl",
+                    help="canonical val split; supplies the beam targets")
     ap.add_argument("--patience", type=int, default=40)
     ap.add_argument("--seed", type=int, default=1234)
     ap.add_argument("--workers", type=int, default=8)
     args = ap.parse_args()
+
+    if "test" in Path(args.val_jsonl).name:
+        raise SystemExit(f"refusing to select checkpoints on {args.val_jsonl}: "
+                         "test-2400 is sealed")
 
     if not args.run_name:
         args.run_name = time.strftime("run-%Y%m%d-%H%M%S")
@@ -390,6 +556,17 @@ def main() -> int:
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     centers = load_layout_centers(args.layout)
+    # Built BEFORE the model touches the GPU: the beam pool is forked once here so
+    # the 147 k-word trie is inherited copy-on-write and no child ever inherits a
+    # live CUDA context.
+    beam_val = None
+    if args.beam_val_rows > 0:
+        beam_val = BeamValidator(args.workdir, args.layout, cache_dir,
+                                 resolve(args.workdir, args.val_jsonl),
+                                 resolve(args.workdir, args.vocab),
+                                 args.beam_val_rows, args.beam_width,
+                                 args.beam_jobs)
+    select_metric = "val_beam_t1" if beam_val is not None else "val_greedy"
     train_ds = SwipeDataset(cache_dir / args.train_npz, centers, augment=True,
                             path_offset_sigma=args.path_offset_sigma,
                             path_scale_sigma=args.path_scale_sigma)
@@ -459,9 +636,17 @@ def main() -> int:
         step = int(ck["step"])
         start_epoch = int(ck["epoch"]) + 1
         best, best_epoch = float(ck["best"]), int(ck["best_epoch"])
+        prev_metric = ck.get("select_metric", "val_greedy")
+        if prev_metric != select_metric:
+            # `best` is on a different scale (greedy is a fraction, beam t1 a
+            # percent), so carrying it across would silently freeze or thrash
+            # best.pt. Restart the tracker instead of comparing incomparables.
+            print(f"[resume] selection metric changed {prev_metric} -> "
+                  f"{select_metric}; resetting best")
+            best, best_epoch = -1.0, -1
         restore_rng(ck["rng"])
         print(f"[resume] {rpath}: continuing at epoch {start_epoch}, step {step}, "
-              f"best val_greedy {best * 100:.2f}% @ epoch {best_epoch}")
+              f"best {select_metric} {best:.4f} @ epoch {best_epoch}")
 
     if start_epoch >= args.epochs:
         print(f"nothing to do: checkpoint already at epoch {start_epoch - 1} "
@@ -497,27 +682,40 @@ def main() -> int:
                 if ema is not None:
                     ema.copy_to(eval_model)
                 acc = greedy_accuracy(eval_model, val_dl, device)
+                bt0 = time.time()
+                bm = beam_val.run(eval_model, device) if beam_val is not None else None
+                beam_secs = time.time() - bt0 if bm else 0.0
+                # Phase D: the checkpoint is chosen by the metric that ships.
+                score = bm[0] if bm else acc
                 lr_now = sched.get_last_lr()[0]
                 secs = time.time() - t0
                 mean_loss = running / max(nb, 1)
                 running, nb, t0 = 0.0, 0, time.time()
                 evals += 1
+                bstr = (f"  beam t1 {bm[0]:5.2f} t3 {bm[1]:5.2f} t5 {bm[2]:5.2f} "
+                        f"({beam_secs:.1f}s)" if bm else "")
                 print(f"epoch {epoch:3d} step {step:6d}  ctc_loss {mean_loss:.4f}  "
-                      f"val_greedy {acc * 100:.2f}%  lr {lr_now:.2e}  {secs:.1f}s",
-                      flush=True)
+                      f"val_greedy {acc * 100:.2f}%{bstr}  lr {lr_now:.2e}  "
+                      f"{secs:.1f}s", flush=True)
                 with open(metrics_path, "a") as mf:
-                    mf.write(json.dumps({"epoch": epoch, "step": step,
-                                         "ctc_loss": mean_loss, "val_greedy": acc,
-                                         "lr": lr_now, "seconds": round(secs, 3)}) + "\n")
-                if acc > best:
-                    best, best_epoch, best_eval = acc, epoch, evals
+                    rec = {"epoch": epoch, "step": step, "ctc_loss": mean_loss,
+                           "val_greedy": acc, "lr": lr_now,
+                           "seconds": round(secs, 3)}
+                    if bm:
+                        rec.update({"val_beam_t1": bm[0], "val_beam_t3": bm[1],
+                                    "val_beam_t5": bm[2],
+                                    "beam_seconds": round(beam_secs, 3)})
+                    mf.write(json.dumps(rec) + "\n")
+                if score > best:
+                    best, best_epoch, best_eval = score, epoch, evals
                 ckpt = build_checkpoint(model, opt, sched, step, epoch, best,
-                                        best_epoch, args, acc, ema)
+                                        best_epoch, args, acc, ema, bm,
+                                        select_metric)
                 atomic_save(ckpt, run_dir / "last.pt")
                 if best_eval == evals:
                     atomic_save(ckpt, run_dir / "best.pt")
                 elif evals - best_eval >= args.patience:
-                    print(f"early stop (best val_greedy {best * 100:.2f}%)", flush=True)
+                    print(f"early stop (best {select_metric} {best:.4f})", flush=True)
                     stop = True
                 if step >= total_steps:
                     print(f"reached step budget {total_steps}", flush=True)
@@ -527,7 +725,9 @@ def main() -> int:
         if stop:
             break
 
-    print(f"done. best val_greedy {best * 100:.2f}% @ epoch {best_epoch} "
+    if beam_val is not None:
+        beam_val.close()
+    print(f"done. best {select_metric} {best:.4f} @ epoch {best_epoch} "
           f"-> {run_dir / 'best.pt'}")
     return 0
 
