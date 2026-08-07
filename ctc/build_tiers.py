@@ -139,7 +139,7 @@ def build_t1(args, holdout: Set[bytes], h2s, tainted) -> None:
                 hws_sess[hash_row(o["word"], o["points"])] = str(o.get("session"))
     hws_tainted = {hws_sess[k] for k in holdout if k in hws_sess}
     print(f"[T1] HWS participants touching holdout: {len(hws_tainted)}")
-    out = resolve(args.workdir, "data/tier_t1.jsonl")
+    out = resolve(args.workdir, f"data/tier_t1{args.suffix}.jsonl")
     stats = dict(hws_kept=0, hws_leak=0, hws_taint=0, futo_in=0, futo_leak=0, futo_taint=0,
                  futo_unmapped=0, futo_kept=0)
     t0 = time.time()
@@ -182,7 +182,7 @@ def build_t1(args, holdout: Set[bytes], h2s, tainted) -> None:
 def build_t2(args, holdout: Set[bytes], h2s, tainted, quality: bool) -> None:
     """HF swipe-1 train, converted to canonical rows, hygiene + contamination."""
     tag = "t2b" if quality else "t2"
-    out = resolve(args.workdir, f"data/tier_{tag}.jsonl")
+    out = resolve(args.workdir, f"data/tier_{tag}{args.suffix}.jsonl")
     st = dict(rows_in=0, invalid_sentence=0, leak=0, taint=0, unmapped=0,
               bad_duration=0, too_many_points=0, not_portrait=0, canvas_dims=0,
               canvas_wide=0, bad_speed=0, invalid_word=0, not_in_dictionary=0, kept=0)
@@ -260,6 +260,10 @@ def main() -> int:
                     default=NST / "futo" / "train.jsonl",
                     help="HF swipe-1 train.jsonl (raw schema) for T2/T2b")
     ap.add_argument("--tiers", default="t1,t2,t2b")
+    ap.add_argument("--suffix", default="",
+                    help="appended to every tier's output stem (e.g. '_strict'), so a "
+                         "rebuild under different exclusion rules lands in its own file "
+                         "instead of clobbering the tier a run already trained on")
     ap.add_argument("--keep-hws-overlap", action="store_true", dest="keep_hws_overlap",
                     help="keep HWS rows from participants who also appear in the "
                          "holdout (reproduces the original, contaminated T1)")
