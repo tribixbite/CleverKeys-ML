@@ -30,7 +30,7 @@ import torch
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from futo_decoder_ceiling import slice_emissions  # noqa: E402
 from futo_decoder_eval import load_layout  # noqa: E402
-from model import MAX_KEYS, T_IN, CtcSwipeEncoder  # noqa: E402
+from model import MAX_KEYS, T_IN, encoder_from_checkpoint  # noqa: E402
 from paths import DEFAULT_LAYOUT, DEFAULT_WORKDIR, resolve  # noqa: E402
 
 PARITY_TRIALS = 100
@@ -53,9 +53,11 @@ def main() -> int:
     num_letters = len(letters)
 
     ck = torch.load(ckpt_path, map_location="cpu", weights_only=True)
-    model = CtcSwipeEncoder(ch=ck.get("ch", 96),
-                            embed_hid=ck.get("embed_hid", 96)).eval()
+    model = encoder_from_checkpoint(ck).eval()
     model.load_state_dict(ck["model"])
+    print(f"arch: ch={model.ch} block={model.block} feat_v{model.feat_version} "
+          f"dil={model.dilations}  params "
+          f"{sum(p.numel() for p in model.parameters())}")
 
     feats = torch.rand(1, 2, T_IN)
     keys = torch.rand(1, MAX_KEYS, 2)

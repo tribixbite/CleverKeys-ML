@@ -34,7 +34,7 @@ from futo_decoder_ceiling import (DEC_BETA, DEC_BETA_PRUNE, DEC_GAMMA,  # noqa: 
                                   ENC_BETA_PRUNE, ENC_GAMMA, ENC_GAMMA_PRUNE,
                                   ENC_LAMBDA, build_decoder_input,
                                   futo_viterbi_beam, slice_emissions)
-from model import MAX_KEYS, CtcRefineHead, CtcSwipeEncoder  # noqa: E402
+from model import MAX_KEYS, CtcRefineHead, encoder_from_checkpoint  # noqa: E402
 from paths import DEFAULT_LAYOUT, DEFAULT_WORKDIR, resolve  # noqa: E402
 
 #: scoring.json presets: encoder-only vs encoder+refinement (guide §7 / §11 step 6).
@@ -59,8 +59,7 @@ class TorchEncoder:
 
     def __init__(self, ckpt_path: Path, device: str = "cpu") -> None:
         ck = torch.load(ckpt_path, map_location="cpu", weights_only=True)
-        self.model = CtcSwipeEncoder(ch=ck.get("ch", 96),
-                                     embed_hid=ck.get("embed_hid", 96)).eval().to(device)
+        self.model = encoder_from_checkpoint(ck).eval().to(device)
         self.model.load_state_dict(ck["model"])
         self.device = device
 

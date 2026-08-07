@@ -42,7 +42,7 @@ from paths import DEFAULT_LAYOUT, DEFAULT_WORKDIR, resolve  # noqa: E402
 BLANK = MAX_KEYS  # 64 — full-head blank index (the Kotlin slice relocates it to K)
 
 #: Args that define the architecture; a --resume must agree on all of them.
-ARCH_ARGS = ("ch", "embed_hid")
+ARCH_ARGS = ("ch", "embed_hid", "feat_version", "block", "dilations")
 
 #: Affine augmentation bounds (audit fix #13 rejection-samples within these).
 SCALE_LO, SCALE_HI = 0.85, 1.15
@@ -260,6 +260,9 @@ def build_checkpoint(model, opt, sched, step: int, epoch: int, best: float,
         # Convenience duplicates so eval/export can read the arch without --args.
         "ch": args.ch,
         "embed_hid": args.embed_hid,
+        "feat_version": args.feat_version,
+        "block": args.block,
+        "dilations": tuple(int(v) for v in args.dilations.split(",")),
     }
 
 
@@ -281,6 +284,14 @@ def main() -> int:
     ap.add_argument("--warmup", type=int, default=1000)
     ap.add_argument("--ch", type=int, default=96)
     ap.add_argument("--embed-hid", type=int, default=96, dest="embed_hid")
+    ap.add_argument("--feat-version", type=int, default=1, choices=(1, 2),
+                    dest="feat_version",
+                    help="1 = 8 path channels; 2 = 14 kinematic channels + a "
+                         "learned reduction of the key-proximity field (B1)")
+    ap.add_argument("--block", default="res", choices=("res", "convnext"),
+                    help="trunk block: original residual, or depthwise/GLU/GRN/SE (B2)")
+    ap.add_argument("--dilations", default="1,2,4,8",
+                    help="comma-separated dilation per trunk block")
     ap.add_argument("--total-steps", type=int, default=0, dest="total_steps",
                     help="step-equalized budget: cosine horizon and stopping are "
                          "measured in optimizer steps, not epochs (0 = use --epochs)")
@@ -314,10 +325,14 @@ def main() -> int:
                         num_workers=val_workers,
                         persistent_workers=val_workers > 0)
 
-    model = CtcSwipeEncoder(ch=args.ch, embed_hid=args.embed_hid).to(device)
+    dilations = tuple(int(v) for v in args.dilations.split(","))
+    model = CtcSwipeEncoder(ch=args.ch, embed_hid=args.embed_hid,
+                            dilations=dilations, feat_version=args.feat_version,
+                            block=args.block).to(device)
     n_params = sum(p.numel() for p in model.parameters())
-    print(f"run {args.run_name}  params: {n_params / 1e6:.2f}M  device: {device}  "
-          f"train {len(train_ds)}  val {len(val_ds)}")
+    print(f"run {args.run_name}  params: {n_params / 1e6:.3f}M ({n_params})  "
+          f"device: {device}  feat_v{args.feat_version} block={args.block} "
+          f"ch={args.ch} dil={dilations}  train {len(train_ds)}  val {len(val_ds)}")
 
     ctc = torch.nn.CTCLoss(blank=BLANK, zero_infinity=True)
     opt = torch.optim.AdamW(model.parameters(), lr=args.lr,

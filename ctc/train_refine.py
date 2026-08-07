@@ -41,7 +41,7 @@ import torch
 from torch.utils.data import DataLoader
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from model import (CtcRefineHead, CtcSwipeEncoder, T_OUT,  # noqa: E402
+from model import (CtcRefineHead, CtcSwipeEncoder, encoder_from_checkpoint, T_OUT,  # noqa: E402
                    build_refine_input, refine_input_dim)
 from paths import DEFAULT_LAYOUT, DEFAULT_WORKDIR, resolve, sha256_file  # noqa: E402
 from train import (SwipeDataset, atomic_save, collate, greedy_accuracy,  # noqa: E402
@@ -57,7 +57,7 @@ UNFREEZE_LR_SCALE = 0.1
 def load_base(base_ckpt: Path, device: str) -> CtcSwipeEncoder:
     """Load the trained encoder that produces the head's inputs."""
     ck = torch.load(base_ckpt, map_location="cpu", weights_only=True)
-    base = CtcSwipeEncoder(ch=ck.get("ch", 96), embed_hid=ck.get("embed_hid", 96))
+    base = encoder_from_checkpoint(ck)
     base.load_state_dict(ck["model"])
     return base.to(device)
 
