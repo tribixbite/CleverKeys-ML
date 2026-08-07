@@ -31,7 +31,8 @@ only, so **inference cost is unchanged**.
 
 On the clean-mask t1 the decision rule uses, **no arm gains**, so no rerun threshold is
 even triggered and **no arm is adopted by the rule**. All three sit within −0.46 pt of
-B0, i.e. inside the ~0.4–0.5 pt noise floor Phase A established.
+B0 — inside the ~1 pt seed-noise floor measured in §4 below, so none of these three
+numbers is individually interpretable.
 
 ## 3. C1 is a clean negative, and that is worth knowing
 
@@ -45,9 +46,11 @@ disagreement. The hypothesis was that training that tolerance would recover HWS 
 distribution difference in how the two populations swipe. This closes a hypothesis that
 would otherwise have been worth several more experiments.
 
-## 4. C2 (EMA) is the only positive result in Phase B or C
+## 4. C2 (EMA): promising at one seed, downgraded by the second
 
-It is neutral on the aggregate and positive on exactly the axis the campaign cares about.
+At seed 1234 it is neutral on the aggregate and positive on exactly the axis the campaign
+cares about — the only such result in either phase. The seed check below then removes most
+of that claim, so read this table together with the one that follows it, not on its own.
 
 | metric | B0 | C2 | Δ |
 |---|---|---|---|
@@ -63,8 +66,9 @@ trade the brief asked for — "the HWS-side number is our generalization gauge, 
 robustness is where the win lives". The aggregate clean t1 hides it because that subset is
 46 % FUTO and 54 % HWS, so the two moves nearly cancel.
 
-C2 also improves t3 and t5, which the beam's top-3/top-5 suggestion slots consume
-directly, and it costs **zero** inference time.
+C2 also improves t3 and t5 here, which the beam's top-3/top-5 suggestion slots consume
+directly, and it costs **zero** inference time. (The t3/t5 gain does not survive the second
+seed; the HWS gain does, at reduced size.)
 
 ### Seed confirmation — and the noise floor it exposed
 
