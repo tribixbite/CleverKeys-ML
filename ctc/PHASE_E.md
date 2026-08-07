@@ -133,3 +133,58 @@ half (92.92 vs 92.88) and **loses** it on full val (92.75 vs 92.78). The t5
 differences across the flat region are not resolvable, so the preset was left at
 the t1 optimum its own protocol selected, and no point was chosen for clearing a
 bar it was measured against.
+
+### The prune params, tested properly — mostly a null
+
+`gamma` moved 0.41 → 1.05, and `gammaPrune` plays the same length-normalising role
+during *survival*: a mis-tuned one drops candidates before the final score ever
+sees them, which would cap t3/t5 no matter what the score does. Every previous
+sweep could only search the published value ±0.05, so `sweep_scoring.py` gained
+explicit `--grid-gamma-prune`/`--grid-beta-prune`. Swept 0.3734–1.35 on
+`phaseE-E4-ch192`:
+
+| gammaPrune | 0.3734 | 0.60 | 0.85 | 1.10 | 1.35 |
+|---|---|---|---|---|---|
+| best sweep-half t1 (betaPrune 0.5) | **88.47** | 88.36 | 88.30 | 87.60 | 79.75 |
+| best sweep-half t1 (betaPrune 0.9882) | 88.40 | 88.32 | 87.46 | 75.38 | 14.62 |
+
+`gammaPrune` wants to stay **low** — it is already near-optimal at the published
+0.3734 and collapses catastrophically above ~1.0. `betaPrune` prefers 0.5 to the
+published 0.9882 by 0.07 pt, which is noise. **The prune hypothesis is tested and
+mostly dead**; unlike the score params, the published prune setting was close to
+right. It is included in later grids anyway, since it costs one beam pass each.
+
+---
+
+## 2. E2 — the refinement head, retested on a strong base and re-tuned. Still null
+
+`train_refine.py` was brought up to Phase-D/E standards for this arm: a step
+budget instead of an epoch count, the T3 cache instead of T0, and **beam-t1
+checkpoint selection at the E1 preset** rather than greedy (Phase 2 had selected
+its head on the metric Phase B showed anti-correlates with the beam).
+
+Trained on the frozen `phaseD-D1` seed-1234 base, 30,000 steps, batch 256:
+
+| config | preset | t1 | t3 | t5 | ≤3 | 4+ |
+|---|---|---|---|---|---|---|
+| base `D1` | E1 tuned | **86.96** | **91.85** | **92.78** | **89.70** | **85.54** |
+| + refine head | E1 tuned | 86.74 | 91.66 | 92.65 | 89.47 | 85.33 |
+| + refine head | its **own** re-tuned preset | 86.81 | 91.69 | 92.68 | 89.61 | 85.36 |
+
+**Negative on every metric and every stratum, under both presets.** The head's own
+selection metric peaked at 86.86 on the 5,000-row val prefix against the base's
+87.24 on the identical rows — it never once beat its own input.
+
+The re-tune matters for fairness and was run: refined emissions have a different
+calibration, so scoring them at a preset fitted to the unrefined ones would have
+been a rigged comparison. It closes about a third of the gap and leaves the sign
+unchanged.
+
+Phase 2's original result was "+0.00 aggregate, **+1.00 on ≤3**", and that ≤3
+profile is why the brief ranked this arm second. **It does not reproduce**: ≤3 is
+−0.23 (E1 preset) / −0.09 (own preset). The stated reason for the original null —
+FUTO's head recovered a base whose greedy was 43.96 %, while ours greedy-decodes
+at 67 % — applies with more force to a base that is now stronger still, and the
+one stratum that had looked promising was evidently the weak base's slack rather
+than a property of the lever. **Phase 2 stays closed, now on much better
+evidence.**
