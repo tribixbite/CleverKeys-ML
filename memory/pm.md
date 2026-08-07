@@ -170,3 +170,27 @@ Date: 2025-10-07
   test ran 0.61 BELOW val on r2, expected test ~84.2 -> gate NOT recommended yet.
   Next levers: close <=3 (length-conditioned score / refine head, which gave
   +1.00 on <=3), scale ch further, widen the selection prefix to 5,000 rows.
+
+2026-08-07 (phase E) — TODO plan: close the gap to the FUTO ceiling on val-9918
+
+THE BAR (FUTO ceiling measured on OUR val-9918, from the app repo's committed eval):
+overall t1/t3/t5 = 85.52 / 91.54 / 92.80, <=3 t1 89.29 (n=3389), 4+ t1 83.57 (n=6529).
+D1 seed-mean deficits: overall -0.71, t3 -0.53, t5 -0.47, <=3 -1.28, 4+ -0.42.
+Gate to unseal test-2400: 3-seed seed-mean full-val beats ALL FIVE. test-2400 stays
+SEALED this phase regardless.
+
+- [x] E1 scoring re-tune on D1. ADOPTED (gamma 1.05, lambda 1.1, beta 0.2, gp 0.3734,
+      bp 0.9882): +3.04 t1 on the untouched holdout half, +2.74 full val. Four grids
+      hit a boundary before the fifth converged -- the published preset was ~0.6 in
+      gamma and ~60x in lambda away from the optimum for our emissions. RETRACTS the
+      README "no free win" verdict and its +0.21 pt headroom bound (grid-width
+      artifact; re-swept r2 gains +4.25 on untouched rows).
+- [x] E2 refinement head on the D1 seed-1234 base. NEGATIVE: -0.58 vs its own base on
+      the same val[0:5000] at the E1 preset. Phase-2's null reproduces on a strong base.
+- [ ] E3a T4 tier = curated FUTO pool (688,025) + full HWS release, exact-trace dedup only.
+- [ ] E3b T3 with HWS rows oversampled 3x (index repetition, not row duplication).
+- [x] E4 capacity ch=192 embed_hid=192 on T3: +0.48 t1 vs ch128 paired at seed 1234,
+      inside the ~1 pt single-seed floor. Latency needs an idle re-measure (1.54 ms
+      mean / 1.90 ms p90 taken under load, vs 0.49 ms for ch128).
+- [x] E5 beam-selection prefix 2000 -> 5000: +0.23 t1 paired at seed 1234. Adopted.
+- [ ] FINAL stack the adopted levers, 3 seeds, definitive table vs the bar. PHASE_E.md.
