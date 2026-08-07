@@ -74,3 +74,21 @@ Date: 2025-10-07
   - Updated `PersonalizedSwipeDataset` to accept `normalize_coords` parameter and pass it to `_prepare_points()`.
   - Modified `_prepare_points()` to conditionally apply normalization based on flag.
   - Still applies clamping to [-1.5, 1.5] in both cases for safety.
+
+2026-08-07 — new `ctc/` pipeline (from-scratch CTC swipe encoder)
+
+- Added `ctc/`: prepare_data / model / train / eval_beam / export_onnx / make_golden,
+  plus vendored `futo_decoder_{eval,ceiling}.py` + `en_qwerty.json` from the
+  CleverKeys app repo @ 79ddfb0f. Implements `docs/guides/train-ctc-swipe-model.md`
+  with 15 pre-run audit fixes (see `ctc/README.md` for the numbered table).
+- Headline fix: the recipe's fixed 8x8 cosine key basis is rank 23 of 26 at the
+  canonical en_qwerty centers, so three emission directions were structurally
+  unreachable. Replaced with a learned per-key embedding + matmul scoring; the
+  trained embedding is rank 26 (cond 33) and the export contains no Einsum.
+- Splits were contaminated: 298 train rows duplicate val/test bit-exactly and 977
+  are train self-duplicates; prepare_data now drops them (109,600 of 110,876 kept).
+- Runtime artifacts live in `~/ctc-train/` (data/cache/ckpt), never committed.
+- Smoke run (6+2 epochs, ~4 s/epoch, RTX 5080): val greedy 50.31 %, beam top-1
+  80.83 % on 120 val rows. Full run + G2/G4 gates still TODO.
+- TODO: full 300-epoch run; match the baseline 131,544-word lexicon before making a
+  formal G2 claim (staged wordlist yields 146,964); phase-2 refinement head (§11).
