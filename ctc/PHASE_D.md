@@ -112,6 +112,104 @@ cancels), and the absolute level is not.
 
 ---
 
-## 3. Arms
+## 3. Arms and the seed-1234 round
 
-*(filled in below)*
+Recipe frozen across every arm: **94,000 steps** (2× the Phase A–C budget, because
+T3 is ~2.6× T2), batch 256, lr 3e-3, wd 0.01, warmup 1,000, fp32,
+`--val-every 3000` (31 validation points), current augmentation (slot permutation
++ rejection-sampled affine + noise; **no** C1 path jitter, which Phase C killed).
+
+| arm | tier | architecture | params |
+|---|---|---|---|
+| `phaseD-D0` | T3 | ch 96, residual trunk, v1 features (the Phase-A/B/C baseline) | 394,114 |
+| `phaseD-D1` | T3 | **ch 128**, `embed_hid` 128, residual trunk | 689,282 |
+| `phaseD-D2` | T3 | Phase-B ConvNeXt trunk, ch 128, 5 blocks, dil {1,2,3,5,8} | 570,818 |
+| `phaseD-D3` | T3 | D1 (the D0–D2 winner) + EMA decay 0.999, evaluated on the averaged weights | 689,282 |
+| `phaseD-T1bridge` | T1 | ch 96 — the D0 recipe on the Phase-A best tier | 394,114 |
+| `phaseD-T1bridge128` | T1 | ch 128 — added to complete the arch × tier 2×2 (see below) | 689,282 |
+
+`T1bridge128` was **not** in the original brief. It was added after `T1bridge`
+(ch 96 on T1) beat `D0` (the same architecture on T3) by 0.89 pt: with the tier
+question live, comparing tiers at one architecture only would have left the
+result confounded with capacity. The 2×2 costs 15 GPU-minutes and removes that.
+
+### Results — full val-9918, published `enc` preset, beam width 100
+
+| arm | greedy | beam2000 t1 (selection) | **val t1** | t3 | t5 | ≤3 | 4+ | FUTO t1 | HWS t1 |
+|---|---|---|---|---|---|---|---|---|---|
+| `D0` (T3, ch96) | 67.20 | 84.30 | 83.15 | 90.81 | 92.10 | 84.83 | 82.28 | 91.00 | 75.36 |
+| `D1` (T3, ch128) | 67.45 | 84.80 | **84.22** | 90.74 | 92.22 | 87.40 | 82.57 | **92.25** | 76.25 |
+| `D2` (T3, convnext) | 70.65 | 84.45 | 83.35 | 90.98 | 92.20 | 84.60 | 82.71 | 91.42 | 75.34 |
+| `D3` (T3, ch128+EMA) | 68.91 | 84.05 | 84.09 | **91.09** | **92.44** | 86.16 | **83.01** | 92.01 | 76.23 |
+| `T1bridge` (T1, ch96) | 65.62 | 85.10 | 84.04 | 90.76 | 92.23 | **88.26** | 81.85 | 91.91 | 76.23 |
+| `T1bridge128` (T1, ch128) | 69.89 | **85.35** | **84.29** | 90.90 | 92.13 | 88.02 | 82.36 | 91.30 | **77.33** |
+| — reference: `phaseA-T1` (47 k steps) | 64.69 | — | 82.47 | 90.62 | 91.96 | 84.45 | 81.44 | 89.26 | 75.72 |
+| — reference: `phaseA-T2` (47 k steps) | 59.62 | — | 80.86 | 88.52 | 90.48 | 84.69 | 78.88 | 92.59 | 69.21 |
+| — target: FUTO ceiling (**test**-2400) | 69.12 | — | 84.83 | 91.04 | 92.08 | 89.57 | 82.40 | — | — |
+
+Everything in the top block is val-9918; the FUTO row is test-2400 and is shown
+only to indicate the target's shape. **They are not directly comparable** — see §5.
+
+### What the round shows
+
+**The step budget and the data both mattered, and neither is the whole story.**
+The best pre-Phase-D arm was 82.47 (`phaseA-T1`, 47 k steps); the worst Phase-D
+arm is 83.15. But `T1bridge` *is* `phaseA-T1`'s tier and architecture at 2× the
+steps with beam selection, and it scores 84.04 — so **+1.57 pt of the improvement
+is budget and selection, not data**.
+
+**T3 did not beat T1.** At matched architecture and matched budget:
+
+| architecture | T1 (374 k rows) | T3 (1.005 M rows) | Δ (T3 − T1) |
+|---|---|---|---|
+| ch 96 | 84.04 | 83.15 | **−0.89** |
+| ch 128 | 84.29 | 84.22 | **−0.07** |
+
+2.7× the training rows, including the whole FUTO corpus with **no** session
+exclusion at all, buys nothing. At ch 96 it is 0.89 pt *worse*; at ch 128 the two
+are a dead heat. Since T3 is strictly more contaminated than T1 (T1 excludes
+369,459 session-tainted FUTO rows; T3 excludes none), this is a genuinely
+negative result for raw FUTO volume: the curated, session-excluded, HWS-balanced
+pool is at least as good and is far cheaper to train on. Whether the gap survives
+three seeds is answered in §4.
+
+**Capacity is the one lever that moved.** ch 96 → ch 128 is worth +1.07 pt on T3
+and +0.25 pt on T1, at 1.75× the parameters. Only the T3 figure clears the ~1 pt
+noise floor at one seed, and it is the only Phase-B/C/D architecture lever that
+ever has.
+
+**The ConvNeXt trunk regresses again, and beam selection was not the confound.**
+Phase B's suspicion was that B2's greedy-selected checkpoint had been chosen by
+the wrong metric. Under beam selection D2 still lands **−0.87 pt below D1** at
+1.2× fewer parameters but 1.5× D0's inference cost, and its stratum signature is
+the same one Phase B measured, just milder: vs D0, **−0.23 on ≤3 and +0.43 on
+4+**. The hypothesis is tested and dead — the trunk is genuinely worse for
+lexicon-decoded accuracy, not merely mis-selected.
+
+**Greedy and beam still disagree.** D2 has the best greedy of any Phase-D arm
+(73.00 at its final step) and the second-worst val t1. `T1bridge` has the *worst*
+greedy (65.62) and the fourth-best val t1. Retiring greedy as the selection
+metric was correct.
+
+### The cost of beam-2000 selection — measured, not assumed
+
+At n = 2,000 the binomial SE on an ~84 % rate is ~0.8 pt, which is large relative
+to the plateau the cosine schedule produces. Three of the six arms selected a
+checkpoint that was **not** the final step: D1 at step 54,000, D2 at 66,000, D3 at
+63,000, `T1bridge128` at 72,000. For D1 that choice was measurable:
+
+| D1 checkpoint | greedy | beam2000 t1 | full-val t1 | t3 | t5 | ≤3 | 4+ |
+|---|---|---|---|---|---|---|---|
+| beam-selected (step 54,000) | 67.45 | 84.80 | 84.22 | 90.74 | 92.22 | 87.40 | 82.57 |
+| final step (94,000) | 70.31 | 84.70 | **84.39** | **91.14** | **92.45** | 86.46 | **83.32** |
+
+The selection rule preferred a checkpoint 40,000 steps early on a 0.10 pt
+beam-2000 margin, and it cost **−0.17 pt** on full val (and −0.40 / −0.23 on
+t3/t5). That is small and well inside noise, but the direction is a warning: with
+a cosine-to-zero schedule the final checkpoint is already near-optimal, so a
+selection rule noisier than the plateau can only lose. **Recommendation for Phase
+E: keep beam selection but raise the prefix to ~5,000 rows (SE ~0.5 pt, still
+under 5 s per validation), or simply take the final step and use the beam curve
+as a diagnostic.** Beam selection is still strictly better than greedy — greedy
+would have picked the final step here for the wrong reason, and picked badly on
+D2, where greedy rises monotonically while beam plateaus.
