@@ -155,3 +155,67 @@ class CtcSwipeEncoder(nn.Module):
         k = centers.shape[0]
         padded[0, :k] = centers
         return self.key_embed(self.key_positional(padded))[0, :k]
+
+
+# ── phase 2: the refinement head (guide §11) ────────────────────────────────────
+
+def slice_head_torch(log_emissions: torch.Tensor, num_letters: int) -> torch.Tensor:
+    """``[B,T,MAX_KEYS+1]`` full head -> ``[B,T,num_letters+1]`` contract view.
+
+    The torch twin of ``futo_decoder_ceiling.slice_emissions`` and of Kotlin's
+    ``CtcEmissions.sliceFromHead``: keep the K real key columns and relocate the
+    blank from full-head column ``MAX_KEYS`` to column ``num_letters``.
+
+    Valid only for the canonical *identity* slot assignment (key ``c`` in slot
+    ``c``); under the slot-permutation augmentation the first ``num_letters``
+    columns are not the alphabet, which is why the refinement head is trained
+    without permutation and is canonical-QWERTY-gated.
+    """
+    return torch.cat([log_emissions[..., :num_letters],
+                      log_emissions[..., MAX_KEYS:MAX_KEYS + 1]], dim=-1)
+
+
+def refine_input_dim(num_letters: int) -> int:
+    """Per-frame width of ``concat(sliced | coefficients | lambda)`` (92 for a-z)."""
+    return (num_letters + 1) + NUM_COEFF + 1
+
+
+class CtcRefineHead(nn.Module):
+    """Per-frame refinement head — our ``magic_macaw`` analogue (guide §11).
+
+    Consumes ``concat(sliced_emissions[K+1], coefficients[64], lambda[1])`` and
+    emits refined ``log_probs[K+1]`` that REPLACE the emissions before the beam.
+    Because it sees the spatial coefficients alongside the collapsed emissions it
+    can sharpen per-frame decisions using context the key softmax discarded —
+    FUTO measured +5.88 pt top-1 (greedy 43.96 % -> 69.12 %) from this lever.
+
+    Blank sits at index ``num_letters`` here (26), not 64: the head operates on
+    the already-sliced view.
+
+    :param num_letters: active alphabet size (26 for en_qwerty).
+    :param hidden: hidden width of the MLP.
+    """
+
+    def __init__(self, num_letters: int = 26, hidden: int = 128) -> None:
+        super().__init__()
+        self.num_letters = num_letters
+        self.hidden = hidden
+        self.in_dim = refine_input_dim(num_letters)
+        self.norm = nn.LayerNorm(self.in_dim)
+        self.fc1 = nn.Linear(self.in_dim, hidden)
+        self.fc2 = nn.Linear(hidden, num_letters + 1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """``[B,T,in_dim]`` -> log-softmaxed ``[B,T,num_letters+1]``."""
+        h = F.gelu(self.fc1(self.norm(x)))
+        return F.log_softmax(self.fc2(h), dim=-1)
+
+
+def build_refine_input(log_emissions: torch.Tensor, coeff: torch.Tensor,
+                       lam: torch.Tensor, num_letters: int) -> torch.Tensor:
+    """Assemble the head's ``[B,T,92]`` input from the base encoder's three heads.
+
+    Mirrors ``futo_decoder_ceiling.build_decoder_input`` exactly.
+    """
+    sliced = slice_head_torch(log_emissions, num_letters)
+    return torch.cat([sliced, coeff, lam], dim=-1)

@@ -76,10 +76,15 @@ class SwipeDataset(Dataset):
 
     :param npz_path: output of ``prepare_data.py``.
     :param centers: ``[K,2]`` canonical key centers.
-    :param augment: enable affine/noise/slot-permutation augmentation.
+    :param augment: enable affine/noise augmentation.
+    :param permute: also scatter the K keys into random slots of the 64 (only
+        meaningful when ``augment``). The phase-2 refinement head trains on the
+        sliced 27-class view, which is defined for the canonical identity slot
+        assignment only, so ``train_refine.py`` passes ``permute=False``.
     """
 
-    def __init__(self, npz_path: Path, centers: np.ndarray, augment: bool) -> None:
+    def __init__(self, npz_path: Path, centers: np.ndarray, augment: bool,
+                 permute: bool = True) -> None:
         with np.load(npz_path) as d:                    # audit fix #14: close handle
             self.features = np.array(d["features"])     # [N,2,64]
             self.tgt_flat = np.array(d["targets"])
@@ -87,6 +92,7 @@ class SwipeDataset(Dataset):
         self.tgt_off = np.concatenate([[0], np.cumsum(self.tgt_len)])
         self.centers = centers                          # [K,2]
         self.augment = augment
+        self.permute = permute
         self.k = centers.shape[0]
 
     def __len__(self) -> int:
@@ -131,7 +137,7 @@ class SwipeDataset(Dataset):
         # geometry rather than slot index.
         keys = np.zeros((MAX_KEYS, 2), np.float32)
         mask = np.zeros((MAX_KEYS,), bool)
-        if self.augment and np.random.rand() < PERMUTE_P:
+        if self.augment and self.permute and np.random.rand() < PERMUTE_P:
             slots = np.random.permutation(MAX_KEYS)[: self.k]
         else:
             slots = np.arange(self.k)
@@ -154,18 +160,29 @@ def collate(batch):
 
 
 @torch.no_grad()
-def greedy_accuracy(model: torch.nn.Module, loader: DataLoader, device: str) -> float:
+def greedy_accuracy(model: torch.nn.Module, loader: DataLoader, device: str,
+                    forward=None, blank: int = BLANK) -> float:
     """Val metric: greedy-CTC collapse == target word.
 
     FUTO-floor anchor: ~44 % greedy on test-2400 corresponded to 79.25 % beam
     top-1, so a plateau near 40 % is expected, not a failure.
+
+    :param model: module toggled into eval mode for the sweep.
+    :param forward: ``(feats, keys, mask) -> log_probs [B,T,C]``; defaults to the
+        base encoder's first output. ``train_refine.py`` passes the refinement
+        head so the same collapse logic serves both heads.
+    :param blank: blank class index in the returned ``log_probs`` (64 for the
+        full head, 26 for the refined sliced view).
     """
     was_training = model.training
     model.eval()
+    if forward is None:
+        def forward(f, k, m):
+            return model(f, k, m)[0]
     hit = n = 0
     for feats, keys, mask, targets, tlens in loader:
-        log_e, _, _ = model(feats.to(device), keys.to(device), mask.to(device))
-        am = log_e.argmax(-1).cpu().numpy()             # [B,32]
+        log_p = forward(feats.to(device), keys.to(device), mask.to(device))
+        am = log_p.argmax(-1).cpu().numpy()             # [B,T]
         off = 0
         for b in range(am.shape[0]):
             tgt = targets[off:off + tlens[b]].numpy().tolist()
@@ -173,7 +190,7 @@ def greedy_accuracy(model: torch.nn.Module, loader: DataLoader, device: str) -> 
             out, prev = [], -1
             for c in am[b]:
                 c = int(c)
-                if c != prev and c != BLANK:
+                if c != prev and c != blank:
                     out.append(c)
                 prev = c
             hit += int(out == tgt)

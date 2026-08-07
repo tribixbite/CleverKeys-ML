@@ -105,6 +105,36 @@ python train.py --resume ckpt/base/last.pt --epochs 500 --run-name base
 Use `--limit 2000` on `eval_beam.py` for quick iteration — prefix slicing is
 distributionally representative (≤3-char share 35 % at N=120 vs 34 % over full test).
 
+## Phase 2 — the refinement head (guide §11)
+
+`train_refine.py` freezes a trained base encoder and trains our `magic_macaw`
+analogue on top: per frame it consumes
+`concat(sliced_emissions[27] | coefficients[64] | lambda[1]) = [32, 92]` and emits
+refined `log_probs[32, 27]` that **replace** the emissions before the beam.
+Head = `LayerNorm(92) → Linear(92,128) → GELU → Linear(128,27) → log_softmax`
+(15.6 K params). CTC blank is **26** here — the head works on the already-sliced
+view, not the 65-wide head.
+
+**Canonical-QWERTY gating.** The base encoder is layout-agnostic because it trains
+with slot permutation, but the sliced 27-class view is only the alphabet under the
+canonical *identity* slot assignment. Refinement therefore trains with
+`permute=False` (geometric jitter stays on), and the head — exactly like FUTO's
+layout-fingerprint-gated `magic_macaw` — is valid for canonical QWERTY only. Other
+layouts must fall back to the encoder-only path.
+
+```bash
+python train_refine.py --base-ckpt ckpt/r2/best.pt --run-name r2-refine   # ~2.7 s/epoch
+python export_refine_onnx.py --ckpt ckpt/r2-refine/best.pt                # [1,32,92] -> [1,32,27]
+python eval_beam.py --ckpt ckpt/r2/best.pt --refine-ckpt ckpt/r2-refine/best.pt \
+       --test data/val_hwsfuto.jsonl                                      # G4 probe
+```
+
+`eval_beam.py --refine-ckpt/--refine-onnx` swaps the refined output in before
+greedy/beam and auto-selects the `encoderDecoder` scoring preset (gamma 0.5949,
+lambda 0.0134, beta 0.7271, gammaPrune 0.1902, betaPrune 1.2727); `--scoring
+enc|dec` overrides. `--unfreeze-after N` optionally unfreezes the base at 0.1×
+the head lr after epoch N (default off).
+
 ## Contract the export must satisfy
 
 | Tensor | Shape | dtype | Meaning |
