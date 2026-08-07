@@ -132,3 +132,19 @@ Date: 2025-10-07
 - Only untried structural idea if ever revisited: temporal context in the refine
   head (FUTO's magic_macaw is a DFSMN; ours is strictly per-frame).
 - Ship candidate remains enc-only r2 with the published scoring preset.
+
+2026-08-07 (phase D) — TODO plan: beam-selected checkpoints + T3 benchmark tier
+
+- [ ] 1. train.py: beam-t1 checkpoint selection on a fixed 2,000-row val prefix
+      (in-process, vendored futo_viterbi_beam + 146,964-word trie, fork pool).
+      Select best.pt on beam2000 t1; keep greedy logged.
+- [ ] 2. build_tiers.py: T3 = full FUTO swipe-1 train (potentially_invalid_sentence
+      only, NO session exclusion, exact-trace dedup vs val/test in both hash forms)
+      + the FULL How-We-Swipe release (1,338 users). Featurize -> cache/train_t3.npz.
+- [ ] 3. Phase D arms on T3 at 94,000 steps, batch 256, lr 3e-3, beam-selected:
+      D0 ch96 | D1 ch128/embed_hid128 | D2 ConvNeXt trunk | D3 winner + EMA 0.999.
+      3 seeds (1234/4321/7777) for the top-2 by beam-selected val t1.
+- [ ] 4. Bridge arm: D0 recipe on T1 tier, seed 1234.
+- [ ] 5. eval_arms.py full-val beam t1/t3/t5 + per-source for every run.
+- [ ] 6. PHASE_D.md with per-seed + mean tables, the T3 contamination disclosure,
+      and the milestone-gate recommendation. test-2400 stays SEALED.
