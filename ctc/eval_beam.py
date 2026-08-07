@@ -138,6 +138,9 @@ def main() -> int:
                     help="phase-2 refinement head as exported ONNX")
     ap.add_argument("--scoring", choices=["auto", "enc", "dec"], default="auto",
                     help="scoring.json preset; auto = dec when refining, else enc")
+    ap.add_argument("--preset", default="",
+                    help="override --scoring with explicit "
+                         "'gamma,lambda,beta,gammaPrune,betaPrune'")
     ap.add_argument("--device", default="cpu", help="torch device for --ckpt")
     ap.add_argument("--beam-width", type=int, default=100, dest="beam_width")
     ap.add_argument("--top-k", type=int, default=8, dest="top_k")
@@ -161,6 +164,16 @@ def main() -> int:
     elif args.refine_onnx:
         refiner = OnnxRefiner(resolve(args.workdir, args.refine_onnx))
     preset = args.scoring if args.scoring != "auto" else ("dec" if refiner else "enc")
+    if args.preset:
+        # Explicit params win over the named presets. This is the path that
+        # cross-checks a re-tuned preset through the REAL per-row decoder rather
+        # than through sweep_scoring's analytic re-scoring (Phase E, E1).
+        vals = [float(v) for v in args.preset.split(",")]
+        if len(vals) != 5:
+            raise SystemExit("--preset needs 5 floats: "
+                             "gamma,lambda,beta,gammaPrune,betaPrune")
+        SCORING["custom"] = (vals[0], vals[1], vals[2], vals[3], vals[4])
+        preset = "custom"
     gamma, lam_w, beta, gamma_prune, beta_prune = SCORING[preset]
     print(f"scoring preset '{preset}': gamma={gamma} lambda={lam_w} beta={beta} "
           f"gammaPrune={gamma_prune} betaPrune={beta_prune}"

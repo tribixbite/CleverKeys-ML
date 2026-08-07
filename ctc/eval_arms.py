@@ -38,12 +38,25 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from futo_decoder_ceiling import (ENC_BETA, ENC_BETA_PRUNE, ENC_GAMMA,  # noqa: E402
                                   ENC_GAMMA_PRUNE, ENC_LAMBDA)
 from futo_decoder_eval import load_combined_vocab, load_test  # noqa: E402
+from model import MAX_KEYS  # noqa: E402
 from paths import DEFAULT_LAYOUT, DEFAULT_WORKDIR, resolve  # noqa: E402
 from sweep_scoring import (TraceCandidates, _init_worker, build_emissions,  # noqa: E402
                            collect, score_grid, strata)
 
 #: The published encoder-only preset every committed number is quoted at.
+#: ``--preset`` rebinds this module-global so every downstream helper (``top``,
+#: the beam's prune setting) sees one consistent scoring setting; Phase E's E1
+#: arm re-tunes it per model, and a report that mixes presets is meaningless.
 PRESET = (ENC_GAMMA, ENC_LAMBDA, ENC_BETA, ENC_GAMMA_PRUNE, ENC_BETA_PRUNE)
+
+
+def parse_preset(spec: str) -> Tuple[float, float, float, float, float]:
+    """``"gamma,lambda,beta,gammaPrune,betaPrune"`` -> the 5-tuple :data:`PRESET` holds."""
+    parts = [float(v) for v in spec.split(",")]
+    if len(parts) != 5:
+        raise SystemExit(f"--preset needs 5 comma-separated floats, got {len(parts)}: "
+                         "gamma,lambda,beta,gammaPrune,betaPrune")
+    return parts[0], parts[1], parts[2], parts[3], parts[4]
 
 
 def subset(traces: Sequence[TraceCandidates], keep: np.ndarray) -> List[TraceCandidates]:
@@ -93,6 +106,73 @@ def onnx_latency(onnx_path: Path, layout: Path, runs: int = 100,
     return float(a.mean()), float(np.percentile(a, 90))
 
 
+def build_emissions_refined(base_ckpt: Path, head_ckpt: Path, layout: Path, rows,
+                            cache: Path, force: bool) -> Tuple[np.ndarray, List[str]]:
+    """Sliced ``[N,32,27]`` emissions **after** the phase-2 refinement head.
+
+    The head replaces the encoder's emissions before the beam, so the whole eval
+    path downstream is unchanged — only the array fed into it differs. Both
+    modules run in torch here rather than through ONNX: the head's exported graph
+    would have to be chained onto the encoder's three outputs, and the encoder's
+    own torch/ONNX parity is asserted at export time (<2e-5 on this view), so the
+    torch path is the same quantity with one less moving part.
+
+    :param base_ckpt: ``ckpt/<arm>/best.pt`` — the frozen encoder the head was
+        trained on. ``train_refine.py`` records the base's sha256, which is
+        checked here so a head can never be evaluated on the wrong encoder.
+    """
+    import torch
+    from futo_decoder_eval import featurize as _featurize, load_layout as _ll
+    from model import CtcRefineHead, build_refine_input, encoder_from_checkpoint
+    from paths import sha256_file
+
+    letters, key_centers = _ll(layout)
+    n_letters = len(letters)
+    if cache.exists() and not force:
+        with np.load(cache) as d:
+            if len(d["emissions"]) >= len(rows):
+                print(f"[cache] {cache} ({len(d['emissions'])} rows)")
+                return np.array(d["emissions"][: len(rows)]), letters
+
+    hck = torch.load(head_ckpt, map_location="cpu", weights_only=True)
+    want = hck.get("base_sha256", "")
+    got = sha256_file(base_ckpt)
+    if want and want != got:
+        raise SystemExit(f"{head_ckpt}: head was trained on base {want[:12]}, but "
+                         f"{base_ckpt} is {got[:12]}")
+    bck = torch.load(base_ckpt, map_location="cpu", weights_only=True)
+    base = encoder_from_checkpoint(bck)
+    base.load_state_dict(bck["model"])
+    head = CtcRefineHead(num_letters=int(hck.get("num_letters", n_letters)),
+                         hidden=int(hck["hidden"]))
+    head.load_state_dict(hck["head"])
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    base, head = base.to(device).eval(), head.to(device).eval()
+
+    keys = np.zeros((MAX_KEYS, 2), np.float32)
+    keys[:n_letters] = key_centers
+    mask = np.zeros((MAX_KEYS,), bool)
+    mask[:n_letters] = True
+    kt = torch.from_numpy(keys)[None].to(device)
+    mt = torch.from_numpy(mask)[None].to(device)
+
+    t0 = time.time()
+    feats = np.stack([_featurize(xs, ys, ts) for _, xs, ys, ts in rows])  # [N,2,64]
+    out = np.empty((len(rows), 32, n_letters + 1), np.float32)
+    with torch.no_grad():
+        for s in range(0, len(rows), 512):
+            f = torch.from_numpy(feats[s:s + 512]).to(device)
+            b = f.shape[0]
+            log_e, coeff, lam = base(f, kt.expand(b, -1, -1), mt.expand(b, -1))
+            ref = head(build_refine_input(log_e, coeff, lam, n_letters))
+            out[s:s + b] = ref.cpu().numpy()
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    np.savez_compressed(cache, emissions=out)
+    print(f"[cache] built {len(rows)} refined rows in {time.time() - t0:.1f}s "
+          f"-> {cache}")
+    return out, letters
+
+
 def load_masks(path: Path, n: int) -> Dict[str, np.ndarray]:
     """Read ``val_clean_masks.json`` -> ``{name: bool[n]}``, plus derived combos."""
     raw = json.loads(Path(path).read_text())
@@ -136,11 +216,29 @@ def main() -> int:
     ap.add_argument("--rebuild-cache", action="store_true", dest="rebuild_cache",
                     help="recompute ckpt/<arm>/eval_emissions.npz; required after an "
                          "arm is retrained, since the cache is keyed only by run dir")
+    ap.add_argument("--preset", default="",
+                    help="override the published enc preset with "
+                         "'gamma,lambda,beta,gammaPrune,betaPrune' (Phase E E1)")
+    ap.add_argument("--refine-ckpt", default="", dest="refine_ckpt",
+                    help="run name under ckpt/ holding a train_refine.py best.pt; "
+                         "its refined [32,27] log-probs REPLACE the encoder's "
+                         "emissions before the beam (Phase E E2). Emissions are then "
+                         "computed in torch from ckpt/<arm>/best.pt, not from ONNX.")
+    ap.add_argument("--emissions-name", default="", dest="emissions_name",
+                    help="basename of the per-arm emission cache (default "
+                         "eval_emissions.npz, or eval_emissions_<refine>.npz when "
+                         "--refine-ckpt is given)")
     ap.add_argument("--out", default="cache/phase_a_results.json")
     args = ap.parse_args()
 
     if "test" in Path(args.test).name:
         raise SystemExit(f"refusing to decode {args.test}: Phase A is val-only")
+
+    global PRESET
+    if args.preset:
+        PRESET = parse_preset(args.preset)
+        print(f"scoring preset OVERRIDDEN: gamma {PRESET[0]} lambda {PRESET[1]} "
+              f"beta {PRESET[2]} gammaPrune {PRESET[3]} betaPrune {PRESET[4]}")
 
     rows = load_test(resolve(args.workdir, args.test))
     targets = [w.lower() for w, _, _, _ in rows]
@@ -157,17 +255,28 @@ def main() -> int:
     trie = load_combined_vocab(resolve(args.workdir, args.vocab))
     print(f"trie: {trie.num_words} words\n")
 
-    results: Dict[str, object] = {"preset": list(PRESET), "n_val": n}
+    refine_run = (resolve(args.workdir, Path("ckpt") / args.refine_ckpt)
+                  if args.refine_ckpt else None)
+    em_name = args.emissions_name or (
+        f"eval_emissions_{args.refine_ckpt}.npz" if refine_run else "eval_emissions.npz")
+
+    results: Dict[str, object] = {"preset": list(PRESET), "n_val": n,
+                                  "refine_ckpt": args.refine_ckpt}
     for arm in args.arms.split(","):
         run = resolve(args.workdir, Path("ckpt") / arm)
         onnx = run / args.onnx_name
-        if not onnx.exists():
+        if refine_run is None and not onnx.exists():
             print(f"{arm}: MISSING {onnx} — run export_onnx.py first; skipped\n")
             continue
         t0 = time.time()
-        emissions, letters = build_emissions(onnx, args.layout, rows,
-                                             run / "eval_emissions.npz",
-                                             args.rebuild_cache)
+        if refine_run is not None:
+            emissions, letters = build_emissions_refined(
+                run / "best.pt", refine_run / "best.pt", args.layout, rows,
+                run / em_name, args.rebuild_cache)
+        else:
+            emissions, letters = build_emissions(onnx, args.layout, rows,
+                                                 run / em_name,
+                                                 args.rebuild_cache)
         ctx = mp.get_context("fork")
         pool = ctx.Pool(args.jobs, initializer=_init_worker,
                         initargs=(trie, letters, emissions, args.beam_width))
@@ -215,7 +324,7 @@ def main() -> int:
                       f"  t3 {ss[1]:5.2f}  t5 {ss[2]:5.2f}")
         if own not in masks:
             print(f"  (no own mask for '{own}' in {args.masks})")
-        if args.latency_runs:
+        if args.latency_runs and onnx.exists():
             ms, p90 = onnx_latency(onnx, args.layout, args.latency_runs)
             rec["latency_ms_mean"] = ms
             rec["latency_ms_p90"] = p90
