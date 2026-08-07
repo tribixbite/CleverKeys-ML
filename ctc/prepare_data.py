@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import multiprocessing as mp
 import sys
 import time
 from pathlib import Path
@@ -89,8 +90,14 @@ def source_meta(path: Path) -> Dict[str, object]:
             "mtime": st.st_mtime}
 
 
+def _featurize_batch(batch):
+    """Worker: featurize a list of (xs, ys, ts) tuples -> list of [2,64] arrays."""
+    return [featurize(xs, ys, ts) for xs, ys, ts in batch]
+
+
 def prepare(jsonl_path: Path, out_path: Path, exclude: Set[bytes],
-            dedup_self: bool, provenance_extra: Dict[str, object]) -> Set[bytes]:
+            dedup_self: bool, provenance_extra: Dict[str, object],
+            jobs: int = 1) -> Set[bytes]:
     """Featurize one split into ``out_path``; return the split's trace hashes.
 
     :param exclude: hashes whose rows must be dropped (cross-split leakage).
@@ -101,6 +108,7 @@ def prepare(jsonl_path: Path, out_path: Path, exclude: Set[bytes],
     words: List[str] = []
     hashes: Set[bytes] = set()
     seen: Set[bytes] = set()
+    pending: List[tuple] = []          # rows awaiting parallel featurization
     n_total = 0
     d_empty = d_infeasible = d_leak = d_self = 0
 
@@ -124,8 +132,20 @@ def prepare(jsonl_path: Path, out_path: Path, exclude: Set[bytes],
                 d_self += 1
                 continue
             seen.add(h)
-        feats.append(featurize(xs, ys, ts))          # [2, 64] float32
+        if jobs > 1:
+            pending.append((xs, ys, ts))
+        else:
+            feats.append(featurize(xs, ys, ts))      # [2, 64] float32
         words.append(w)
+
+    if jobs > 1 and pending:
+        # Featurization is pure Python and dominates a ~700 k-row tier; fan it out.
+        chunk = max(1, len(pending) // (jobs * 8))
+        batches = [pending[i:i + chunk] for i in range(0, len(pending), chunk)]
+        with mp.get_context("fork").Pool(jobs) as pool:
+            for out in pool.imap(_featurize_batch, batches):
+                feats.extend(out)
+        pending.clear()
 
     if not words:
         raise SystemExit(f"{jsonl_path}: no rows survived filtering")
@@ -173,6 +193,14 @@ def main() -> int:
                     help="split dir, relative to --workdir unless absolute")
     ap.add_argument("--cache", type=Path, default=Path("cache"),
                     help="npz output dir, relative to --workdir unless absolute")
+    ap.add_argument("--extra-train", default="", dest="extra_train",
+                    help="featurize ONE extra training jsonl (a data tier built by "
+                         "build_tiers.py) instead of the three canonical splits; "
+                         "still deduped against canonical val/test")
+    ap.add_argument("--out-name", default="", dest="out_name",
+                    help="npz basename for --extra-train (default: input stem)")
+    ap.add_argument("--jobs", type=int, default=1,
+                    help="parallel featurization workers for --extra-train")
     args = ap.parse_args()
 
     data_dir = resolve(args.workdir, args.data)
@@ -201,6 +229,17 @@ def main() -> int:
         print(f"  {s}: {len(h)} unique traces")
         holdout |= h
     print(f"  holdout union: {len(holdout)} unique traces", flush=True)
+
+    if args.extra_train:
+        # Tier mode: featurize one externally-built training pool. The same
+        # holdout exclusion and self-dedup apply, so a tier can never smuggle a
+        # canonical val/test trace in even if build_tiers.py missed one.
+        src = resolve(args.workdir, args.extra_train)
+        name = args.out_name or src.stem
+        static_prov["tier_source"] = str(src)
+        prepare(src, cache_dir / f"{name}.npz", exclude=holdout, dedup_self=True,
+                provenance_extra=static_prov, jobs=args.jobs)
+        return 0
 
     # val/test are cached verbatim (never filtered), train is deduped against them.
     for s in SPLITS:
