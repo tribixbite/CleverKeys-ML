@@ -258,3 +258,21 @@ pad slots carry ~zero probability; featurization must be the vendored port.
 measured against a 131 544-word lexicon. A larger lexicon means more confusable
 candidates, so numbers from this pipeline are, if anything, conservative relative to
 the table — but for a formal G2/G4 claim the baseline lexicon should be matched.
+
+## The scale-up campaign
+
+**test-2400 remains sealed.** Only the pre-campaign `r2` run was ever decoded on
+it (val 81.57 → test **80.96**, i.e. test runs ~0.61 pt *below* val); every phase
+below is measured on val-9918 alone.
+
+| doc | question | outcome |
+|---|---|---|
+| `DATA_TIERS.md` | provenance + contamination audit | splits are 49 % How-We-Swipe, not "held-out FUTO"; T0 has 75 % contributor overlap with the holdout |
+| `PHASE_A.md` | which training pool | corpus **mix** dominates, not size; the quality cascade is net harmful |
+| `PHASE_B.md` | architecture levers | all three regress; greedy and beam top-1 move in **opposite** directions |
+| `PHASE_C.md` | training-procedure levers | all inside a seed-noise floor of **~1 pt**, 2× the previously assumed figure |
+| `PHASE_D.md` | beam-selected checkpoints, the T3 benchmark tier, 3 seeds | **ch 128 adopted**; T3 (1.0 M rows) indistinguishable from T1; test gate **not** spent |
+
+Best measured configuration: `phaseD-D1` — ch 128 residual trunk, 689 k params, on
+T1 or T3, 94 k steps, beam-selected checkpoint. Seed-mean val-9918 **84.81 t1 /
+91.01 t3 / 92.33 t5** (≤3 88.01, 4+ 83.15) over seeds 1234/4321/7777.
