@@ -34,7 +34,7 @@ import json
 import sys
 import time
 from pathlib import Path
-from typing import Dict, Set
+from typing import Dict, Optional, Set
 
 import numpy as np
 
@@ -179,6 +179,46 @@ def build_t1(args, holdout: Set[bytes], h2s, tainted) -> None:
     (out.with_suffix(".stats.json")).write_text(json.dumps(stats, indent=1))
 
 
+def canonical_points(d):
+    """Raw corpus ``data`` -> canonical points (x/y verbatim, t rebased to 0)."""
+    t_0 = d[0]["t"]
+    return [{"t": float(p["t"] - t_0), "x": p["x"], "y": p["y"]} for p in d]
+
+
+def quality_reason(o, d, valid_set) -> Optional[str]:
+    """First T2b quality gate this raw corpus row fails, or ``None`` if it passes.
+
+    Returns the stats key so callers can both count and branch on one decision.
+    The gates are verbatim from the user's recovered filter; keeping them in one
+    function is what lets ``build_val_clean.py`` reconstruct a tier's contributor
+    set without a second, drifting copy of the cascade.
+    """
+    if o.get("orientation", "") != "portrait-primary":
+        return "not_portrait"
+    cw, ch = o.get("canvas_width", 0), o.get("canvas_height", 0)
+    if cw <= ch:
+        return "canvas_dims"
+    if cw > MAX_CANVAS_WIDTH:
+        return "canvas_wide"
+    if not (MIN_POINTS <= len(d) <= MAX_POINTS):
+        return "too_many_points"
+    dur = d[-1]["t"] - d[0]["t"]
+    if dur < MIN_DURATION_MS or dur > MAX_DURATION_MS:
+        return "bad_duration"
+    # Mean path speed in normalised units per ms.
+    px = np.array([p["x"] for p in d])
+    py = np.array([p["y"] for p in d])
+    spd = float(np.hypot(np.diff(px), np.diff(py)).sum()) / dur if dur > 0 else 0.0
+    if spd < MIN_SPEED or spd > MAX_SPEED:
+        return "bad_speed"
+    cw_ = canonicalize_word(o["word"])
+    if not (MIN_WORD_LEN <= len(cw_) <= MAX_WORD_LEN) or not cw_.isalpha():
+        return "invalid_word"
+    if valid_set is not None and cw_ not in valid_set:
+        return "not_in_dictionary"
+    return None
+
+
 def build_t2(args, holdout: Set[bytes], h2s, tainted, quality: bool) -> None:
     """HF swipe-1 train, converted to canonical rows, hygiene + contamination."""
     tag = "t2b" if quality else "t2"
@@ -199,41 +239,12 @@ def build_t2(args, holdout: Set[bytes], h2s, tainted, quality: bool) -> None:
                 continue
             d = o["data"]
             if quality:
-                # Metadata gates, verbatim from the user's filter.
-                if o.get("orientation", "") != "portrait-primary":
-                    st["not_portrait"] += 1
-                    continue
-                cw, ch = o.get("canvas_width", 0), o.get("canvas_height", 0)
-                if cw <= ch:
-                    st["canvas_dims"] += 1
-                    continue
-                if cw > MAX_CANVAS_WIDTH:
-                    st["canvas_wide"] += 1
-                    continue
-                if not (MIN_POINTS <= len(d) <= MAX_POINTS):
-                    st["too_many_points"] += 1
-                    continue
-                dur = d[-1]["t"] - d[0]["t"]
-                if dur < MIN_DURATION_MS or dur > MAX_DURATION_MS:
-                    st["bad_duration"] += 1
-                    continue
-                # Mean path speed in normalised units per ms.
-                px = np.array([p["x"] for p in d]); py = np.array([p["y"] for p in d])
-                arc = float(np.hypot(np.diff(px), np.diff(py)).sum())
-                spd = arc / dur if dur > 0 else 0.0
-                if spd < MIN_SPEED or spd > MAX_SPEED:
-                    st["bad_speed"] += 1
-                    continue
-                cw_ = canonicalize_word(o["word"])
-                if not (MIN_WORD_LEN <= len(cw_) <= MAX_WORD_LEN) or not cw_.isalpha():
-                    st["invalid_word"] += 1
-                    continue
-                if valid_set is not None and cw_ not in valid_set:
-                    st["not_in_dictionary"] += 1
+                reason = quality_reason(o, d, valid_set)
+                if reason is not None:
+                    st[reason] += 1
                     continue
             # canonical row: x,y verbatim (frame is identical), t relative, word lowered
-            t_0 = d[0]["t"]
-            pts = [{"t": float(p["t"] - t_0), "x": p["x"], "y": p["y"]} for p in d]
+            pts = canonical_points(d)
             h = hash_row(o["word"], pts)
             if h in holdout:
                 st["leak"] += 1
