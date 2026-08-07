@@ -96,6 +96,9 @@ def main() -> int:
                          "the 'phaseA-' run-name prefix)")
     ap.add_argument("--beam-width", type=int, default=100, dest="beam_width")
     ap.add_argument("--jobs", type=int, default=12)
+    ap.add_argument("--rebuild-cache", action="store_true", dest="rebuild_cache",
+                    help="recompute ckpt/<arm>/eval_emissions.npz; required after an "
+                         "arm is retrained, since the cache is keyed only by run dir")
     ap.add_argument("--out", default="cache/phase_a_results.json")
     args = ap.parse_args()
 
@@ -126,7 +129,8 @@ def main() -> int:
             continue
         t0 = time.time()
         emissions, letters = build_emissions(onnx, args.layout, rows,
-                                             run / "eval_emissions.npz", False)
+                                             run / "eval_emissions.npz",
+                                             args.rebuild_cache)
         ctx = mp.get_context("fork")
         pool = ctx.Pool(args.jobs, initializer=_init_worker,
                         initargs=(trie, letters, emissions, args.beam_width))
