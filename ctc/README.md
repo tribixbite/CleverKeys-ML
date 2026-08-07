@@ -135,6 +135,36 @@ lambda 0.0134, beta 0.7271, gammaPrune 0.1902, betaPrune 1.2727); `--scoring
 enc|dec` overrides. `--unfreeze-after N` optionally unfreezes the base at 0.1×
 the head lr after epoch N (default off).
 
+### Scoring sweep — **no free win; keep the published preset** (2026-08-07)
+
+`sweep_scoring.py` grid-searches the beam's scoring params on **val** (test is never
+touched). Two things make an exhaustive grid nearly free:
+
+* Emissions are computed once by the ONNX encoder and cached as the sliced
+  `[N,32,27]` contract view.
+* The beam runs once per *prune* setting, not once per grid point. In
+  `futo_viterbi_beam` the per-frame pruning key depends only on
+  `(gammaPrune, betaPrune)`; `(gamma, beta, lambda)` enter solely through the final
+  score `raw / max(L,1)**gamma + beta*L + lambda*log_freq`. So the **unmodified
+  vendored beam** is called with `gamma=beta=lambda=0` and `top_k=beam_width`,
+  returning every terminal-beam word with its raw path score, and the grid is then
+  re-scored analytically. Verified exact: this path reproduces `eval_beam.py`'s full
+  val-9918 numbers to the digit (81.57 / 89.84 / 91.37, strata 86.28 / 79.12) in
+  seconds rather than 45 minutes.
+
+Result on r2 (coarse 5×5×3 grid, then prune params ±0.05 with a local refinement):
+
+| preset | sweep half (0:2000) | holdout half (2000:4000) | FULL val (9918) |
+|---|---|---|---|
+| published `encoderOnly` | 81.55 | 82.70 | **81.57** |
+| tuned (γ 0.275, λ 0.026, β 0.84, γp 0.3734, βp 0.9882) | 82.00 (+0.45) | 82.75 (+0.05) | 81.56 (**−0.01**) |
+
+The +0.45 pt on the rows it was fitted to is 0.5 standard errors (SE ≈ 0.87 pt at
+n=2000), evaporates to +0.05 on untouched rows, and is −0.01 on full val. **The
+published `CtcScoringParams.encoderOnly` preset is already at the optimum within
+noise for our emissions — do not change it.** The objective surface is flat across
+the whole 81.5–82.0 band, so the guide's "free win" does not exist for this model.
+
 ### Measured result on r2 — **G4 misses** (2026-08-07)
 
 60 epochs, 2.7 s/epoch, head best val greedy **58.91 %** @ epoch 40 (base r2 was
@@ -155,10 +185,17 @@ whose greedy was only 43.96 %, i.e. emissions with a lot of per-frame slack for 
 refiner to recover. Our base already greedy-decodes at 58.0 %, so there is far
 less headroom, and the head converges to roughly reproducing its input. The two
 scoring presets bracket the result, so this is not a preset-mismatch artifact.
-Options before spending more on phase 2: more head capacity/context (FUTO's
-`magic_macaw` is a DFSMN with temporal context, ours is strictly per-frame),
-`--unfreeze-after` end-to-end fine-tuning, or dropping phase 2 and tuning
-(gamma, beta, lambda) on val for the enc-only emissions instead.
+
+**End-to-end fine-tune probe** (`--unfreeze-after 10 --epochs 40`): unfreezing the
+base at 0.1× the head lr pushed train CTC loss 0.316 → 0.276 but val greedy only
+58.91 % → **59.16 %** (+0.25 pt, best @ epoch 22) — train loss improving while val
+stalls is mild overfitting, expected once the slot-permutation regularizer is gone.
+Below the +0.5 pt threshold agreed for a beam probe, so none was run.
+
+**Phase 2 is closed.** Both the frozen head and the end-to-end fine-tune are nulls,
+and the scoring sweep above shows the decode side is already at its optimum. If
+phase 2 is ever revisited, the one untried structural change is temporal context in
+the head — FUTO's `magic_macaw` is a DFSMN, ours is strictly per-frame by design.
 
 ## Contract the export must satisfy
 

@@ -108,3 +108,22 @@ Date: 2025-10-07
 - Next options: temporal-context head (FUTO's magic_macaw is DFSMN, ours is strictly
   per-frame), --unfreeze-after end-to-end fine-tune, or drop phase 2 and sweep
   (gamma, beta, lambda) on val for the enc-only emissions.
+
+2026-08-07 (close-out) — scoring sweep + unfreeze probe: both null, phase 2 closed
+
+- Added `ctc/sweep_scoring.py`: caches sliced [N,32,27] emissions from the r2 ONNX
+  once, then grid-sweeps beam scoring params. Key trick: (gamma,beta,lambda) only
+  affect FINAL scoring, so the vendored beam runs once per PRUNE setting with
+  gamma=beta=lambda=0 / top_k=beam_width and the grid is re-scored analytically.
+  Verified it reproduces eval_beam's full-val numbers exactly (81.57/89.84/91.37)
+  in seconds instead of 45 min.
+- Sweep result: tuned preset (g 0.275, l 0.026, b 0.84, gp 0.3734, bp 0.9882) gave
+  +0.45 t1 on the 2000 rows it was fitted to, +0.05 on untouched rows 2000-4000,
+  and -0.01 on full val-9918. SE at n=2000 is ~0.87 pt, so the gain was noise.
+  VERDICT: keep CtcScoringParams.encoderOnly unchanged; no free win exists.
+- Unfreeze probe (--unfreeze-after 10 --epochs 40): train loss 0.316 -> 0.276 but
+  val greedy only 58.91 -> 59.16 % (+0.25, best @ epoch 22). Below the +0.5 pt bar
+  so no beam probe was run. Phase 2 closed for good.
+- Only untried structural idea if ever revisited: temporal context in the refine
+  head (FUTO's magic_macaw is a DFSMN; ours is strictly per-frame).
+- Ship candidate remains enc-only r2 with the published scoring preset.
