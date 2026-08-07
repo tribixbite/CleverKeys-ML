@@ -31,6 +31,22 @@ models to include anything trained on model outputs, which would re-import their
 licence. Decode *algorithms* were ported from the GPL-3.0 `swipe-library` and are
 already committed on the app side; only the I/O contract is copied here.
 
+### How-We-Swipe full release (acquired, **not yet wired into any tier**)
+
+`fetch_hws_full.py` reproduces the download + verification of the *complete*
+How-We-Swipe release (OSF project [`sj67f`](https://osf.io/sj67f/), **MIT**,
+© 2021 Leiva/Kim/Cui/Bi/Oulasvirta) into `~/ctc-train/data/hws_full/` — 1 GB,
+~22 s on a gigabit link. Run `--analyze` for the participant/yield breakdown.
+
+The pool used by T0 (`1 052` logs → `61 597` rows) is a strict **subset** of the
+release's **1 338** participants; the missing 286 users are worth **+23 015** rows
+(+37 %) under the identical filter. Every participant ships a per-user `.json`
+carrying `englishLevel`, so native-speaker filtering needs no extra source:
+413 native / 342 advanced / 363 intermediate / 219 beginner (1 `NA`), yielding
+**29 853** native-only and **51 559** native+advanced rows across the full release.
+Note `metadata.tsv` covers only the **909**-user subset the paper analysed, not all
+1 338 — use the per-user `.json` for coverage.
+
 ## Audit fixes applied to the recipe
 
 The recipe was audited before its first GPU run; the numbered fixes below are the
