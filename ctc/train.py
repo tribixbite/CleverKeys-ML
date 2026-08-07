@@ -269,6 +269,8 @@ def main() -> int:
     ap.add_argument("--workdir", type=Path, default=DEFAULT_WORKDIR)
     ap.add_argument("--layout", type=Path, default=DEFAULT_LAYOUT)
     ap.add_argument("--cache", type=Path, default=Path("cache"))
+    ap.add_argument("--train-npz", default="train.npz", dest="train_npz",
+                    help="training cache inside --cache (tier arm selector)")
     ap.add_argument("--run-name", default="", dest="run_name",
                     help="ckpt/<run-name>/ (default: timestamped)")
     ap.add_argument("--resume", default="", help="checkpoint to continue from")
@@ -279,6 +281,11 @@ def main() -> int:
     ap.add_argument("--warmup", type=int, default=1000)
     ap.add_argument("--ch", type=int, default=96)
     ap.add_argument("--embed-hid", type=int, default=96, dest="embed_hid")
+    ap.add_argument("--total-steps", type=int, default=0, dest="total_steps",
+                    help="step-equalized budget: cosine horizon and stopping are "
+                         "measured in optimizer steps, not epochs (0 = use --epochs)")
+    ap.add_argument("--val-every", type=int, default=0, dest="val_every",
+                    help="validate/checkpoint every N steps (0 = once per epoch)")
     ap.add_argument("--patience", type=int, default=40)
     ap.add_argument("--seed", type=int, default=1234)
     ap.add_argument("--workers", type=int, default=8)
@@ -297,7 +304,7 @@ def main() -> int:
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     centers = load_layout_centers(args.layout)
-    train_ds = SwipeDataset(cache_dir / "train.npz", centers, augment=True)
+    train_ds = SwipeDataset(cache_dir / args.train_npz, centers, augment=True)
     val_ds = SwipeDataset(cache_dir / "val.npz", centers, augment=False)
     train_dl = DataLoader(train_ds, args.batch, shuffle=True, collate_fn=collate,
                           num_workers=args.workers, pin_memory=True, drop_last=True,
@@ -315,10 +322,15 @@ def main() -> int:
     ctc = torch.nn.CTCLoss(blank=BLANK, zero_infinity=True)
     opt = torch.optim.AdamW(model.parameters(), lr=args.lr,
                             weight_decay=args.weight_decay)
-    total_steps = max(1, args.epochs * len(train_dl))
+    # Step-equalized mode lets tiers of very different sizes share one budget.
+    total_steps = args.total_steps if args.total_steps > 0 \
+        else max(1, args.epochs * len(train_dl))
+    val_every = args.val_every if args.val_every > 0 else len(train_dl)
+    if args.total_steps > 0:
+        args.epochs = 10 ** 6      # step budget is the real stopping rule
 
     def lr_at(step: int) -> float:
-        """Linear warmup then cosine decay to 0 over the full --epochs horizon."""
+        """Linear warmup then cosine decay to 0 over the full step horizon."""
         if step < args.warmup:
             return (step + 1) / args.warmup          # audit fix #12
         p = (step - args.warmup) / max(1, total_steps - args.warmup)
@@ -350,6 +362,8 @@ def main() -> int:
               f"of --epochs {args.epochs}")
         return 0
 
+    evals = best_eval = 0
+    stop = False
     for epoch in range(start_epoch, args.epochs):
         t0 = time.time()
         running = 0.0
@@ -371,26 +385,36 @@ def main() -> int:
             nb += 1
             step += 1
 
-        acc = greedy_accuracy(model, val_dl, device)
-        lr_now = sched.get_last_lr()[0]
-        secs = time.time() - t0
-        mean_loss = running / max(nb, 1)
-        print(f"epoch {epoch:3d}  ctc_loss {mean_loss:.4f}  val_greedy {acc * 100:.2f}%  "
-              f"lr {lr_now:.2e}  step {step}  {secs:.1f}s", flush=True)
-        with open(metrics_path, "a") as mf:
-            mf.write(json.dumps({"epoch": epoch, "step": step, "ctc_loss": mean_loss,
-                                 "val_greedy": acc, "lr": lr_now,
-                                 "seconds": round(secs, 3)}) + "\n")
-
-        if acc > best:
-            best, best_epoch = acc, epoch
-        ckpt = build_checkpoint(model, opt, sched, step, epoch, best, best_epoch,
-                                args, acc)
-        atomic_save(ckpt, run_dir / "last.pt")
-        if best_epoch == epoch:
-            atomic_save(ckpt, run_dir / "best.pt")
-        elif epoch - best_epoch >= args.patience:
-            print(f"early stop (best val_greedy {best * 100:.2f}% @ epoch {best_epoch})")
+            if step % val_every == 0 or step >= total_steps:
+                acc = greedy_accuracy(model, val_dl, device)
+                lr_now = sched.get_last_lr()[0]
+                secs = time.time() - t0
+                mean_loss = running / max(nb, 1)
+                running, nb, t0 = 0.0, 0, time.time()
+                evals += 1
+                print(f"epoch {epoch:3d} step {step:6d}  ctc_loss {mean_loss:.4f}  "
+                      f"val_greedy {acc * 100:.2f}%  lr {lr_now:.2e}  {secs:.1f}s",
+                      flush=True)
+                with open(metrics_path, "a") as mf:
+                    mf.write(json.dumps({"epoch": epoch, "step": step,
+                                         "ctc_loss": mean_loss, "val_greedy": acc,
+                                         "lr": lr_now, "seconds": round(secs, 3)}) + "\n")
+                if acc > best:
+                    best, best_epoch, best_eval = acc, epoch, evals
+                ckpt = build_checkpoint(model, opt, sched, step, epoch, best,
+                                        best_epoch, args, acc)
+                atomic_save(ckpt, run_dir / "last.pt")
+                if best_eval == evals:
+                    atomic_save(ckpt, run_dir / "best.pt")
+                elif evals - best_eval >= args.patience:
+                    print(f"early stop (best val_greedy {best * 100:.2f}%)", flush=True)
+                    stop = True
+                if step >= total_steps:
+                    print(f"reached step budget {total_steps}", flush=True)
+                    stop = True
+                if stop:
+                    break
+        if stop:
             break
 
     print(f"done. best val_greedy {best * 100:.2f}% @ epoch {best_epoch} "
