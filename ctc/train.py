@@ -250,30 +250,33 @@ _BV_LETTERS: List[str] = []
 _BV_TARGETS: List[str] = []
 _BV_EM: Optional[np.ndarray] = None
 _BV_WIDTH = 100
+#: ``(gamma, lambda, beta, gammaPrune, betaPrune)`` the selection beam scores at.
+_BV_PRESET = (ENC_GAMMA, ENC_LAMBDA, ENC_BETA, ENC_GAMMA_PRUNE, ENC_BETA_PRUNE)
 
 
 def _beam_init(trie, letters: List[str], targets: List[str], shm, n: int,
-               width: int) -> None:
-    global _BV_TRIE, _BV_LETTERS, _BV_TARGETS, _BV_EM, _BV_WIDTH
+               width: int, preset: Tuple[float, float, float, float, float]) -> None:
+    global _BV_TRIE, _BV_LETTERS, _BV_TARGETS, _BV_EM, _BV_WIDTH, _BV_PRESET
     _BV_TRIE, _BV_LETTERS, _BV_TARGETS, _BV_WIDTH = trie, letters, targets, width
+    _BV_PRESET = preset
     _BV_EM = np.frombuffer(shm, np.float32).reshape(n, T_OUT, len(letters) + 1)
 
 
 def _beam_chunk(bounds: Tuple[int, int]) -> Tuple[int, int, int]:
     """Decode rows ``[lo,hi)`` from the shared buffer -> ``(hits1, hits3, hits5)``.
 
-    The beam is called with the published ``enc`` preset and ``top_k=5``, which is
-    exactly what ``eval_beam.py`` does; ``sweep_scoring``'s raw-score trick is not
-    needed here because the preset is fixed, and ``top_k=5`` is cheaper than
-    returning the whole terminal beam.
+    The beam is called with :data:`_BV_PRESET` and ``top_k=5``, which is exactly
+    what ``eval_beam.py`` does; ``sweep_scoring``'s raw-score trick is not needed
+    here because the preset is fixed, and ``top_k=5`` is cheaper than returning
+    the whole terminal beam.
     """
     lo, hi = bounds
     n_letters = len(_BV_LETTERS)
+    g, lam, b, gp, bp = _BV_PRESET
     h1 = h3 = h5 = 0
     for i in range(lo, hi):
         cands = futo_viterbi_beam(_BV_EM[i], _BV_LETTERS, n_letters, _BV_TRIE,
-                                  _BV_WIDTH, 5, ENC_GAMMA, ENC_LAMBDA, ENC_BETA,
-                                  ENC_GAMMA_PRUNE, ENC_BETA_PRUNE)
+                                  _BV_WIDTH, 5, g, lam, b, gp, bp)
         words = [w for w, _ in cands]
         tgt = _BV_TARGETS[i]
         try:
@@ -301,7 +304,9 @@ class BeamValidator:
 
     def __init__(self, workdir: Path, layout: Path, cache_dir: Path,
                  val_jsonl: Path, vocab: Path, n_rows: int, beam_width: int,
-                 jobs: int) -> None:
+                 jobs: int,
+                 preset: Tuple[float, float, float, float, float] = _BV_PRESET
+                 ) -> None:
         letters, centers = load_layout(layout)
         rows = load_test(val_jsonl)
         with np.load(cache_dir / "val.npz") as d:
@@ -335,9 +340,9 @@ class BeamValidator:
         ctx = mp.get_context("fork")
         self.pool = ctx.Pool(jobs, initializer=_beam_init,
                              initargs=(trie, letters, self.targets, self._shm,
-                                       self.n, beam_width))
+                                       self.n, beam_width, preset))
         print(f"beam-val: {self.n} rows, trie {trie.num_words} words, "
-              f"width {beam_width}, {jobs} procs"
+              f"width {beam_width}, {jobs} procs, preset {preset}"
               + (f"  ({mismatch} targets differ from the a-z-normalised cache)"
                  if mismatch else ""))
 
@@ -555,6 +560,12 @@ def main() -> int:
                          "anti-correlates with beam top-1.")
     ap.add_argument("--beam-width", type=int, default=100, dest="beam_width")
     ap.add_argument("--beam-jobs", type=int, default=12, dest="beam_jobs")
+    ap.add_argument("--select-preset", default="", dest="select_preset",
+                    help="scoring preset the SELECTION beam uses, as "
+                         "'gamma,lambda,beta,gammaPrune,betaPrune' (default: the "
+                         "published enc preset). A checkpoint should be selected "
+                         "at the preset it will be reported at — Phase E's E1 arm "
+                         "moved that preset a long way from the published one")
     ap.add_argument("--vocab", default="data/futo_en_wordlist.combined",
                     help="AOSP lexicon for the selection beam")
     ap.add_argument("--val-jsonl", default="data/val_hwsfuto.jsonl", dest="val_jsonl",
@@ -586,11 +597,18 @@ def main() -> int:
     # live CUDA context.
     beam_val = None
     if args.beam_val_rows > 0:
+        sel_preset = _BV_PRESET
+        if args.select_preset:
+            vals = [float(v) for v in args.select_preset.split(",")]
+            if len(vals) != 5:
+                raise SystemExit("--select-preset needs 5 floats: "
+                                 "gamma,lambda,beta,gammaPrune,betaPrune")
+            sel_preset = (vals[0], vals[1], vals[2], vals[3], vals[4])
         beam_val = BeamValidator(args.workdir, args.layout, cache_dir,
                                  resolve(args.workdir, args.val_jsonl),
                                  resolve(args.workdir, args.vocab),
                                  args.beam_val_rows, args.beam_width,
-                                 args.beam_jobs)
+                                 args.beam_jobs, sel_preset)
     select_metric = "val_beam_t1" if beam_val is not None else "val_greedy"
     # A comma-separated --train-npz concatenates caches; repeating a name repeats
     # its rows, which is how the HWS-oversampling arm is expressed.
