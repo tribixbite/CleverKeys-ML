@@ -79,7 +79,12 @@ def load_layout_centers(path: Path) -> np.ndarray:
 class SwipeDataset(Dataset):
     """Cached ``[2,64]`` features + slot-space CTC targets.
 
-    :param npz_path: output of ``prepare_data.py``.
+    :param npz_path: output of ``prepare_data.py``. A **sequence** of paths is
+        concatenated in order, and a path repeated N times contributes its rows
+        N times — which is how the Phase-E oversampling arms are built. Exact
+        repetition through a plain without-replacement shuffle is used in
+        preference to a weighted sampler, because ``prepare_data.py``'s exact
+        self-dedup would silently undo duplicate rows written into a tier jsonl.
     :param centers: ``[K,2]`` canonical key centers.
     :param augment: enable affine/noise augmentation.
     :param permute: also scatter the K keys into random slots of the 64 (only
@@ -88,13 +93,20 @@ class SwipeDataset(Dataset):
         assignment only, so ``train_refine.py`` passes ``permute=False``.
     """
 
-    def __init__(self, npz_path: Path, centers: np.ndarray, augment: bool,
+    def __init__(self, npz_path, centers: np.ndarray, augment: bool,
                  permute: bool = True, path_offset_sigma: float = 0.0,
                  path_scale_sigma: float = 0.0) -> None:
-        with np.load(npz_path) as d:                    # audit fix #14: close handle
-            self.features = np.array(d["features"])     # [N,2,64]
-            self.tgt_flat = np.array(d["targets"])
-            self.tgt_len = np.array(d["target_lengths"])
+        paths = [npz_path] if isinstance(npz_path, (str, Path)) else list(npz_path)
+        feats, tgts, tlens = [], [], []
+        for p in paths:
+            with np.load(p) as d:                       # audit fix #14: close handle
+                feats.append(np.array(d["features"]))   # [N,2,64]
+                tgts.append(np.array(d["targets"]))
+                tlens.append(np.array(d["target_lengths"]))
+        self.features = feats[0] if len(feats) == 1 else np.concatenate(feats)
+        self.tgt_flat = tgts[0] if len(tgts) == 1 else np.concatenate(tgts)
+        self.tgt_len = tlens[0] if len(tlens) == 1 else np.concatenate(tlens)
+        self.sources = paths
         self.tgt_off = np.concatenate([[0], np.cumsum(self.tgt_len)])
         self.centers = centers                          # [K,2]
         self.augment = augment
@@ -330,18 +342,27 @@ class BeamValidator:
                  if mismatch else ""))
 
     @torch.no_grad()
-    def run(self, model: torch.nn.Module, device: str, batch: int = 512
-            ) -> Tuple[float, float, float]:
-        """-> ``(t1, t3, t5)`` percentages for *model* on the fixed prefix."""
+    def run(self, model: torch.nn.Module, device: str, batch: int = 512,
+            forward=None) -> Tuple[float, float, float]:
+        """-> ``(t1, t3, t5)`` percentages for *model* on the fixed prefix.
+
+        :param forward: ``(feats, keys, mask) -> sliced log-probs [B,32,K+1]``.
+            Defaults to the base encoder's full head, sliced. ``train_refine.py``
+            passes the refinement head so the head is selected on the same
+            lexicon-beam top-1 the encoder arms are, rather than on greedy.
+        """
         was_training = model.training
         model.eval()
         off = 0
         for s in range(0, self.n, batch):
             f = self.features[s:s + batch].to(device)
             b = f.shape[0]
-            log_e, _, _ = model(f, self.keys.to(device).expand(b, -1, -1),
-                                self.mask.to(device).expand(b, -1))
-            sliced = slice_head_torch(log_e, self.n_letters)       # [b,32,27]
+            keys = self.keys.to(device).expand(b, -1, -1)
+            mask = self.mask.to(device).expand(b, -1)
+            if forward is None:
+                sliced = slice_head_torch(model(f, keys, mask)[0], self.n_letters)
+            else:
+                sliced = forward(f, keys, mask)                    # [b,32,27]
             self._view[off:off + b] = sliced.detach().cpu().numpy()
             off += b
         if was_training:
@@ -490,7 +511,11 @@ def main() -> int:
     ap.add_argument("--layout", type=Path, default=DEFAULT_LAYOUT)
     ap.add_argument("--cache", type=Path, default=Path("cache"))
     ap.add_argument("--train-npz", default="train.npz", dest="train_npz",
-                    help="training cache inside --cache (tier arm selector)")
+                    help="training cache(s) inside --cache (tier arm selector). "
+                         "Comma-separated names are concatenated, and a repeated "
+                         "name repeats its rows — e.g. "
+                         "'train_t3.npz,train_t3hws.npz,train_t3hws.npz' is T3 "
+                         "with its HWS half oversampled 3x")
     ap.add_argument("--run-name", default="", dest="run_name",
                     help="ckpt/<run-name>/ (default: timestamped)")
     ap.add_argument("--resume", default="", help="checkpoint to continue from")
@@ -567,7 +592,13 @@ def main() -> int:
                                  args.beam_val_rows, args.beam_width,
                                  args.beam_jobs)
     select_metric = "val_beam_t1" if beam_val is not None else "val_greedy"
-    train_ds = SwipeDataset(cache_dir / args.train_npz, centers, augment=True,
+    # A comma-separated --train-npz concatenates caches; repeating a name repeats
+    # its rows, which is how the HWS-oversampling arm is expressed.
+    train_npz = [cache_dir / p.strip() for p in args.train_npz.split(",") if p.strip()]
+    for p in train_npz:
+        if not p.exists():
+            raise SystemExit(f"--train-npz: missing {p}")
+    train_ds = SwipeDataset(train_npz, centers, augment=True,
                             path_offset_sigma=args.path_offset_sigma,
                             path_scale_sigma=args.path_scale_sigma)
     val_ds = SwipeDataset(cache_dir / "val.npz", centers, augment=False)

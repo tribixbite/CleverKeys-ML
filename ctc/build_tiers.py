@@ -21,6 +21,14 @@ Tiers (all evaluated against the SAME canonical val-9918 / test-2400):
        strictly more conservative than they are — but T3 is contributor-dirty by
        construction and can therefore NOT support a generalization claim. It
        exists to be comparable with published numbers, nothing else.
+  T4   the **curated** benchmark arm (Phase E): T3's contamination policy applied
+       to T1's curated FUTO source — the user's 688,025-row filtered+normalised
+       pool instead of the raw swipe-1 train corpus, plus the same full HWS
+       release. T3 vs T4 is curation at benchmark scale. T4 inherits T3's
+       disclosure verbatim: it is contributor-dirty and is a benchmark tier only.
+  T3hws  the HWS half of T3 alone (Phase E). Not a training tier on its own — it
+       is the oversampling supply for the 3x-HWS arm, concatenated onto
+       ``train_t3.npz`` twice via ``train.py --train-npz a,b,b``.
 
 Contamination control (applied to every tier):
   a. **Exact-trace dedup** against canonical val/test — also re-applied inside
@@ -399,26 +407,116 @@ def build_t3(args, holdout: Set[bytes], holdout_xyt: Set[bytes]) -> None:
                 w.write(json.dumps({"word": word, "points": pts}) + "\n")
                 st["futo_kept"] += 1
         print(f"[T3] futo pass done ({time.time() - t0:.0f}s): {st}", flush=True)
-
-        # ── HWS: every participant in the release, not just the 1,052 local logs ─
-        for log in sorted(HWS_FULL_LOGS.glob("*.log")):
-            st["hws_logs"] += 1
-            for word, pts in parse_hws_log(log):
-                st["hws_traces"] += 1
-                if len(word) < 2:
-                    st["hws_len1"] += 1
-                    continue
-                if hash_row(word, pts) in holdout:
-                    st["hws_leak_xy"] += 1
-                    continue
-                if trace_hash_xyt(word, [p["x"] for p in pts], [p["y"] for p in pts],
-                                  [p["t"] for p in pts]) in holdout_xyt:
-                    st["hws_leak_xyt"] += 1
-                    continue
-                w.write(json.dumps({"word": word, "points": pts}) + "\n")
-                st["hws_kept"] += 1
+        write_hws_release(w, st, holdout, holdout_xyt)
     st["total"] = st["futo_kept"] + st["hws_kept"]
     print(f"[T3] {st}  ({time.time() - t0:.0f}s) -> {out}")
+    (out.with_suffix(".stats.json")).write_text(json.dumps(st, indent=1))
+
+
+def write_hws_release(w, st: Dict[str, int], holdout: Set[bytes],
+                      holdout_xyt: Set[bytes]) -> None:
+    """Append every kept trace of the FULL How-We-Swipe release to an open file.
+
+    The filter is the canonical one (``is_err = 0`` and ``>= 3`` points, both
+    inside :func:`parse_hws_log`, then ``len(word) >= 2``) plus exact-trace dedup
+    against the canonical holdout under both hash conventions. Shared by T3 and
+    T4 so the two tiers cannot drift apart on the HWS side, and by the HWS-only
+    tier that supplies the oversampling copies (Phase E, E3b).
+
+    *st* is updated in place with the ``hws_*`` counters.
+    """
+    for log in sorted(HWS_FULL_LOGS.glob("*.log")):
+        st["hws_logs"] += 1
+        for word, pts in parse_hws_log(log):
+            st["hws_traces"] += 1
+            if len(word) < 2:
+                st["hws_len1"] += 1
+                continue
+            if hash_row(word, pts) in holdout:
+                st["hws_leak_xy"] += 1
+                continue
+            if trace_hash_xyt(word, [p["x"] for p in pts], [p["y"] for p in pts],
+                              [p["t"] for p in pts]) in holdout_xyt:
+                st["hws_leak_xyt"] += 1
+                continue
+            w.write(json.dumps({"word": word, "points": pts}) + "\n")
+            st["hws_kept"] += 1
+
+
+def hws_stats() -> Dict[str, int]:
+    """Zeroed ``hws_*`` counters for :func:`write_hws_release`."""
+    return dict(hws_logs=0, hws_traces=0, hws_len1=0, hws_leak_xy=0,
+                hws_leak_xyt=0, hws_kept=0)
+
+
+def build_t3hws(args, holdout: Set[bytes], holdout_xyt: Set[bytes]) -> None:
+    """The HWS half of T3 on its own — the oversampling supply for Phase E's E3b.
+
+    Duplicating rows inside a tier jsonl would be undone by ``prepare_data.py``'s
+    exact self-dedup, so the 3x-HWS arm is built instead by concatenating this
+    npz onto ``train_t3.npz`` twice at load time (``train.py --train-npz a,b,b``).
+    That is exact 3x oversampling under a plain without-replacement shuffle,
+    rather than the with-replacement approximation a weighted sampler would give.
+    """
+    out = resolve(args.workdir, f"data/tier_t3hws{args.suffix}.jsonl")
+    st = hws_stats()
+    t0 = time.time()
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with open(out, "w") as w:
+        write_hws_release(w, st, holdout, holdout_xyt)
+    st["total"] = st["hws_kept"]
+    print(f"[T3hws] {st}  ({time.time() - t0:.0f}s) -> {out}")
+    (out.with_suffix(".stats.json")).write_text(json.dumps(st, indent=1))
+
+
+def build_t4(args, holdout: Set[bytes], holdout_xyt: Set[bytes]) -> None:
+    """T4 — the user's curated FUTO pool at benchmark scale + the full HWS release.
+
+    T4 is T3's contamination policy (exact-trace dedup only, **no session or
+    participant exclusion**) applied to T1's *curated* FUTO source. The two tiers
+    therefore isolate curation at benchmark scale:
+
+    ============  ====================================  ==================
+    tier          FUTO source                           session exclusion
+    ============  ====================================  ==================
+    T1            curated 688,025-row pool              yes (FUTO side)
+    T3            raw swipe-1 train, hygiene gate only  no
+    **T4**        **curated 688,025-row pool**          **no**
+    ============  ====================================  ==================
+
+    ⚠ T4 inherits T3's disclosure verbatim (``PHASE_D.md`` §2): every contributor
+    who produced a val/test trace also has other traces here, so T4 is a
+    *benchmark* tier and cannot support a generalization claim.
+
+    The curated pool is already in canonical ``{word, points}`` form, so no
+    hygiene gate or point rebasing applies — its own cascade ran upstream.
+    """
+    out = resolve(args.workdir, f"data/tier_t4{args.suffix}.jsonl")
+    st = dict(futo_in=0, futo_leak_xy=0, futo_leak_xyt=0, futo_kept=0)
+    st.update(hws_stats())
+    t0 = time.time()
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with open(out, "w") as w:
+        with open(CCO / "train_futo_filtered_norm.jsonl") as f:
+            for line in f:
+                o = json.loads(line)
+                st["futo_in"] += 1
+                pts = o["points"]
+                word = o["word"].lower()
+                if hash_row(word, pts) in holdout:
+                    st["futo_leak_xy"] += 1
+                    continue
+                if trace_hash_xyt(word, [p["x"] for p in pts],
+                                  [p["y"] for p in pts],
+                                  [p["t"] for p in pts]) in holdout_xyt:
+                    st["futo_leak_xyt"] += 1
+                    continue
+                w.write(json.dumps({"word": word, "points": pts}) + "\n")
+                st["futo_kept"] += 1
+        print(f"[T4] futo pass done ({time.time() - t0:.0f}s): {st}", flush=True)
+        write_hws_release(w, st, holdout, holdout_xyt)
+    st["total"] = st["futo_kept"] + st["hws_kept"]
+    print(f"[T4] {st}  ({time.time() - t0:.0f}s) -> {out}")
     (out.with_suffix(".stats.json")).write_text(json.dumps(st, indent=1))
 
 
@@ -446,14 +544,20 @@ def main() -> int:
     print(f"canonical holdout traces: {len(holdout)}")
 
     want = set(args.tiers.split(","))
-    if "t3" in want:
-        # T3 is the only tier with no session exclusion, so it needs no corpus
-        # index — but it applies BOTH hash conventions instead of one.
+    # T3/T3hws/T4 are the tiers with no session exclusion, so they need no corpus
+    # index — but they apply BOTH hash conventions instead of one.
+    no_session = {"t3", "t3hws", "t4"}
+    if want & no_session:
         holdout_xyt = load_pool_hashes_xyt(NST / "val_hwsfuto.jsonl") | \
             load_pool_hashes_xyt(NST / "test_hwsfuto.jsonl")
         print(f"canonical holdout traces (word+x+y+t hash): {len(holdout_xyt)}")
-        build_t3(args, holdout, holdout_xyt)
-    if not (want - {"t3"}):
+        if "t3" in want:
+            build_t3(args, holdout, holdout_xyt)
+        if "t3hws" in want:
+            build_t3hws(args, holdout, holdout_xyt)
+        if "t4" in want:
+            build_t4(args, holdout, holdout_xyt)
+    if not (want - no_session):
         return 0
 
     h2s, tainted = session_lookup(args.workdir)
