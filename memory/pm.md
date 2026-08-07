@@ -148,3 +148,25 @@ Date: 2025-10-07
 - [ ] 5. eval_arms.py full-val beam t1/t3/t5 + per-source for every run.
 - [ ] 6. PHASE_D.md with per-seed + mean tables, the T3 contamination disclosure,
       and the milestone-gate recommendation. test-2400 stays SEALED.
+
+2026-08-07 (phase D) — beam selection adopted, ch128 adopted, T3 rejected, gate NOT spent
+
+- train.py selects best.pt on beam top-1 over a fixed 2,000-row val prefix (pool
+  forked once pre-CUDA, trie copy-on-write, shared RawArray emissions, ~2 s/val
+  point). Golden-checked: reproduces r2's committed val[0:2000] 81.55/89.85/91.65
+  exactly. eval_arms now reports the <=3 / 4+ strata too.
+- T3 built: full FUTO swipe-1 (929,568 kept) + FULL How-We-Swipe release (1,338
+  users, 78,155 kept) = 1,007,723 rows -> 1,005,336 cached. NO session exclusion
+  (documented in PHASE_D.md §2). parse_hws_log reproduces all 60,303 unique
+  canonical HWS traces bit-exactly; prepare_data re-dedup found 0 extra leaks.
+- Seed-mean val t1 (3 seeds, paired): D1 ch128 on T3 = 84.81 (sd 0.56);
+  ch128 on T1 = 84.38 (sd 0.15). Paired t(2) = 1.31 -> tiers indistinguishable.
+  T3 buys FUTO (+1.35) and 4+ (+0.87), costs HWS (-0.48) and <=3 (-0.41).
+- ch96 -> ch128 = +1.07 pt on T3, the only arch lever that has ever gained here.
+  Costs 0.31 -> 0.49 ms single-thread CPU (+60 %).
+- ConvNeXt regresses again UNDER beam selection (-0.87 vs D1), so the Phase-B
+  mis-selection hypothesis is dead. EMA is a null (-0.13).
+- vs FUTO ceiling: t1 84.81 vs 84.83, t5 +0.25, 4+ +0.75, but <=3 -1.56. Since
+  test ran 0.61 BELOW val on r2, expected test ~84.2 -> gate NOT recommended yet.
+  Next levers: close <=3 (length-conditioned score / refine head, which gave
+  +1.00 on <=3), scale ch further, widen the selection prefix to 5,000 rows.
