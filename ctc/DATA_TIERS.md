@@ -108,19 +108,29 @@ committed numbers comparable and costs no training).
 
 ## 3. The tiers
 
-| tier | rows | composition | filters |
-|---|---|---|---|
-| **T0** | 110,876 (109,600 cached) | 55,438 HWS + 55,438 FUTO | user's curation, 1:1 balance cap |
-| **T1** | **374,004** | 55,438 HWS + 318,566 FUTO | user's curation at full scale + contamination controls |
-| **T2** | **385,458** | FUTO only | basic hygiene only (`potentially_invalid_sentence`) + contamination controls |
-| **T2b** | see stats | FUTO only | T2 + the full recovered quality cascade |
+| tier | jsonl rows | cached npz | cache file | composition | filters |
+|---|---|---|---|---|---|
+| **T0** | 110,876 | 109,600 | `train.npz` (48 MB) | 55,438 HWS + 55,438 FUTO | user's curation, 1:1 balance cap |
+| **T1** | 374,004 | **372,726** | `train_t1.npz` (165 MB) | 55,438 HWS + 318,566 FUTO | user's curation at full scale + contamination controls |
+| **T2** | 385,458 | **385,021** | `train_t2.npz` (166 MB) | FUTO only | basic hygiene only (`potentially_invalid_sentence`) + contamination controls |
+| **T2b** | 285,932 | **285,929** | `train_t2b.npz` (127 MB) | FUTO only | T2 + the full recovered quality cascade |
 
 Drop accounting:
 
 ```
-T1: futo_in 688,025 | leak 0 | session-taint 369,459 | unmapped 102,826 (kept) | kept 318,566
-T2: rows_in 939,550 | invalid_sentence 4,709 | leak 5,273 | session-taint 544,110 | kept 385,458
+T1 : futo_in 688,025 | leak 0 | session-taint 369,459 | unmapped 102,826 (kept) | kept 318,566
+T2 : rows_in 939,550 | invalid_sentence 4,709 | leak 5,273 | session-taint 544,110 | kept 385,458
+T2b: rows_in 939,550 | invalid_sentence 4,709 | leak 5,152 | session-taint 491,154
+     not_portrait 53,464 | bad_speed 40,865 | too_many_points 26,722 | bad_duration 19,528
+     not_in_dictionary 7,166 | invalid_word 4,401 | canvas_wide 457 | canvas_dims 0
+     kept 285,932   (dictionary = 458,325 terms)
 ```
+
+T2b's quality cascade costs **99,526 rows on top of T2** (385,458 → 285,932). The two
+biggest single gates are `not_portrait` (53,464) and `bad_speed` (40,865); the
+dictionary/word gates together drop only 11,567, so the curation is overwhelmingly a
+*motion/geometry* filter rather than a lexical one. That makes T2 vs T2b a clean test of
+whether those motion gates earn their keep, independent of vocabulary coverage.
 
 **T1 has zero exact-trace contamination** (0 of 12,299 holdout traces, 0.0000 %) — the
 user's FUTO train/val pools were already disjoint. Its 102,826 "unmapped" rows are the
@@ -131,6 +141,11 @@ Note T1 (374 k) and T2 (385 k) end up nearly the same size: **once session-disjo
 is enforced, the user's curation only costs ~11 k rows.** The "more data vs better data"
 contrast is therefore much weaker than the raw 110 k-vs-939 k framing suggested — the
 real cost of a clean evaluation is the 58.8 % session exclusion, not the curation.
+
+Every tier is still **3.4–3.5× T0**, so the scale-up lever is real; it is the *spread
+between* the tiers that is narrow. The informative contrasts are therefore T0→T1 (scale
+at fixed curation, but confounded by §2's T0 leak) and T2→T2b (curation at fixed scale,
+unconfounded — both are contributor-disjoint).
 
 ### Recovered filter criteria (FUTO half, verbatim)
 
