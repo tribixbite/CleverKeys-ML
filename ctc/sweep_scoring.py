@@ -224,6 +224,13 @@ def main() -> int:
                     help="comma-separated override for the coarse gamma grid")
     ap.add_argument("--grid-beta", default="", dest="grid_beta")
     ap.add_argument("--grid-lambda", default="", dest="grid_lambda")
+    ap.add_argument("--grid-gamma-prune", default="", dest="grid_gamma_prune",
+                    help="explicit pass-2 gammaPrune values (default: the preset "
+                         "+-REFINE_STEP). The prune params are the beam's length "
+                         "normalisation for SURVIVAL, so a mis-tuned gammaPrune "
+                         "drops candidates before scoring ever sees them and caps "
+                         "top-3/top-5 no matter what the final score does")
+    ap.add_argument("--grid-beta-prune", default="", dest="grid_beta_prune")
     ap.add_argument("--skip-refine", action="store_true", dest="skip_refine",
                     help="coarse pass only (no prune-param refinement)")
     args = ap.parse_args()
@@ -292,8 +299,12 @@ def main() -> int:
                                  for _, p, m in scored]
 
         # ── pass 2: prune params +-REFINE_STEP, local (gamma, beta, lambda) grid ──
-        gps = [round(base[3] + d * REFINE_STEP, 4) for d in (-1, 0, 1)]
-        bps = [round(base[4] + d * REFINE_STEP, 4) for d in (-1, 0, 1)]
+        gps = ([float(v) for v in args.grid_gamma_prune.split(",")]
+               if args.grid_gamma_prune
+               else [round(base[3] + d * REFINE_STEP, 4) for d in (-1, 0, 1)])
+        bps = ([float(v) for v in args.grid_beta_prune.split(",")]
+               if args.grid_beta_prune
+               else [round(base[4] + d * REFINE_STEP, 4) for d in (-1, 0, 1)])
         loc_g = sorted({round(w1[0] + d, 4) for d in (-0.05, -0.025, 0.0, 0.025, 0.05)})
         loc_b = sorted({round(w1[2] + d, 4) for d in (-0.05, -0.025, 0.0, 0.025, 0.05)})
         best = (scored[0][0], w1, scored[0][2])
