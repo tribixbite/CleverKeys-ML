@@ -154,6 +154,17 @@ def main() -> int:
             rec[f"clean_{name}"] = {"n": int(sel.sum()), "t1": s[0], "t3": s[1], "t5": s[2]}
             print(f"  {label:<24} n={int(sel.sum()):<5} t1 {s[0]:5.2f}"
                   f"  t3 {s[1]:5.2f}  t5 {s[2]:5.2f}")
+            # A FUTO-only tier leaves every HWS val row "clean", so an undivided
+            # clean number is mostly a cross-corpus transfer score. Split it.
+            for sname, ssel in (("futo", is_futo), ("hws", ~is_futo)):
+                sub = sel & ssel
+                if not sub.any():
+                    continue
+                ss = top(subset(traces, sub))
+                rec[f"clean_{name}_{sname}"] = {"n": int(sub.sum()), "t1": ss[0],
+                                                "t3": ss[1], "t5": ss[2]}
+                print(f"    {'|- ' + sname:<22} n={int(sub.sum()):<5} t1 {ss[0]:5.2f}"
+                      f"  t3 {ss[1]:5.2f}  t5 {ss[2]:5.2f}")
         if own not in masks:
             print(f"  (no own mask for '{own}' in {args.masks})")
         ck = run / "best.pt"
