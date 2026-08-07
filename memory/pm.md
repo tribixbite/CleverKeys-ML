@@ -92,3 +92,19 @@ Date: 2025-10-07
   80.83 % on 120 val rows. Full run + G2/G4 gates still TODO.
 - TODO: full 300-epoch run; match the baseline 131,544-word lexicon before making a
   formal G2 claim (staged wordlist yields 146,964); phase-2 refinement head (§11).
+
+2026-08-07 (later) — phase-2 refinement head: G4 MISSED
+
+- Added `ctc/train_refine.py`, `ctc/export_refine_onnx.py`, `CtcRefineHead` in
+  `ctc/model.py`, and `eval_beam.py --refine-ckpt/--refine-onnx/--scoring`.
+- Head (15.6K params) trained 60 epochs on frozen r2, 2.7 s/epoch. Best val greedy
+  58.91 % @ epoch 40 vs r2's 58.00 % — only +0.9 pt (FUTO's lever was +25 pt greedy).
+- G4 probe on val[0:2000]: enc-only 81.55 t1; refined 81.55 (dec preset) / 81.35
+  (enc preset). Delta +0.00 pt against a >= +4 pt bar. 28 rows fixed, 28 broken.
+  Short words +1.00, long words -0.54.
+- Read: our base emissions are already far sharper than FUTO's 43.96 % greedy base,
+  so the per-frame refiner has almost no headroom. Both scoring presets bracket the
+  result, so it is not a preset artifact.
+- Next options: temporal-context head (FUTO's magic_macaw is DFSMN, ours is strictly
+  per-frame), --unfreeze-after end-to-end fine-tune, or drop phase 2 and sweep
+  (gamma, beta, lambda) on val for the enc-only emissions.

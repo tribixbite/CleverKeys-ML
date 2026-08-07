@@ -135,6 +135,31 @@ lambda 0.0134, beta 0.7271, gammaPrune 0.1902, betaPrune 1.2727); `--scoring
 enc|dec` overrides. `--unfreeze-after N` optionally unfreezes the base at 0.1×
 the head lr after epoch N (default off).
 
+### Measured result on r2 — **G4 misses** (2026-08-07)
+
+60 epochs, 2.7 s/epoch, head best val greedy **58.91 %** @ epoch 40 (base r2 was
+58.00 %). G4 probe on the identical first 2 000 val rows:
+
+| config | greedy | top-1 | top-3 | top-5 |
+|---|---|---|---|---|
+| enc-only r2 (enc preset) | 58.55 % | **81.55** | 89.85 | 91.65 |
+| refined, `dec` preset (auto) | 59.15 % | **81.55** | 89.80 | 91.30 |
+| refined, `enc` preset (control) | 59.15 % | **81.35** | 89.65 | 91.40 |
+
+Delta vs the ≥ +4 pt bar: **+0.00 pt** (dec) / −0.20 pt (enc). Per-row churn is
+28 fixed / 28 broken — net zero. By stratum (dec): ≤3-char 83.24 → **84.24**
+(+1.00), 4+-char 80.65 → **80.11** (−0.54).
+
+The likely reason the lever does not reproduce: FUTO's +5.88 pt came off a base
+whose greedy was only 43.96 %, i.e. emissions with a lot of per-frame slack for a
+refiner to recover. Our base already greedy-decodes at 58.0 %, so there is far
+less headroom, and the head converges to roughly reproducing its input. The two
+scoring presets bracket the result, so this is not a preset-mismatch artifact.
+Options before spending more on phase 2: more head capacity/context (FUTO's
+`magic_macaw` is a DFSMN with temporal context, ours is strictly per-frame),
+`--unfreeze-after` end-to-end fine-tuning, or dropping phase 2 and tuning
+(gamma, beta, lambda) on val for the enc-only emissions instead.
+
 ## Contract the export must satisfy
 
 | Tensor | Shape | dtype | Meaning |
