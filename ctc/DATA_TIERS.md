@@ -104,6 +104,16 @@ decides anything, we need either a contributor-disjoint holdout carved from the 
 val, or T0 re-run with the same session exclusion. Recommend the former (keeps the
 committed numbers comparable and costs no training).
 
+> ⚠ **Superseded — "by construction" was wrong for T1.** Measuring contributors from each
+> row's own `session` field (rather than from a trace hash) in Phase A showed T1's FUTO
+> contributor set is **9,877 of the corpus's 10,889 sessions**: the 102,826 rows whose
+> session could not be recovered are kept by default, and they carry back ~2,000 of the
+> sessions the exclusion had dropped. T1's contributor-clean val subset is **46 rows, not
+> the 4,238 the hash-based mask reported**. A genuinely disjoint T1 needs
+> `--strict-session`. T2/T2b *are* clean (93.8 % / 97.5 % of val). Separately, 219 sessions
+> produced 249 val rows without ever entering `futo_tainted_sessions.npz`, so their 27,356
+> corpus rows sit inside every tier. See `PHASE_A.md` §3.
+
 ---
 
 ## 3. The tiers
