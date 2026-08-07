@@ -121,6 +121,11 @@ Date: 2025-10-07
   +0.45 t1 on the 2000 rows it was fitted to, +0.05 on untouched rows 2000-4000,
   and -0.01 on full val-9918. SE at n=2000 is ~0.87 pt, so the gain was noise.
   VERDICT: keep CtcScoringParams.encoderOnly unchanged; no free win exists.
+- Headroom bound: a wider grid (405 coarse + 9x125 refinement points) run directly
+  on all 9918 val rows -- selecting on the rows it is scored on, an optimistic upper
+  bound -- tops out at 81.78 t1 vs 81.57 baseline, i.e. +0.21 pt MAXIMUM, while
+  costing -0.01 on both t3 and t5 (trades 4+ 79.12->78.89 for <=3 86.28->87.34).
+  The two sweeps also pick different winners, confirming a flat objective surface.
 - Unfreeze probe (--unfreeze-after 10 --epochs 40): train loss 0.316 -> 0.276 but
   val greedy only 58.91 -> 59.16 % (+0.25, best @ epoch 22). Below the +0.5 pt bar
   so no beam probe was run. Phase 2 closed for good.

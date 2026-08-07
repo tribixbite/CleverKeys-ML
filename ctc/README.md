@@ -160,10 +160,26 @@ Result on r2 (coarse 5×5×3 grid, then prune params ±0.05 with a local refinem
 | tuned (γ 0.275, λ 0.026, β 0.84, γp 0.3734, βp 0.9882) | 82.00 (+0.45) | 82.75 (+0.05) | 81.56 (**−0.01**) |
 
 The +0.45 pt on the rows it was fitted to is 0.5 standard errors (SE ≈ 0.87 pt at
-n=2000), evaporates to +0.05 on untouched rows, and is −0.01 on full val. **The
-published `CtcScoringParams.encoderOnly` preset is already at the optimum within
-noise for our emissions — do not change it.** The objective surface is flat across
-the whole 81.5–82.0 band, so the guide's "free win" does not exist for this model.
+n=2000), evaporates to +0.05 on untouched rows, and is −0.01 on full val.
+
+**Headroom bound.** To settle whether *any* setting helps, a wider grid (9 γ × 9 β
+× 5 λ = 405 points, plus 9 prune settings × 125 local points) was run directly on
+all 9 918 val rows — i.e. selecting on the same rows it is scored on, an optimistic
+upper bound rather than an honest estimate. The best point reachable that way is
+**81.78 top-1 vs 81.57 baseline: +0.21 pt maximum**, and it costs −0.01 on both
+top-3 and top-5 (it trades 4+-char accuracy 79.12 → 78.89 for ≤3-char 86.28 →
+87.34). The two sweeps also disagree on which point wins (γ 0.275/β 0.84 vs
+γ 0.4056/β 0.69), which is what a flat objective surface looks like.
+
+**Verdict: keep `CtcScoringParams.encoderOnly` exactly as published.** It is already
+at the optimum within noise for our emissions; the guide's "free win" does not exist
+for this model, and the ≤0.21 pt that selection-on-val can manufacture is not worth
+a preset divergence from the committed Kotlin default.
+
+```
+CtcScoringParams(gamma = 0.4056, lambda = 0.0176, beta = 0.9866,
+                 alpha = 0.0, gammaPrune = 0.4234, betaPrune = 1.0382)  // unchanged
+```
 
 ### Measured result on r2 — **G4 misses** (2026-08-07)
 
