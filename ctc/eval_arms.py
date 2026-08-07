@@ -59,6 +59,40 @@ def top(traces: Sequence[TraceCandidates]) -> Tuple[float, float, float]:
     return score_grid(list(traces), g, b, lam)
 
 
+def onnx_latency(onnx_path: Path, layout: Path, runs: int = 100,
+                 warmup: int = 20) -> Tuple[float, float]:
+    """Single-call CPU latency of the exported graph -> ``(mean_ms, p90_ms)``.
+
+    One session, one thread, batch 1, fixed shapes — the on-device shape of the
+    call the IME makes once per swipe. Threads are pinned to 1 because a phone
+    will not hand the encoder the whole machine, and an unpinned ORT session
+    silently uses every core and reports a number the device can never reach.
+    """
+    import onnxruntime as ort
+    from futo_decoder_eval import load_layout as _ll
+    letters, centers = _ll(layout)
+    opts = ort.SessionOptions()
+    opts.intra_op_num_threads = 1
+    opts.inter_op_num_threads = 1
+    sess = ort.InferenceSession(str(onnx_path), opts,
+                                providers=["CPUExecutionProvider"])
+    keys = np.zeros((1, 64, 2), np.float32)
+    keys[0, :len(letters)] = centers
+    mask = np.zeros((1, 64), bool)
+    mask[0, :len(letters)] = True
+    feed = {"features": np.random.rand(1, 2, 64).astype(np.float32),
+            "layout_keys": keys, "layout_mask": mask}
+    for _ in range(warmup):
+        sess.run(["log_emissions"], feed)
+    ts = []
+    for _ in range(runs):
+        t = time.perf_counter()
+        sess.run(["log_emissions"], feed)
+        ts.append((time.perf_counter() - t) * 1000.0)
+    a = np.array(ts)
+    return float(a.mean()), float(np.percentile(a, 90))
+
+
 def load_masks(path: Path, n: int) -> Dict[str, np.ndarray]:
     """Read ``val_clean_masks.json`` -> ``{name: bool[n]}``, plus derived combos."""
     raw = json.loads(Path(path).read_text())
@@ -96,6 +130,9 @@ def main() -> int:
                          "the 'phaseA-' run-name prefix)")
     ap.add_argument("--beam-width", type=int, default=100, dest="beam_width")
     ap.add_argument("--jobs", type=int, default=12)
+    ap.add_argument("--latency-runs", type=int, default=0, dest="latency_runs",
+                    help="also time the exported graph: single-thread batch-1 CPU "
+                         "mean/p90 ms over N runs (0 = skip)")
     ap.add_argument("--rebuild-cache", action="store_true", dest="rebuild_cache",
                     help="recompute ckpt/<arm>/eval_emissions.npz; required after an "
                          "arm is retrained, since the cache is keyed only by run dir")
@@ -171,6 +208,12 @@ def main() -> int:
                       f"  t3 {ss[1]:5.2f}  t5 {ss[2]:5.2f}")
         if own not in masks:
             print(f"  (no own mask for '{own}' in {args.masks})")
+        if args.latency_runs:
+            ms, p90 = onnx_latency(onnx, args.layout, args.latency_runs)
+            rec["latency_ms_mean"] = ms
+            rec["latency_ms_p90"] = p90
+            print(f"  {'latency (1 thread)':<24} mean {ms:6.2f} ms   p90 {p90:6.2f} ms"
+                  f"   ({args.latency_runs} runs)")
         ck = run / "best.pt"
         if ck.exists():
             import torch
