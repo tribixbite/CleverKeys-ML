@@ -44,8 +44,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from model import (CtcRefineHead, CtcSwipeEncoder, encoder_from_checkpoint, T_OUT,  # noqa: E402
                    build_refine_input, refine_input_dim)
 from paths import DEFAULT_LAYOUT, DEFAULT_WORKDIR, resolve, sha256_file  # noqa: E402
-from train import (BeamValidator, SwipeDataset, atomic_save, collate,  # noqa: E402
-                   greedy_accuracy, load_layout_centers, restore_rng, rng_state)
+from train import (_BV_PRESET as BV_PRESET, BeamValidator, SwipeDataset,  # noqa: E402
+                   atomic_save, collate, greedy_accuracy, load_layout_centers,
+                   restore_rng, rng_state)
 
 #: Args that define the head's architecture; a --resume must agree on all of them.
 ARCH_ARGS = ("hidden",)
@@ -146,6 +147,10 @@ def main() -> int:
                          "by the beam, so it must be selected by it too")
     ap.add_argument("--beam-width", type=int, default=100, dest="beam_width")
     ap.add_argument("--beam-jobs", type=int, default=12, dest="beam_jobs")
+    ap.add_argument("--select-preset", default="", dest="select_preset",
+                    help="scoring preset the SELECTION beam uses, as "
+                         "'gamma,lambda,beta,gammaPrune,betaPrune' (default: the "
+                         "published enc preset) — see train.py")
     ap.add_argument("--vocab", default="data/futo_en_wordlist.combined")
     ap.add_argument("--val-jsonl", default="data/val_hwsfuto.jsonl", dest="val_jsonl")
     ap.add_argument("--seed", type=int, default=1234)
@@ -178,10 +183,18 @@ def main() -> int:
     # the trie is inherited copy-on-write and no child holds a CUDA context.
     beam_val = None
     if args.beam_val_rows > 0:
+        sel_preset = BV_PRESET
+        if args.select_preset:
+            vals = [float(v) for v in args.select_preset.split(",")]
+            if len(vals) != 5:
+                raise SystemExit("--select-preset needs 5 floats: "
+                                 "gamma,lambda,beta,gammaPrune,betaPrune")
+            sel_preset = (vals[0], vals[1], vals[2], vals[3], vals[4])
         beam_val = BeamValidator(args.workdir, args.layout, cache_dir,
                                  resolve(args.workdir, args.val_jsonl),
                                  resolve(args.workdir, args.vocab),
-                                 args.beam_val_rows, args.beam_width, args.beam_jobs)
+                                 args.beam_val_rows, args.beam_width, args.beam_jobs,
+                                 sel_preset)
     select_metric = "val_beam_t1" if beam_val is not None else "val_greedy"
 
     # permute=False: the sliced 27-view is only the alphabet under identity slots.
