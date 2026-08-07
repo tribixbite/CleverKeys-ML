@@ -38,8 +38,15 @@ time was spent.
 | B2 | 13.9 min | **64.78** | 79.48 | **88.68** | 90.42 | 89.54 | **69.49** | 78.68 | **−1.31** |
 | B3 | 13.2 min | 62.92 | 78.05 | 88.45 | **90.53** | 87.43 | 68.73 | 77.31 | **−2.68** |
 
-Decision rule required a T2-clean t1 gain > 0.6 pt. Every arm is negative, and by margins
-far outside the ~0.4 pt noise floor established in Phase A. **Adopt none.**
+Decision rule required a T2-clean t1 gain > 0.6 pt. Every arm is negative. **Adopt none.**
+
+> ⚠ **Corrected after Phase C.** This section originally called the margins "far outside
+> the ~0.4 pt noise floor". Phase C re-ran the B0 control at a second seed and measured a
+> **1.05 pt** clean-t1 swing from seed alone, so the real floor is ~1 pt (see `PHASE_C.md`
+> §4). B1 (−4.60) and B3 (−2.68) remain solidly outside it and are real regressions;
+> **B2's −1.31 is marginal** and would need a second seed to be called with confidence.
+> The greedy-vs-beam inversion in §3 is unaffected — a +5.16 pt greedy move is far too
+> large to be seed noise.
 
 ## 3. Greedy went up and beam went down
 

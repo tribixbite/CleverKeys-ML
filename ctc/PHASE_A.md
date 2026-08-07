@@ -154,6 +154,14 @@ scores 81.57. That is a **0.55 pt spread from checkpoint selection alone**, larg
 the T0→T1 difference. Aggregate differences below ~0.6 pt in this table are not
 resolvable; the T2-vs-T2b FUTO gap (1.71 pt) and the corpus-mix effects (4–7 pt) are.
 
+> ⚠ **Corrected after Phase C.** The 0.55 pt figure above counts checkpoint-selection
+> spread only. Re-running the T2 arm at a second seed moved clean t1 by **1.05 pt** and
+> FUTO t1 by 1.45 pt, so the true single-seed resolution limit is **~1 pt, not ~0.6**.
+> Consequences for this table: the T0→T1 aggregate gap (+0.35) is **not** resolvable, and
+> the T2-vs-T2b aggregate gap (0.96) only barely reaches the floor. **The T2-vs-T2b
+> FUTO-half gap (1.71 pt) is the one that survives**, and it is what the "drop the cascade"
+> recommendation should rest on. The corpus-mix effects (4–7 pt) are unaffected.
+
 Related: the `seconds` field in `metrics.jsonl` is not the interval between validations —
 `t0` is also reset at each epoch boundary, so with `--val-every` smaller than an epoch it
 under-reports. Wall-clock above is taken from log file timestamps instead.
