@@ -272,7 +272,21 @@ below is measured on val-9918 alone.
 | `PHASE_B.md` | architecture levers | all three regress; greedy and beam top-1 move in **opposite** directions |
 | `PHASE_C.md` | training-procedure levers | all inside a seed-noise floor of **~1 pt**, 2× the previously assumed figure |
 | `PHASE_D.md` | beam-selected checkpoints, the T3 benchmark tier, 3 seeds | **ch 128 adopted**; T3 (1.0 M rows) indistinguishable from T1; test gate **not** spent |
+| `PHASE_E.md` | scoring re-tune, data mix, capacity, refinement head | **the published scoring preset was badly mis-tuned for our emissions** (+2.7–4.6 pt); 3× How-We-Swipe oversampling +0.83; the 3-seed stack **beats all five FUTO-ceiling numbers on val-9918**; test-2400 still **not** decoded |
 
-Best measured configuration: `phaseD-D1` — ch 128 residual trunk, 689 k params, on
-T1 or T3, 94 k steps, beam-selected checkpoint. Seed-mean val-9918 **84.81 t1 /
-91.01 t3 / 92.33 t5** (≤3 88.01, 4+ 83.15) over seeds 1234/4321/7777.
+Best measured configuration: `phaseE-FINAL` — ch 192 residual trunk, 1.525 M
+params, T3 with its How-We-Swipe half oversampled 3×, 94 k steps, checkpoint
+selected on beam top-1 over 5,000 val rows, decoded at the **Phase-E re-tuned
+preset** (`gamma 1.05, lambda 1.1, beta 0.2, gammaPrune 0.3734, betaPrune
+0.9882`). Seed-mean val-9918 **88.06 t1 / 92.32 t3 / 93.08 t5** (≤3 90.86,
+4+ 86.62) over seeds 1234/4321/7777, at 0.898 ms single-thread CPU. The ch 128
+variant scores 87.88 / 92.23 / 92.96 (≤3 90.98, 4+ 86.26) at 0.470 ms and clears
+the same bar.
+
+> ⚠ **The scoring-sweep section above is superseded by `PHASE_E.md` §1.** Its
+> "no free win" verdict and its "+0.21 pt maximum headroom" bound were both
+> artifacts of a grid centred on the published preset; re-swept wide on the same
+> `r2` model the gain is **+4.25 pt top-1 on untouched val rows**. Every absolute
+> accuracy number quoted elsewhere in this README is measured at the mis-tuned
+> published preset and is understated by 2–5 pt. Arm-vs-arm comparisons are
+> unaffected — the mis-tuning was common-mode.
