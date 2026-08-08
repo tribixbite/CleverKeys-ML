@@ -328,3 +328,18 @@ free at inference), 5-/6-block narrow trunks, and the no-KD ablation.
 - [ ] NEXT (optional): retrain ch128 itself with the resbn trunk -- folding BatchNorm
       is a strict improvement (50 fewer ONNX nodes, no accuracy cost) and would make
       the test-validated anchor faster without changing its capacity.
+
+Phase F round 3 — EXTENDED SCHEDULE (coordinator directive: test the underfit lever).
+188k steps, same recipe+KD, seed 1234, full val at E1:
+  resbn:48:1,2,4,8,16  134.6k  0.139 ms  86.64/91.80/92.53/89.73/85.04  4/5 (t5 -0.27)
+  resbn:56:1,2,4,8     145.6k  0.144 ms  86.79/91.83/92.65/90.26/84.99  4/5 (t5 -0.15)
+  resbn:64:1,2,4,8     185.1k  0.161 ms  87.19/92.09/92.76/90.29/85.59  4/5 (t5 -0.04)
+Delta vs 94k: +0.5 t1, +0.2 t3, +0.8 <=3, +0.4 4+ ... and +0.04 / -0.02 on t5.
+Train CTC 0.4425->0.4284 (ch56) and 0.4178->0.4039 (ch64): doubling the schedule buys
+0.014, while ch56->ch80 buys 0.061 and ch128 buys 0.141. The models are UNDER-CAPACITY,
+not undertrained -- the underfit reading in PHASE_F 7.1 was wrong in its mechanism.
+No arm cleared all five at seed 1234, so per the decision rule none earned a seed round.
+
+Round 4 running: M56-280k (the coordinator's 280k contingency on the best <=0.153 arm),
+N72-188k (resbn:72:1,2,4,8, 229.6k, 0.185 ms) and O56x5-188k (resbn:56:1,2,4,8,16,
+177.3k, 0.166 ms) -- the last two target criterion (2): clear all five below 0.213 ms.

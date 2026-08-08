@@ -511,6 +511,10 @@ space:
   from the teacher** and how much from the architecture and data. That is a real
   gap in the evidence and is not hidden.
 
+> **§13 supersedes the first bullet.** The extended schedule was subsequently run
+> to completion at 188,000 steps on three architectures. It is a real **+0.5 t1**
+> and it does **not** move t5. The conclusion of §7 survives it.
+
 ---
 
 ## 8. The two candidates at three seeds
@@ -697,5 +701,68 @@ python export_onnx.py --ckpt ckpt/phaseF-I-resbn80x4/best.pt \
 python eval_arms.py --arms phaseF-I-resbn80x4 --preset 1.05,1.1,0.2,0.3734,0.9882 \
        --own-mask T0 --also-masks= --rebuild-cache
 ```
+
+---
+
+## 13. The extended-schedule round — a real +0.5 t1 that does **not** buy t5
+
+§7.1 flagged the training budget as the most promising untested lever: every
+student's final train CTC loss sits far above the teacher's, so they looked
+undertrained rather than under-capacity. With the GPU budget lifted, the schedule
+was doubled to **188,000 steps** (cosine keyed to 188 k, warmup unchanged at 1,000,
+everything else identical to §4 including the teacher, weight and temperature) on
+three architectures, seed 1234.
+
+### Did the underfit close?
+
+| arm | params | train CTC @94k | train CTC @188k | Δ |
+|---|---|---|---|---|
+| `resbn:48:1,2,4,8,16` | 134,578 | — | 0.4358 | — |
+| `resbn:56:1,2,4,8` | 145,594 | 0.4425 | **0.4284** | −0.0141 |
+| `resbn:64:1,2,4,8` | 185,058 | 0.4178 | **0.4039** | −0.0139 |
+| *reference:* `resbn:80:1,2,4,8` @94k | 279,346 | 0.3816 | — | — |
+| *reference:* ch 128 `res` @94k | 689,282 | 0.3017 | — | — |
+| *reference:* ch 192 `res` @94k (the teacher) | 1,525,378 | 0.2422 | — | — |
+
+**Barely.** Doubling the schedule bought **0.013–0.014** of train CTC, while the
+step from ch 56 to ch 80 buys **0.061** and the step to ch 128 buys **0.141**. The
+gap to the teacher is dominated by capacity, not by optimization: these models are
+**under-capacity, not undertrained**, and the "underfit" reading in §7.1 was wrong
+in its mechanism even though the experiment was worth running.
+
+### What it bought on the bar — full val-9918, E1 preset, seed 1234
+
+| arm | params | ms (idle) | t1 | t3 | t5 | ≤3 | 4+ | bars |
+|---|---|---|---|---|---|---|---|---|
+| the bar | | | 85.52 | 91.54 | 92.80 | 89.29 | 83.57 | |
+| `resbn:48:1,2,4,8,16` @188k | 134,578 | **0.139** | 86.64 | 91.80 | 92.53 | 89.73 | 85.04 | **4/5** |
+| `resbn:56:1,2,4,8` @94k (G) | 145,594 | 0.141 | 86.25 | 91.67 | 92.61 | 89.52 | 84.55 | 4/5 |
+| **`resbn:56:1,2,4,8` @188k** | 145,594 | 0.144 | **86.79** | **91.83** | **92.65** | **90.26** | **84.99** | **4/5** |
+| Δ (188k − 94k) | | | **+0.54** | **+0.16** | **+0.04** | **+0.74** | **+0.44** | |
+| `resbn:64:1,2,4,8` @94k (D) | 185,058 | 0.162 | 86.70 | 91.84 | 92.78 | 89.44 | 85.28 | 4/5 |
+| **`resbn:64:1,2,4,8` @188k** | 185,058 | 0.161 | **87.19** | **92.09** | **92.76** | **90.29** | **85.59** | **4/5** |
+| Δ (188k − 94k) | | | **+0.49** | **+0.25** | **−0.02** | **+0.85** | **+0.31** | |
+
+**The extended schedule is worth about +0.5 t1, +0.2 t3, +0.8 ≤3 and +0.4 4+ —
+and +0.04 / −0.02 on t5.** It is a genuine, free-at-inference gain on four of the
+five metrics and it moves the fifth by nothing at all. Neither arm's seed-1234
+result clears all five, so under the pre-agreed decision rule **neither earned a
+seed round**.
+
+### Why t5 is the metric that does not respond
+
+Across the 94 k series `t5 − t1` shrinks monotonically with capacity — **6.36** pt
+at 145 k parameters, **6.08** at 185 k, **5.44** at 279 k, **5.01** at 689 k — so
+the headroom between "in the beam's top five" and "ranked first" is a capacity
+property. The extended schedule shrinks that gap too (`resbn:56` 6.36 → 5.86,
+`resbn:64` 6.08 → 5.57) but does so **entirely by raising t1**, leaving the top of
+the distribution where it was. Longer training sharpens the top of the distribution, which is
+what t1, ≤3 and 4+ read; keeping the right word inside a 100-wide beam's **top
+five** depends on how well the whole emission distribution is shaped, and that is
+a capacity property. This is consistent with Phase E, where the same metric was
+the one riding at +0.01 and +0.05 margins on far larger models.
+
+**§7's verdict stands, now on stronger evidence: ≤0.15 ms does not clear all five
+bars, and the reason is capacity, which no training-side lever recovers.**
 
 ---
