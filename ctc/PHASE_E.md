@@ -51,7 +51,11 @@ gamma = 1.05   lambda = 1.1   beta = 0.2   gammaPrune = 0.3734   betaPrune = 0.9
 against the published `encoderOnly`
 `(0.4056, 0.0176, 0.9866, 0.4234, 1.0382)`.
 
-### `phaseD-D1` under both presets, full val-9918
+### `phaseD-D1` under both presets — **full val-9918, seed 1234 only**
+
+Every number in this table is all 9,918 val rows (not the 5,000-row selection
+prefix) for the single seed-1234 checkpoint. It is **not** a seed-mean and must
+not be read as one; the seed-mean is two tables below.
 
 | preset | t1 | t3 | t5 | ≤3 | 4+ |
 |---|---|---|---|---|---|
@@ -110,10 +114,11 @@ tables was decoded at the same published preset, so the mis-tuning is common-mod
 and cancels. It changes every **absolute** number in the campaign, and it changes
 the distance to the FUTO ceiling.
 
-### `D1` at three seeds under the E1 preset
+### `D1` at three seeds under the E1 preset — full val-9918
 
 The preset was tuned on seed 1234's emissions; seeds 4321 and 7777 are a transfer
-test for it.
+test for it. All rows are full val-9918; the seed-mean row is the only figure
+comparable to the bar.
 
 | arm | seed | t1 | t3 | t5 | ≤3 | 4+ | FUTO | HWS |
 |---|---|---|---|---|---|---|---|---|
@@ -124,8 +129,20 @@ test for it.
 | — the bar | | 85.52 | 91.54 | 92.80 | 89.29 | 83.57 | — | — |
 | **Δ vs bar** | | **+1.69** | **+0.39** | **−0.01** | **+0.62** | **+2.24** | | |
 
-**Four of the five bars clear on E1 alone; t5 misses by 0.01 pt** — one row in
-9,918, averaged over three seeds. The gate is not passed.
+**Four of the five bars clear on E1 alone; t5 misses by 0.01 pt** (92.79 vs
+92.80) — about one row in 9,918, averaged over three seeds. **The gate is not
+passed**, and a 0.01 pt shortfall is far below anything this campaign can
+resolve, so it should be read as "t5 is level with the ceiling", not as "t5 is
+behind it". Either way the gate is a conjunction of five *strict* wins and this
+is not one, so E1 alone does not unseal test-2400.
+
+Note the E1 preset also helps the *harder* half more: on `D1` seed 1234 it moves
+the FUTO half +2.35 (92.25 → 94.60) and the How-We-Swipe half **+3.13**
+(76.25 → 79.38). A preset whose largest single parameter change is a 60× increase
+in the word-frequency weight is the one most exposed to a holdout's vocabulary
+distribution, so the fact that the out-of-distribution corpus gains *more* is the
+main evidence that this is not a val-specific artifact. It is not proof, and §5
+treats it as an open risk.
 
 A t5-favoured point inside the flat region (γ 1.10, λ 1.1, β 0.15, at the
 *published* prune params) was tested rather than assumed: it wins t5 on the tuning
