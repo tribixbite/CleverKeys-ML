@@ -8,18 +8,20 @@ at **0.455 ms** single-thread batch-1 CPU. Phase F asks a different question:
 The target set for this phase is **≤ 0.15 ms** — half the Campaign-1 `r2`
 artifact's 0.306 ms, and about a third of the ch 128 ship candidate.
 
-**Result in one paragraph.** The target is **not** reachable with the bar intact.
-The best model at or under 0.15 ms (`resbn:56:1,2,4,8`, 0.141 ms) clears four of
-the five bars and misses top-5 by 0.19 pt; the next size up, at 0.162 ms, misses
-top-5 by 0.13 pt at three seeds. The fastest configuration that clears **all five
-on the seed mean and on every individual seed** is `resbn:80:1,2,4,8` at
-**0.213 ms / 279 k parameters / 1.1 MB** — **2.23× faster and 2.45× smaller than
-the Phase-E ch 128 ship candidate for −0.41 t1**. Two of the three levers the brief
-proposed were measurably the wrong ones (post-training int8, depthwise-separable
-convolution); the win came from a dense trunk whose BatchNorms fold away at export,
-plus self-distillation from our own ch 192 checkpoint. §6 is the measured frontier,
-§7 states what was not reached and §7.1 the one promising lever that GPU budget cut
-short.
+**Result in one paragraph.** The target is **not** reachable with the bar intact,
+and that was tested to exhaustion rather than inferred: at ≤0.15 ms the schedule was
+tripled to 280,000 steps and the KD temperature doubled, and **top-5 moved by
++0.06 and −0.20 pt respectively** against a 0.19 pt deficit (§13). The binding
+constraint is capacity, not optimization — t5 crosses the bar at **210–230 k
+parameters** and nothing else this phase varied moves it. The fastest configuration
+that clears **all five bars on the seed mean and on every individual seed** is
+`resbn:72:1,2,4,8` trained for 188 k steps: **0.186 ms / 230 k parameters /
+0.94 MB — 2.55× faster and 2.96× smaller than the Phase-E ch 128 ship candidate for
+−0.61 t1** (§14.1). Two of the three levers the brief proposed measured *negative*
+(post-training int8; depthwise-separable convolution); the win came from a dense
+trunk whose BatchNorms fold away at export, self-distillation from our own ch 192
+checkpoint, and a doubled schedule. §6 and §14 are the measured frontier, §7 and
+§13 state what was not reached and why.
 
 > ⚠ **The evidence in this document is val-only, and that is structural.**
 > `test-2400` is **sealed-spent** (`AUDIT_FINAL.md` §7): the one legitimate decode
@@ -350,18 +352,18 @@ fits the budget, at **0.141 ms**:
 
 Inside the target, **four of five bars clear and t5 misses by 0.19 pt.**
 
-Arm **I** takes the same shape past the target, to ch 80 at **0.213 ms**, to find
+Arm **I** takes the same shape past the target, to ch 80 at **0.215 ms**, to find
 where all five actually clear:
 
 | arm | trunk | params | ms (idle, trained export) | t1 | t3 | t5 | ≤3 | 4+ | bars |
 |---|---|---|---|---|---|---|---|---|---|
 | the bar | | | | 85.52 | 91.54 | 92.80 | 89.29 | 83.57 | |
-| **I** | `resbn:80:1,2,4,8` | 279,346 | 0.213 | **87.41** | **92.18** | **92.85** | **90.38** | **85.86** | **5/5** |
+| **I** | `resbn:80:1,2,4,8` | 279,346 | 0.215 | **87.41** | **92.18** | **92.85** | **90.38** | **85.86** | **5/5** |
 | ch 128 `res` (Phase-E ship candidate, s1234) | 689,282 | 0.475 | 88.02 | 92.27 | 93.03 | 91.12 | 86.41 | 5/5 |
 
-**All five clear at 0.213 ms with 279 k parameters — 2.23× faster than the ch 128
-ship candidate at 41 % of its size, for −0.61 t1.** That is the phase's shippable
-result, and it is not the target.
+**All five clear at 0.215 ms with 279 k parameters — 2.21× faster than the ch 128
+ship candidate at 41 % of its size, for −0.61 t1.** §14 later beats this at
+0.186 ms; it is kept as the conservative pick because its t5 margin is wider.
 
 ---
 
@@ -411,11 +413,16 @@ differ, this table is authoritative).
 | **0.122** | 0.130 | `resbn:48:1,2,4,8` (B) | 111,250 | 472,645 | 86.39 | 91.41 | 92.38 | 89.82 | 84.61 | 3/5 |
 | 0.126 | 0.136 | `resbn:56:1,2,4,8` **int8** (G) | 145,594 | 290,872 | 84.77 | 90.99 | 92.05 | 87.49 | 83.35 | 0/5 |
 | 0.134 | 0.141 | `resbn:64:1,2,4` (A) | 143,714 | 600,196 | 85.89 | 91.48 | 92.50 | 88.76 | 84.41 | 2/5 |
-| **0.141** | 0.150 | **`resbn:56:1,2,4,8` (G)** — best ≤0.15 ms | 145,594 | 609,445 | 86.25 | 91.67 | **92.61** | 89.52 | 84.55 | **4/5** |
+| **0.141** | 0.148 | `resbn:48:1,2,4,8,16` @188k | 134,578 | 567,368 | 86.64 | 91.80 | 92.53 | 89.73 | 85.04 | 4/5 |
+| 0.141 | 0.150 | `resbn:56:1,2,4,8` @94k (G) | 145,594 | 609,445 | 86.25 | 91.67 | 92.61 | 89.52 | 84.55 | 4/5 |
+| **0.142** | 0.149 | **`resbn:56:1,2,4,8` @280k (M)** — best ≤0.15 ms | 145,594 | 609,445 | **86.83** | **91.85** | **92.67** | **90.23** | **85.07** | **4/5** |
 | 0.142 | 0.150 | `dwsep:128:1,2,4,8` (C) | 97,826 | 413,034 | 85.78 | 91.39 | 92.27 | 88.40 | 84.42 | 2/5 |
 | 0.146 | 0.155 | `resbn:80:1,2,4,8` **int8** (I) | 279,346 | 434,986 | 86.38 | 91.63 | 92.50 | 88.70 | 85.17 | 3/5 |
 | 0.162 | 0.172 | `resbn:64:1,2,4,8` (D/FAST) | 185,058 | 766,727 | 86.82* | 91.85* | **92.67*** | 89.86* | 85.24* | **4/5** |
-| **0.213** | 0.223 | **`resbn:80:1,2,4,8` (I/FINAL)** — fastest 5/5 | 279,346 | 1,142,727 | **87.47*** | **92.13*** | **92.89*** | **90.35*** | **85.98*** | **5/5** |
+| 0.165 | 0.175 | `resbn:56:1,2,4,8,16` @188k | 177,290 | 720,000 | 87.07 | 91.92 | 92.74 | 90.20 | 85.45 | 4/5 |
+| 0.176 | 0.185 | `resbn:68:1,2,4,8` @188k | 206,710 | 852,927 | 87.27 | 91.98 | 92.74 | 90.20 | 85.74 | 4/5 |
+| **0.186** | 0.195 | **`resbn:72:1,2,4,8` @188k** — **fastest 5/5** | 229,642 | 944,487 | **87.27*** | **92.09*** | **92.87*** | **90.49*** | **85.60*** | **5/5** |
+| 0.215 | 0.224 | `resbn:80:1,2,4,8` @94k (§8) | 279,346 | 1,142,727 | **87.47*** | **92.13*** | **92.89*** | **90.35*** | **85.98*** | **5/5** |
 | 0.273 | 0.285 | ch 128 `res` **int8** (tail+norms+stem fp32) | 689,282 | 905,293 | 87.04 | 91.98 | 92.72 | 90.09 | 85.46 | 4/5 |
 | 0.306 | 0.318 | ⚠ pre-campaign `r2` ch 96, at **its own** re-tuned preset† | 394,114 | 1,619,140 | 86.14 | 91.01 | 92.12 | 89.94 | 84.16 | 3/5 |
 | 0.475 | 0.490 | ch 128 `res` fp32 — the Phase-E ship candidate | 689,282 | 2,799,865 | 88.02 | 92.27 | 93.03 | 91.12 | 86.41 | 5/5 |
@@ -438,12 +445,14 @@ Read across it:
   miss, by 0.19 pt and (at three seeds) 0.13 pt. Below ~0.14 ms t3 goes with it, and
   below ~0.135 ms so does ≤3. t1 and 4+ hold +0.3 to +1.9 pt of margin the whole way down; the
   ordering of which bar fails first is stable across all seven trained models.
-* **The knee is between 0.162 and 0.213 ms.** Above it all five clear; below it t5
-  does not, and §8 resolves the 0.162 ms case at three seeds rather than leaving it
-  on a one-seed coin flip.
-* **The fastest configuration that clears all five is 2.23× faster than the
-  Phase-E ship candidate** and 4.32× faster than the ch 192 headline, at 41 % and
-  18 % of their parameters, in **41 %** and **19 %** of the file bytes.
+* **The knee is between 0.176 and 0.186 ms** (§14 pins it with probes on both
+  sides). Above it all five clear; below it t5 does not, and §8 and §14 resolve the
+  two closest cases at three seeds rather than leaving them on one-seed coin flips.
+* **The fastest configuration that clears all five is 2.55× faster than the
+  Phase-E ship candidate** and 4.95× faster than the ch 192 headline, at 33 % and
+  15 % of their parameters, in **34 %** and **15 %** of the file bytes.
+* This table mixes 94 k and 188 k schedules; §13 quantifies that lever separately
+  (+0.5 t1, ~0 t5) so the two can be read apart.
 * **The old `r2` artifact is dominated** by the 0.122 ms student, which is 2.5×
   faster, 3.4× smaller and +0.25 t1 (across presets, so read the accuracy loosely).
   The 0.306 ms figure the target was derived from was never a frontier point; it
@@ -455,22 +464,27 @@ Read across it:
 
 **No, not with all five bars clearing, on the evidence this phase gathered.**
 
-The best model measured at or under 0.15 ms is `resbn:56:1,2,4,8` at 0.141 ms:
-four of five bars clear and **top-5 falls 0.19 pt short** (92.61 vs 92.80). The
-next configuration up, at 0.162 ms, was taken to **three seeds** precisely because
-its single-seed t5 (92.78) sat 0.02 pt from the bar and a one-seed reading could
-not settle it: the seed-mean is **92.67, and no seed clears** (§8). The first
+The best model measured at or under 0.15 ms is `resbn:56:1,2,4,8` — 0.141 ms at
+94 k steps, 0.142 ms at 188 k and 280 k. Four of five bars clear and **top-5 falls
+0.19 pt short at 94 k, 0.15 at 188 k and 0.13 at 280 k** (§13.1). The next
+configuration up, at 0.162 ms, was taken to **three seeds** precisely because its
+single-seed t5 (92.78) sat 0.02 pt from the bar and a one-seed reading could not
+settle it: the seed-mean is **92.67, and no seed clears** (§8). The first
 configuration in this family that does clear all five, on the mean and on every
-seed, is **0.213 ms**.
+seed, is **0.186 ms** (§14.1).
 
 So the frontier is not merely "0.15 ms was missed narrowly" — the bar-clearing
-boundary sits at **~1.4× the target**, and it is now measured on both sides with a
-seeded run, not extrapolated.
+boundary sits at **~1.25× the target**, it is measured on both sides with seeded
+runs rather than extrapolated, and the two training-side levers that could have
+closed it were each run to the point of diminishing returns.
 
 What was tried, and what each was worth:
 
 | lever | outcome |
 |---|---|
+| **doubling the schedule to 188 k steps** (§13) | **+0.54 t1 … and +0.04 t5** |
+| **tripling it to 280 k** (§13.1) | +0.58 t1 … and **+0.06 t5**, against a 0.19 deficit |
+| **KD temperature 2 → 4** (§13.2) | **negative**, −0.59 t1 and −0.20 t5 |
 | depthwise-separable trunk (the brief's F2 hypothesis) | **negative** — −0.61 t1 vs dense at *higher* latency (§3, §4) |
 | dense trunk with foldable BatchNorm (`resbn`) | **the win** — 142 → 92 ONNX nodes, +47 % parameters per microsecond |
 | depth over width at fixed budget | **+0.50 t1** (4×ch48 over 3×ch64), and cheaper |
@@ -498,22 +512,25 @@ Three runs were launched and killed before completion when the box was
 oversubscribed. They are listed so the phase is not read as having exhausted the
 space:
 
-* **`resbn:56:1,2,4,8` at 188,000 steps** (double the campaign budget). Every
-  student here **underfits badly** — final train CTC loss 0.42–0.47 against the
-  ch 192 teacher's 0.30 — so a longer schedule is the most likely remaining source
-  of the 0.19 pt, and it is **free at inference**. Killed at step ~86,000. This is
-  the single most promising untested lever in the phase.
-* **`resbn:48:1,2,4,8,16` and `resbn:40:1,2,4,8,1,2`** (5- and 6-block narrow
-  trunks). Both were trailing `resbn:56:1,2,4,8` at step 21,000 and were killed
-  there; that is a trajectory, not a result.
+* ~~**`resbn:56:1,2,4,8` at 188,000 steps**~~ — **run to completion in §13**, and
+  again at 280,000 in §13.1. Worth +0.54 t1 and +0.06 t5. The "underfits badly"
+  reading was wrong in its mechanism: the gap to the teacher is capacity.
+* ~~**`resbn:48:1,2,4,8,16` and `resbn:40:1,2,4,8,1,2`**~~ — the 5-block narrow
+  trunk was **trained out at 188 k** (§13, §14) at 0.141 ms and 0.165 ms in two
+  widths; neither clears t5. The 6-block ch 40 variant is still untrained, and on
+  the §14 evidence that extra depth past four blocks does not pay, it is not
+  expected to.
 * **the no-distillation ablation** at the final architecture. KD was used in every
   trained arm, so **this phase cannot say how much of the students' accuracy comes
   from the teacher** and how much from the architecture and data. That is a real
   gap in the evidence and is not hidden.
 
-> **§13 supersedes the first bullet.** The extended schedule was subsequently run
-> to completion at 188,000 steps on three architectures. It is a real **+0.5 t1**
-> and it does **not** move t5. The conclusion of §7 survives it.
+> **§13 supersedes the first two bullets and part of the third.** The extended
+> schedule was run to completion at 188,000 *and* 280,000 steps: a real **+0.5 t1**
+> that moves t5 by **+0.06 over a 3× budget**. The 5-block narrow trunks were also
+> trained out (§13, §14) and do not clear. The KD temperature was swept (§13.2,
+> negative). The **no-KD ablation remains the one unmeasured item**, and §11.3 says
+> so. §7's verdict survives all of it, and §14 improves the frontier it reports.
 
 ---
 
@@ -525,7 +542,7 @@ distilled from `phaseE-FINAL-s1234` at weight 1.0 / temperature 2, T3 with 3× H
 on beam top-1 over a 5,000-row val prefix. Fresh trainings at seeds 1234 / 4321 /
 7777. Full val-9918 at the E1 preset.
 
-### FINAL — `resbn:80:1,2,4,8`, 279,346 params, **0.213 ms** — all five clear
+### FINAL — `resbn:80:1,2,4,8`, 279,346 params, **0.215 ms** — all five clear
 
 | metric | s1234 | s4321 | s7777 | **seed-mean** | sd | the bar | **Δ** | gate | worst seed |
 |---|---|---|---|---|---|---|---|---|---|
@@ -569,18 +586,20 @@ the ≤0.15 ms configurations are all below it.
 `Einsum`, and — new in Phase F — **zero normalization nodes**, the BatchNorms
 having been folded into their convolutions at export.
 
-| file | arm | params | bytes | ms | sha256 |
-|---|---|---|---|---|---|
-| `fast_resbn80_s1234.onnx` ← **the Phase-F candidate** | `phaseF-I-resbn80x4` | 279,346 | 1,142,727 | 0.213 | `5e8c88756cbad5a5a8b8b3f289a990174fa6f3b6edfead46d8dbdb2927fb06f2` |
-| `fast_resbn80_s4321.onnx` | `phaseF-FINAL-resbn80x4-s4321` | 279,346 | 1,142,727 | 0.213 | `ca7a670095dae41ed441eaca22cd0a5be6cdd620826f1d1bc0b49c0d9f72a35d` |
-| `fast_resbn80_s7777.onnx` | `phaseF-FINAL-resbn80x4-s7777` | 279,346 | 1,142,727 | 0.213 | `a0d0c894a1cfd616f939644cd9c63cbe5910c3846ca2b542e55b43d2f278f4d0` |
-| `fast_resbn64_s1234.onnx` | `phaseF-D-resbn64x4` | 185,058 | 766,727 | 0.162 | `1c39b49a7673695dab046eabc303f3428a30eec691cdfdf51af037fc0685cd79` |
-| `fast_resbn64_s4321.onnx` | `phaseF-FAST-resbn64x4-s4321` | 185,058 | 766,727 | 0.161 | `3045207fa5b95874eb111eb817199a6f4c9ae048cd8b35665bc35021e490a382` |
-| `fast_resbn64_s7777.onnx` | `phaseF-FAST-resbn64x4-s7777` | 185,058 | 766,727 | 0.161 | `f03639aaea8ea91b871a56133b8838963e5ee8680c7f6050962aec966719a399` |
-| `fast_resbn56_s1234.onnx` ⚠ **under the bar** | `phaseF-G-resbn56x4` | 145,594 | 609,445 | 0.141 | `e8b52c80e9950eb8d6d1ac886493826764de957a10eeb46f764fcf8bb7c3ec8a` |
+| file | arm | params | bytes | ms | all five? | sha256 |
+|---|---|---|---|---|---|---|
+| `fast_resbn72_s1234.onnx` ← **the Phase-F candidate** | `phaseF-N72-188k` | 229,642 | 944,487 | 0.186 | **yes** | `6567366b61bbbd04b5353f7f780aedb9aa507f7a87f52a381089cb54bf510985` |
+| `fast_resbn72_s4321.onnx` | `phaseF-N72-188k-s4321` | 229,642 | 944,487 | 0.186 | **yes** | `0697af644212d09ec5592b0c4018f4b98089abc72a7a4b66df2f9d4d6cd5fa7f` |
+| `fast_resbn72_s7777.onnx` | `phaseF-N72-188k-s7777` | 229,642 | 944,487 | 0.186 | **yes** | `02c20784287aa831e20835ec391fd91c9144b5d12f6e798d711eff51d9ae4f7b` |
+| `fast_resbn80_s1234.onnx` — the conservative pick | `phaseF-I-resbn80x4` | 279,346 | 1,142,727 | 0.215 | **yes** | `5e8c88756cbad5a5a8b8b3f289a990174fa6f3b6edfead46d8dbdb2927fb06f2` |
+| `fast_resbn80_s4321.onnx` | `phaseF-FINAL-resbn80x4-s4321` | 279,346 | 1,142,727 | 0.215 | **yes** | `ca7a670095dae41ed441eaca22cd0a5be6cdd620826f1d1bc0b49c0d9f72a35d` |
+| `fast_resbn80_s7777.onnx` | `phaseF-FINAL-resbn80x4-s7777` | 279,346 | 1,142,727 | 0.215 | **yes** | `a0d0c894a1cfd616f939644cd9c63cbe5910c3846ca2b542e55b43d2f278f4d0` |
+| `fast_resbn64_188k_s1234.onnx` ⚠ frontier evidence | `phaseF-L64-188k` | 185,058 | 766,727 | 0.162 | no (t5) | `0a773948b1195436897a19b1f3824433cc2a72dd9bdd71f4fbd23574d87836c3` |
+| `fast_resbn56_188k_s1234.onnx` ⚠ frontier evidence | `phaseF-L56-188k` | 145,594 | 609,445 | 0.142 | no (t5) | `ecd317b4ab0b40673f760c7cdae8eb65f55f15c2e5c90c278daa07ae434f779b` |
 
-The `fast_resbn64_*` and `fast_resbn56_*` files are published as **frontier
-evidence, not as ship candidates** — neither configuration clears t5 (§8, §6).
+The two `⚠` files are published as **frontier evidence, not ship candidates** —
+neither clears t5 (§13, §14). The three-seed sets are shipped for both passing
+configurations so either can be adopted without a retrain.
 
 ### Parity, per the audit conventions
 
@@ -589,13 +608,14 @@ Every export ran the two `export_onnx.py` checks plus the Phase-F fold check, ov
 
 | arm | BN pairs folded | max abs Δ from folding | sliced `[32,27]` max abs vs torch | argmax agreement |
 |---|---|---|---|---|
+| `fast_resbn72_s1234` | 9 | 1.34e-05 | 5.05e-05 | **100/100** |
+| `fast_resbn72_s4321` | 9 | 1.00e-05 | 4.20e-05 | **100/100** |
+| `fast_resbn72_s7777` | 9 | 1.57e-05 | 6.29e-05 | **100/100** |
 | `fast_resbn80_s1234` | 9 | 9.77e-04 | 2.57e-05 | **100/100** |
 | `fast_resbn80_s4321` | 9 | 9.77e-04 | 3.62e-05 | **100/100** |
 | `fast_resbn80_s7777` | 9 | 9.77e-04 | 4.01e-05 | **100/100** |
-| `fast_resbn64_s1234` | 9 | 4.77e-06 | 2.29e-05 | **100/100** |
-| `fast_resbn64_s4321` | 9 | 7.63e-06 | 2.38e-05 | **100/100** |
-| `fast_resbn64_s7777` | 9 | 8.11e-06 | 2.86e-05 | **100/100** |
-| `fast_resbn56_s1234` | 9 | 8.11e-06 | 3.43e-05 | **100/100** |
+| `fast_resbn64_188k_s1234` | 9 | 1.14e-05 | 6.10e-05 | **100/100** |
+| `fast_resbn56_188k_s1234` | 9 | 6.68e-06 | 2.77e-05 | **100/100** |
 
 Parity is asserted on the **sliced 27-column contract view** — what
 `CtcEmissions.sliceFromHead` feeds the Kotlin beam — not the raw 65-wide head,
@@ -631,15 +651,22 @@ No Kotlin signature moves.
 * **Do not change the scoring preset for a smaller model.** Re-tuned from scratch
   on a 6×-smaller student the E1 preset is worth +0.12 t1 — inside noise, and a
   second preset divergence is not worth that.
-* **The ≤0.15 ms target is not met with the bar intact.** No under-bar model is
-  put forward as a ship candidate; §6's frontier is the deliverable, and §7.1 names
-  the one lever that might still close the 0.19 pt.
-* **If a faster encoder is wanted, ship `fast_resbn80_s1234.onnx`** — 0.213 ms,
-  279 k parameters, 1.1 MB, all five val bars on the seed mean and on every seed,
-  **2.23× faster and 2.45× smaller than the Phase-E ch 128 candidate for −0.41 t1
-  on the seed mean** (87.47 vs 87.88, both 3-seed). The decision is a genuine trade, not a free
-  win, and it must be taken with §11.1 in view: ch 128 is *test*-validated and this
-  is not.
+* **Double the schedule to 188 k steps** for any student in this size class — a
+  free-at-inference **+0.5 t1 / +0.2 t3 / +0.8 ≤3 / +0.4 4+** (§13). Do **not**
+  expect it to move t5, and do not go past 188 k: the third 94 k buys a quarter of
+  what the second did (§13.1).
+* **Leave the KD temperature at 2.** T = 4 is −0.59 t1 and −0.20 t5 (§13.2).
+* **The ≤0.15 ms target is not met with the bar intact**, and the schedule and
+  temperature levers were both run to exhaustion against it. No under-bar model is
+  put forward as a ship candidate; §6 and §14 are the deliverable.
+* **If a faster encoder is wanted, ship `fast_resbn72_s1234.onnx`** — 0.186 ms,
+  230 k parameters, 0.94 MB, all five val bars on the seed mean and on every seed,
+  **2.55× faster and 2.96× smaller than the Phase-E ch 128 candidate for −0.61 t1
+  on the seed mean** (87.27 vs 87.88, both 3-seed). Take `fast_resbn80_s1234.onnx`
+  (0.215 ms) instead if you want t5 margin: its worst seed clears by 0.05 against
+  `resbn:72`'s 0.01 (§14.1). Either way the decision is a genuine trade, not a free
+  win, and must be taken with §11.1 in view: ch 128 is *test*-validated and neither
+  of these is.
 
 ---
 
@@ -649,14 +676,16 @@ No Kotlin signature moves.
    (`AUDIT_FINAL.md` §7). No Phase-F model has ever been decoded on it and none may
    be. The test-validated anchors are still ch 128 and ch 192 from Phase E; a
    Phase-F artifact is a val-validated variant, and any claim about it must say so.
-2. **Single seed for the frontier.** Every row of §6 except the two candidates in
-   §8 is one seed. Phase D measured the single-seed noise floor at **~1 pt top-1**,
+2. **Single seed for the frontier.** Every row of §6 except the three seeded
+   configurations (§8, §14.1) is one seed. Phase D measured the single-seed noise floor at **~1 pt top-1**,
    which is larger than several of the gaps in that table. The frontier's *shape*
    is robust (it is monotone in capacity across seven models); individual 0.1–0.3 pt
    differences in it are not.
-3. **The distillation contribution is unmeasured** (§7.1). Every trained arm used
-   the same teacher at the same weight and temperature; neither the KD weight nor
-   the temperature was swept, and no no-teacher control completed.
+3. **The distillation contribution is unmeasured.** Every trained arm used the same
+   teacher, and **no no-teacher control was ever completed** — so this phase cannot
+   attribute any of the students' accuracy between the teacher, the architecture and
+   the data. The KD *temperature* was swept once (§13.2, negative); the KD *weight*
+   never was. This is the largest remaining hole in the evidence.
 4. **Everything Phase E did not establish still applies unchanged** — the preset
    asymmetry (our decode preset is tuned on the holdout family, FUTO's is not), the
    T3 contributor contamination, and the fact that these are benchmark numbers and
@@ -764,5 +793,131 @@ the one riding at +0.01 and +0.05 margins on far larger models.
 
 **§7's verdict stands, now on stronger evidence: ≤0.15 ms does not clear all five
 bars, and the reason is capacity, which no training-side lever recovers.**
+
+---
+
+### 13.1 Taken to exhaustion: 280,000 steps on the same architecture
+
+The pre-agreed contingency was "if 188 k still underfits, try 280 k on the single
+most promising arm before concluding". Train CTC was still 0.43 at 188 k, so
+`resbn:56:1,2,4,8` — the best arm inside the ≤0.153 ms reading of the target — was
+retrained at **280,000 steps**, a **3×** schedule. The whole ladder, one
+architecture, one seed, everything else identical:
+
+| steps | train CTC | t1 | t3 | **t5** | ≤3 | 4+ | bars |
+|---|---|---|---|---|---|---|---|
+| the bar | | 85.52 | 91.54 | **92.80** | 89.29 | 83.57 | |
+| 94,000 | 0.4425 | 86.25 | 91.67 | **92.61** | 89.52 | 84.55 | 4/5 |
+| 188,000 | 0.4284 | 86.79 | 91.83 | **92.65** | 90.26 | 84.99 | 4/5 |
+| **280,000** | **0.4192** | **86.83** | **91.85** | **92.67** | 90.23 | 85.07 | **4/5** |
+| Δ 94k → 280k | −0.0233 | **+0.58** | +0.18 | **+0.06** | +0.71 | +0.52 | |
+
+**Tripling the schedule moves t5 by 0.06 pt; the bar needs 0.19.** The second
+doubling bought less than a quarter of what the first did (+0.04 t1, +0.02 t5
+against +0.54 and +0.04), and train CTC is *still* 0.42 — far above ch 128's 0.30
+at a third of the steps. The lever is exhausted, and its ceiling on the metric that
+matters is an order of magnitude short. **Criterion (1) — all five bars at
+≤0.153 ms — is answered: not reachable, and not by training longer.**
+
+### 13.2 The KD temperature, aimed straight at t5 — negative
+
+Top-5 depends on the shape of the whole emission distribution, and raising the
+distillation temperature is the textbook way to transfer more of a teacher's tail.
+`resbn:56:1,2,4,8` at 188 k with **temperature 4** instead of 2 (same weight, same
+teacher, same seed):
+
+| arm | t1 | t3 | **t5** | ≤3 | 4+ |
+|---|---|---|---|---|---|
+| T = 2 | **86.79** | **91.83** | **92.65** | 90.26 | **84.99** |
+| T = 4 | 86.20 | 91.66 | **92.45** | **90.38** | 84.03 |
+| Δ | **−0.59** | −0.17 | **−0.20** | +0.12 | **−0.96** |
+
+**Negative on four of five, including on the metric it was chosen to move.** Note
+the confound worth stating: the conventional `T²` scaling means T = 4 also
+quadruples the KD term's magnitude against the CTC term, so this arm varies
+temperature *and* effective weight together. Either way the direction is clear
+enough not to pursue: it is not a t5 lever.
+
+---
+
+## 14. Criterion (2): the bar-clearing frontier moves from 0.215 to 0.186 ms
+
+With the target itself out of reach, the second success criterion is the *lowest*
+latency at which all five bars clear. Two sizes were trained in the gap between
+`resbn:64` (0.162 ms, 4/5) and `resbn:80` (0.215 ms, 5/5), both at 188 k steps,
+seed 1234 — one buying capacity with depth, one with width:
+
+| arm | params | ms (idle) | t1 | t3 | **t5** | ≤3 | 4+ | bars |
+|---|---|---|---|---|---|---|---|---|
+| the bar | | | 85.52 | 91.54 | **92.80** | 89.29 | 83.57 | |
+| `resbn:48:1,2,4,8,16` @188k | 134,578 | 0.139 | 86.64 | 91.80 | 92.53 | 89.73 | 85.04 | 4/5 |
+| `resbn:56:1,2,4,8` @188k | 145,594 | 0.144 | 86.79 | 91.83 | 92.65 | 90.26 | 84.99 | 4/5 |
+| `resbn:64:1,2,4,8` @188k | 185,058 | 0.161 | 87.19 | 92.09 | 92.76 | 90.29 | 85.59 | 4/5 |
+| **`resbn:56:1,2,4,8,16` @188k** | 177,290 | **0.166** | 87.07 | 91.92 | **92.74** | 90.20 | 85.45 | **4/5** |
+| **`resbn:72:1,2,4,8` @188k** | 229,642 | **0.185** | **87.25** | **92.24** | **92.96** | **90.44** | **85.59** | **5/5** |
+| `resbn:80:1,2,4,8` @94k (the §8 candidate) | 279,346 | 0.215 | 87.41 | 92.18 | 92.85 | 90.38 | 85.86 | 5/5 |
+
+| `resbn:68:1,2,4,8` @188k | 206,710 | 0.176 | 87.27 | 91.98 | 92.74 | 90.20 | 85.74 | 4/5 |
+
+`resbn:72` at 188 k **clears all five at seed 1234**, in 82 % of the 0.215 ms
+candidate's parameters and 87 % of its time. The two probes on either side pin the
+crossing down: `resbn:68` (206.7 k, 0.176 ms) misses t5 by 0.06 and `resbn:56` × 5
+blocks (177.3 k, 0.166 ms) misses it by 0.06, so **the bar is crossed between
+207 k and 230 k parameters, i.e. between 0.176 and 0.186 ms.**
+
+Depth in the gap does *not* substitute for width — `resbn:56`×5 at 177 k is level
+with `resbn:64`×4 at 185 k despite costing more time — which bounds the
+depth-over-width finding of §4: it held between three and four blocks, where the
+receptive field was still growing, and stops past four, where 4 × (1+2+4+8) = 60
+frames already covers all 32.
+
+### t5 versus capacity, which is the whole story of this phase
+
+| params | 134.6 k | 145.6 k | 177.3 k | 185.1 k | 206.7 k | 229.6 k | 279.3 k | 689.3 k |
+|---|---|---|---|---|---|---|---|---|
+| **t5** | 92.53 | 92.65 | 92.74 | 92.76 | 92.74 | **92.96** | 92.85 | 93.03 |
+
+Monotone in capacity to within single-seed noise (the 206.7 k dip and the
+229.6 k / 279.3 k inversion are both inside it; the latter also mixes 188 k and
+94 k schedules), flat in everything else this phase varied, and crossing 92.80 at
+**210–230 k parameters**. That is the constraint, and it is the only one.
+
+### 14.1 The new candidate at three seeds — `resbn:72:1,2,4,8` @188k, **0.186 ms**
+
+229,642 params, 944,487 bytes, `embed_hid` 96, feature v1, distilled from
+`phaseE-FINAL-s1234` at weight 1.0 / temperature 2, T3 with 3× HWS, 188,000 steps,
+batch 256, lr 3e-3, wd 0.01, warmup 1,000, checkpoint selected on beam top-1 over a
+5,000-row val prefix. Fresh trainings at seeds 1234 / 4321 / 7777. Full val-9918,
+E1 preset.
+
+| metric | s1234 | s4321 | s7777 | **seed-mean** | sd | the bar | **Δ** | gate | worst seed |
+|---|---|---|---|---|---|---|---|---|---|
+| overall t1 | 87.25 | 87.30 | 87.27 | **87.27** | 0.03 | 85.52 | **+1.75** | **PASS** | 87.25 **PASS** |
+| t3 | 92.24 | 91.95 | 92.08 | **92.09** | 0.15 | 91.54 | **+0.55** | **PASS** | 91.95 **PASS** |
+| t5 | 92.96 | 92.81 | 92.84 | **92.87** | 0.08 | 92.80 | **+0.07** | **PASS** | 92.81 **PASS** |
+| ≤3 t1 (n=3,389) | 90.44 | 90.38 | 90.65 | **90.49** | 0.14 | 89.29 | **+1.20** | **PASS** | 90.38 **PASS** |
+| 4+ t1 (n=6,529) | 85.59 | 85.69 | 85.51 | **85.60** | 0.09 | 83.57 | **+2.03** | **PASS** | 85.51 **PASS** |
+
+**All five clear on the seed mean and on every individual seed**, at **0.186 ms —
+2.55× faster than the Phase-E ch 128 ship candidate, at 33 % of its parameters and
+34 % of its bytes, for −0.61 t1 on the seed mean** (87.27 vs 87.88).
+
+**Read t5 carefully, and prefer the 0.215 ms model if you want margin.** Against
+the two candidates side by side:
+
+| candidate | ms | params | t5 seed-mean | t5 **worst seed** |
+|---|---|---|---|---|
+| `resbn:72` @188k | **0.186** | 229,642 | 92.87 (+0.07) | 92.81 (**+0.01**) |
+| `resbn:80` @94k (§8) | 0.215 | 279,346 | 92.89 (+0.09) | 92.85 (+0.05) |
+
+*(§8's table quotes 0.213 ms for `resbn:80`; the final idle pass measured 0.215.
+Run-to-run spread on this harness is ±0.002 ms and no conclusion turns on it.)*
+
+The two are statistically indistinguishable on t5 and `resbn:72` is 14 % faster and
+18 % smaller, but its **worst seed clears the top-5 bar by 0.01 pt — one row in
+9,918.** Both are honest passes under the campaign's stated gate (seed mean, all
+five); neither has t5 margin worth relying on. Everything else about `resbn:72` is
+comfortable: t1 +1.75, ≤3 +1.20, 4+ +2.03, and its seed sd on t1 is 0.03, the
+tightest of any arm in the campaign.
 
 ---

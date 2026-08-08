@@ -273,11 +273,11 @@ below is measured on val-9918 alone.
 | `PHASE_C.md` | training-procedure levers | all inside a seed-noise floor of **~1 pt**, 2× the previously assumed figure |
 | `PHASE_D.md` | beam-selected checkpoints, the T3 benchmark tier, 3 seeds | **ch 128 adopted**; T3 (1.0 M rows) indistinguishable from T1; test gate **not** spent |
 | `PHASE_E.md` | scoring re-tune, data mix, capacity, refinement head | **the published scoring preset was badly mis-tuned for our emissions** (+2.7–4.6 pt); 3× How-We-Swipe oversampling +0.83; the 3-seed stack **beats all five FUTO-ceiling numbers on val-9918**; test-2400 still **not** decoded |
-| `PHASE_F.md` | latency: quantization, efficient students, distillation | ≤0.15 ms is **not** reachable with the bar intact — the boundary is at **0.213 ms**, where `resbn:80:1,2,4,8` (279 k params) clears all five val bars on every seed at **2.23×** the ch 128 candidate's speed. int8 and depthwise-separable both measured **negative**; the win is a dense trunk with foldable BatchNorm + self-distillation. **Val-only** — the seal is spent |
+| `PHASE_F.md` | latency: quantization, efficient students, distillation, schedule | ≤0.15 ms is **not** reachable with the bar intact — top-5 is the binding bar and it tracks **capacity alone**, crossing at 210–230 k params. Tripling the schedule moves it +0.06, doubling the KD temperature −0.20. The boundary is **0.186 ms**, where `resbn:72:1,2,4,8` (230 k params, 188 k steps) clears all five val bars on every seed at **2.55×** the ch 128 candidate's speed. int8 and depthwise-separable both measured **negative**; the win is a dense trunk with foldable BatchNorm + self-distillation. **Val-only** — the seal is spent |
 
 > **Phase F caveat on this paragraph.** The two configurations below remain the
-> *test-validated* anchors. `PHASE_F.md` adds a **val-only** 0.213 ms / 279 k-param
-> variant (`artifacts/fast_resbn80_s1234.onnx`) that clears all five **val** bars on
+> *test-validated* anchors. `PHASE_F.md` adds a **val-only** 0.186 ms / 230 k-param
+> variant (`artifacts/fast_resbn72_s1234.onnx`) that clears all five **val** bars on
 > every seed; it has never been decoded on test-2400 and never may be.
 
 Best measured configuration: `phaseE-FINAL` — ch 192 residual trunk, 1.525 M

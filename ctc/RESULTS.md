@@ -133,15 +133,25 @@ parameters — while being *behind* on the ≤3 stratum. ch 192
 device budget allows.
 
 **Or ship the Phase-F speed variant, with its weaker evidence stated.**
-`artifacts/fast_resbn80_s1234.onnx` — 279,346 params, **0.213 ms**, 1.1 MB — clears
-all five **val** bars on the seed mean and on every seed, at **2.23× the speed and
-41 % of the parameters** of ch 128, for −0.41 t1 on the val seed-mean (87.47 vs
-87.88, both three seeds). It uses the `resbn` trunk (dense convolutions with BatchNorms folded into
-them at export, so the graph carries no normalization node) and is distilled from
-our own ch 192 checkpoint. **It has never been decoded on test-2400 and never may
-be** — the seal is spent — so unlike ch 128 it carries val evidence only.
-`PHASE_F.md` has the frontier: the ≤0.15 ms models measured in that phase all miss
-top-5, by 0.19 pt at 0.141 ms and by 0.13 pt (three seeds) at 0.162 ms.
+`artifacts/fast_resbn72_s1234.onnx` — 229,642 params, **0.186 ms**, 0.94 MB —
+clears all five **val** bars on the seed mean and on every individual seed, at
+**2.55× the speed, 33 % of the parameters and 34 % of the bytes** of ch 128, for
+−0.61 t1 on the val seed-mean (87.27 vs 87.88, both three seeds). It uses the
+`resbn` trunk (dense convolutions with BatchNorms folded into them at export, so
+the graph carries no normalization node), 188 k training steps, and is distilled
+from our own ch 192 checkpoint. **It has never been decoded on test-2400 and never
+may be** — the seal is spent — so unlike ch 128 it carries val evidence only.
+
+If you want top-5 margin, take `artifacts/fast_resbn80_s1234.onnx` instead
+(279,346 params, **0.215 ms**, 1.1 MB, 2.20×): its t5 seed-mean is statistically
+the same (92.89 vs 92.87) but its **worst seed clears the t5 bar by 0.05 pt against
+`resbn72`'s 0.01**.
+
+`PHASE_F.md` has the frontier and the negative results. Everything at or under
+0.15 ms misses top-5 — by 0.19 pt at 0.141 ms and 0.13 pt (three seeds) at
+0.162 ms — and it stays missed after tripling the training schedule to 280 k steps
+(+0.06 t5) or doubling the distillation temperature (−0.20 t5). The constraint is
+capacity: t5 crosses the bar at 210–230 k parameters.
 
 **Set `CtcScoringParams` to the E1 preset** — this is a required change, not an
 option, for either artifact: at the published preset the same model clears only
@@ -175,11 +185,14 @@ export). Full table, parity checks and the frontier in `PHASE_F.md` §6/§8/§9.
 
 | file | arm | params | bytes | ms | all five val bars |
 |---|---|---|---|---|---|
-| `fast_resbn80_s1234.onnx` ← Phase-F candidate | `phaseF-I-resbn80x4` | 279,346 | 1,142,727 | 0.213 | **yes**, every seed |
-| `fast_resbn80_s4321.onnx` | `phaseF-FINAL-resbn80x4-s4321` | 279,346 | 1,142,727 | 0.213 | **yes** |
-| `fast_resbn80_s7777.onnx` | `phaseF-FINAL-resbn80x4-s7777` | 279,346 | 1,142,727 | 0.213 | **yes** |
-| `fast_resbn64_s{1234,4321,7777}.onnx` ⚠ frontier evidence | `phaseF-{D,FAST}-resbn64x4*` | 185,058 | 766,727 | 0.162 | **no** — t5 92.67 vs 92.80 |
-| `fast_resbn56_s1234.onnx` ⚠ frontier evidence | `phaseF-G-resbn56x4` | 145,594 | 609,445 | 0.141 | **no** — t5 92.61 vs 92.80 |
+| `fast_resbn72_s1234.onnx` ← Phase-F candidate | `phaseF-N72-188k` | 229,642 | 944,487 | 0.186 | **yes**, every seed |
+| `fast_resbn72_s4321.onnx` | `phaseF-N72-188k-s4321` | 229,642 | 944,487 | 0.186 | **yes** |
+| `fast_resbn72_s7777.onnx` | `phaseF-N72-188k-s7777` | 229,642 | 944,487 | 0.186 | **yes** |
+| `fast_resbn80_s1234.onnx` — wider t5 margin | `phaseF-I-resbn80x4` | 279,346 | 1,142,727 | 0.215 | **yes**, every seed |
+| `fast_resbn80_s4321.onnx` | `phaseF-FINAL-resbn80x4-s4321` | 279,346 | 1,142,727 | 0.215 | **yes** |
+| `fast_resbn80_s7777.onnx` | `phaseF-FINAL-resbn80x4-s7777` | 279,346 | 1,142,727 | 0.215 | **yes** |
+| `fast_resbn64_188k_s1234.onnx` ⚠ frontier evidence | `phaseF-L64-188k` | 185,058 | 766,727 | 0.162 | **no** — t5 92.76 vs 92.80 |
+| `fast_resbn56_188k_s1234.onnx` ⚠ frontier evidence | `phaseF-L56-188k` | 145,594 | 609,445 | 0.142 | **no** — t5 92.65 vs 92.80 |
 
 `ctc_model_golden.json` records its own `source_onnx_sha256` and `preset`, and was
 regenerated at `1.05,1.1,0.2,0.3734,0.9882` — the fixture must match the preset the

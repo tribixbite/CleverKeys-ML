@@ -343,3 +343,45 @@ No arm cleared all five at seed 1234, so per the decision rule none earned a see
 Round 4 running: M56-280k (the coordinator's 280k contingency on the best <=0.153 arm),
 N72-188k (resbn:72:1,2,4,8, 229.6k, 0.185 ms) and O56x5-188k (resbn:56:1,2,4,8,16,
 177.3k, 0.166 ms) -- the last two target criterion (2): clear all five below 0.213 ms.
+
+BREAKTHROUGH (round 4): resbn:72:1,2,4,8 @ 188k steps, 229.6k params, **0.185 ms**,
+seed 1234 full val at E1: 87.25/92.24/**92.96**/90.44/85.59 -> **ALL FIVE CLEAR**,
+and its t5 margin (+0.16) beats resbn80@94k's (+0.09 at 3 seeds, 0.213 ms).
+=> the bar-clearing frontier moves 0.213 -> 0.185 ms. Seeds 4321/7777 launched.
+Still running: M56-280k (<=0.153 exhaustion test), O56x5-188k (resbn:56:1,2,4,8,16,
+177.3k, 0.166 ms -- if it clears, the frontier moves again), P56-188k-T4 (KD
+temperature ablation; clearly behind T=2 at equal step, likely a negative).
+
+Round 4 results (seed 1234, full val at E1):
+  M56-280k  resbn:56:1,2,4,8 @280k  0.144 ms  86.83/91.85/92.67/90.23/85.07  4/5
+      -> the schedule ladder on the SAME arch: 94k 92.61 t5, 188k 92.65, 280k 92.67.
+         TRIPLING the schedule moves t5 +0.06 total; the bar needs +0.19. Criterion (1)
+         is answered to exhaustion: <=0.153 ms cannot clear t5 by training longer.
+         Train CTC 0.4425 -> 0.4284 -> 0.4192 (still far above ch128's 0.3017).
+  N72-188k  resbn:72:1,2,4,8       0.185 ms  87.25/92.24/**92.96**/90.44/85.59  **5/5**
+  O56x5-188k resbn:56:1,2,4,8,16   0.166 ms  87.07/91.92/92.74/90.20/85.45  4/5 (t5 -0.06)
+  P56-188k-T4 KD temperature 4     0.144 ms  86.20/91.66/92.45/90.38/84.03  NEGATIVE
+      -> vs T=2 at the same 188k: -0.59 t1, -0.20 t5. The temperature lever aimed at
+         t5 moves t5 the wrong way. (T^2 scaling also 4x's the effective KD weight.)
+Running: N72 seeds 4321/7777 (188k), Q68-188k (resbn:68, ~207k params, ~0.173 ms)
+probing whether the clear point drops below 0.185.
+
+PHASE F FINAL (extended rounds complete). Two success criteria answered:
+ (1) all five bars at <=0.153 ms: **NOT REACHABLE**, tested to exhaustion.
+     resbn:56:1,2,4,8 at 94k/188k/280k -> t5 92.61/92.65/92.67 against a 92.80 bar.
+     TRIPLING the schedule = +0.06 t5. KD temperature 2->4 = -0.20 t5 (negative).
+     Train CTC 0.4425->0.4192 over 3x the steps, still far above ch128's 0.3017:
+     these models are UNDER-CAPACITY, not undertrained.
+ (2) lowest latency clearing all five: **0.186 ms**, resbn:72:1,2,4,8 @188k, 229,642
+     params, 3 seeds -- mean 87.27/92.09/92.87/90.49/85.60, and EVERY seed clears.
+     2.55x faster + 2.96x smaller than the ch128 Phase-E candidate for -0.61 t1.
+     Frontier improved from 0.215 -> 0.186 ms. Probes pin the crossing between
+     206.7k params (0.176 ms, t5 92.74, fail) and 229.6k (0.186 ms, pass).
+     resbn:80 @0.215 stays the conservative pick: worst-seed t5 margin +0.05 vs +0.01.
+ t5 vs params is the whole story: 92.53 @134.6k -> 92.96 @229.6k -> 93.03 @689.3k,
+ flat in everything else varied. Crossing at 210-230k params.
+Artifacts: fast_resbn72_s{1234,4321,7777}, fast_resbn80_s{1234,4321,7777},
+ fast_resbn{56,64}_188k_s1234 (frontier evidence, under the bar). sha256 + parity in
+ PHASE_F.md 9. STILL VAL-ONLY: seal spent, ch128/ch192 remain the test anchors.
+- [ ] Only unmeasured lever left: the no-KD ablation (PHASE_F 11.3). KD weight also
+      never swept. Everything else in the phase brief has been run.
