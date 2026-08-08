@@ -40,6 +40,7 @@ from futo_decoder_ceiling import (ENC_BETA, ENC_BETA_PRUNE, ENC_GAMMA,  # noqa: 
 from futo_decoder_eval import load_combined_vocab, load_test  # noqa: E402
 from model import MAX_KEYS  # noqa: E402
 from paths import DEFAULT_LAYOUT, DEFAULT_WORKDIR, resolve  # noqa: E402
+import seal  # noqa: E402
 from sweep_scoring import (TraceCandidates, _init_worker, build_emissions,  # noqa: E402
                            collect, score_grid, strata)
 
@@ -229,6 +230,7 @@ def main() -> int:
                          "eval_emissions.npz, or eval_emissions_<refine>.npz when "
                          "--refine-ckpt is given)")
     ap.add_argument("--out", default="cache/phase_a_results.json")
+    seal.add_argument(ap)
     args = ap.parse_args()
 
     if "test" in Path(args.test).name:
@@ -241,6 +243,7 @@ def main() -> int:
               f"beta {PRESET[2]} gammaPrune {PRESET[3]} betaPrune {PRESET[4]}")
 
     rows = load_test(resolve(args.workdir, args.test))
+    seal.check(rows, args.unseal_test, what="eval_arms.py")
     targets = [w.lower() for w, _, _, _ in rows]
     n = len(rows)
     tags = json.loads(resolve(args.workdir, args.tags).read_text())["val"]

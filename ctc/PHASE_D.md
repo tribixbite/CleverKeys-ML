@@ -85,6 +85,19 @@ added **zero** further rows. `prepare_data.py` then re-applies its own dedup
 independently and reports `dropped_cross_split_duplicate = 0`, which is the
 cross-check that the tier build missed nothing.
 
+> ⚠ **CORRECTED post-decode (`AUDIT_FINAL.md` §4).** The claim that exact-trace
+> dedup "caught every match" is **false as written**. Both hash conventions keyed
+> on the **raw** word while the CTC target is built from the a–z-normalized word,
+> so `'arabian.'` in a tier did not match `'arabian'` in the holdout even though
+> the two rows carry a bit-identical input tensor *and* the same label. **588 val
+> rows and 145 test rows are in `train_t3` on that blind spot.** The key is fixed
+> in `build_tiers.hash_row` / `prepare_data.trace_hash` as of the post-decode
+> hygiene pass; the tiers on disk were **not** rebuilt, by the deliberate decision
+> in `AUDIT_PREDECODE.md` §E. Measured effect: the leaked rows score **4.34 pt
+> below** comparable non-leaked ones — no memorization signal — and removing all
+> of them moves the headline **< 0.05 pt on val / 0.20 pt on test**, with all five
+> bars still clearing on every one of six seeds.
+
 ### ⚠ Disclosure — T3 is contributor-dirty by construction
 
 **T3 applies no session or participant exclusion.** Every contributor who

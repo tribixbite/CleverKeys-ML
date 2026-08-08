@@ -461,8 +461,15 @@ number from those phases is understated by 2–5 pt.
 1. **Generalization.** T3-3× applies no session or participant exclusion, and
    oversampling HWS triples the exposure of the more contaminated corpus. These
    are benchmark numbers, comparable with published FUTO figures because the
-   holdout traces are removed bit-exactly where FUTO kept them — **not** a claim
-   about an unseen user.
+   holdout traces are removed where FUTO kept them — **not** a claim about an
+   unseen user.
+
+   > ⚠ **CORRECTED post-decode.** This originally read "removed bit-exactly".
+   > It is not exact: the dedup keyed on the raw word and the label on the
+   > a–z-normalized one, so **588 val / 145 test rows** survived into `train_t3`
+   > with a bit-identical tensor and label (`AUDIT_FINAL.md` §4). Key fixed,
+   > tiers deliberately not rebuilt; measured effect < 0.05 pt val / 0.20 pt
+   > test, all five bars still clearing on every seed.
 2. **Preset transfer beyond this holdout.** λ moved 0.0176 → 1.1, a 60× increase
    in the word-frequency weight. It helps the out-of-distribution HWS half *more*
    than the FUTO half, which is the strongest evidence available that it is not a

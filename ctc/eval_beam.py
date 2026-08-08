@@ -36,6 +36,7 @@ from futo_decoder_ceiling import (DEC_BETA, DEC_BETA_PRUNE, DEC_GAMMA,  # noqa: 
                                   futo_viterbi_beam, slice_emissions)
 from model import MAX_KEYS, CtcRefineHead, encoder_from_checkpoint  # noqa: E402
 from paths import DEFAULT_LAYOUT, DEFAULT_WORKDIR, resolve  # noqa: E402
+import seal  # noqa: E402
 
 #: scoring.json presets: encoder-only vs encoder+refinement (guide §7 / §11 step 6).
 SCORING = {
@@ -146,6 +147,7 @@ def main() -> int:
     ap.add_argument("--top-k", type=int, default=8, dest="top_k")
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--progress", type=int, default=200)
+    seal.add_argument(ap)
     args = ap.parse_args()
     if bool(args.ckpt) == bool(args.onnx):
         raise SystemExit("pass exactly one of --ckpt / --onnx")
@@ -179,6 +181,7 @@ def main() -> int:
           f"gammaPrune={gamma_prune} betaPrune={beta_prune}"
           + ("  [refined emissions]" if refiner else ""))
     rows = load_test(resolve(args.workdir, args.test))
+    seal.check(rows, args.unseal_test, what="eval_beam.py")
     if args.limit:
         rows = rows[: args.limit]
     mask = np.ones((num_letters,), bool)

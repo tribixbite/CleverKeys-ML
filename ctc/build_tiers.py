@@ -113,6 +113,24 @@ def build_valid_set():
 
 
 def hash_row(word: str, pts) -> bytes:
+    """Exact-trace dedup key: a–z-normalized word + exact float64 x/y bytes.
+
+    Both this and ``prepare_data.trace_hash_xyt`` key on the **normalized** word
+    as of the campaign-2 post-decode fix. They previously keyed on the raw word,
+    which is why ``'arabian.'`` in a tier did not match ``'arabian'`` in the
+    holdout even though the two produce a bit-identical input tensor and the same
+    CTC target.
+
+    ⚠ **The tiers currently cached under ``~/ctc-train`` were built with the old
+    key and were deliberately NOT rebuilt** — `AUDIT_PREDECODE.md` §E judged a
+    rebuild the worse trade, because re-rolling six seeds against a +0.28 pt val
+    margin risks more than the defect costs. `AUDIT_FINAL.md` §4 bounded the
+    effect by measurement rather than assumption: the leaked rows score **4.34 pt
+    below** comparable non-leaked ones (i.e. no memorization signal), and removing
+    all of them moves the headline by **< 0.05 pt on val / 0.20 pt on test**, with
+    all five bars still clearing on every one of six seeds. Any tier built from
+    here on gets the correct key.
+    """
     return trace_hash(word, [p["x"] for p in pts], [p["y"] for p in pts])
 
 

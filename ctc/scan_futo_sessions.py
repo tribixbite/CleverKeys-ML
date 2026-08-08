@@ -39,10 +39,26 @@ from paths import DEFAULT_WORKDIR, resolve  # noqa: E402
 DEFAULT_CORPUS = Path("/home/will/git/swype/neural-swipe-typing/data/futo/train.jsonl")
 
 
+def normalize_word(w: str) -> str:
+    """Lowercase and strip everything outside ``a-z`` — the CTC target's own form.
+
+    Duplicated from ``prepare_data`` rather than imported: this module is the
+    corpus scanner and is imported *by* the tier builder, so importing back would
+    close a cycle. The two must stay identical; see the note in
+    ``prepare_data.trace_hash``.
+    """
+    return "".join(c for c in w.lower() if "a" <= c <= "z")
+
+
 def trace_hash(word: str, xs, ys) -> bytes:
-    """16-byte content hash of a trace: lowercased word + exact float64 x/y bytes."""
+    """16-byte content hash of a trace: NORMALIZED word + exact float64 x/y bytes.
+
+    Keyed on the a–z-normalized word, not the raw one. Keying on the raw word was
+    the campaign-2 dedup defect that let 588 val / 145 test rows into `train_t3`
+    with a bit-identical input tensor and label (`AUDIT_FINAL.md` §4).
+    """
     m = hashlib.blake2b(digest_size=16)
-    m.update(word.lower().encode("utf-8"))
+    m.update(normalize_word(word).encode("utf-8"))
     m.update(b"\0")
     m.update(np.asarray(xs, np.float64).tobytes())
     m.update(np.asarray(ys, np.float64).tobytes())

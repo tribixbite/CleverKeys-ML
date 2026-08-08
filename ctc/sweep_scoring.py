@@ -48,6 +48,7 @@ from futo_decoder_eval import (featurize, len_stratum, load_combined_vocab,  # n
                                load_layout, load_test)
 from model import MAX_KEYS  # noqa: E402
 from paths import DEFAULT_LAYOUT, DEFAULT_WORKDIR, resolve  # noqa: E402
+import seal  # noqa: E402
 
 #: Coarse grid, centred on the published encoder-only preset.
 GRID_GAMMA = (0.30, 0.3556, 0.4056, 0.4556, 0.51)
@@ -233,6 +234,7 @@ def main() -> int:
     ap.add_argument("--grid-beta-prune", default="", dest="grid_beta_prune")
     ap.add_argument("--skip-refine", action="store_true", dest="skip_refine",
                     help="coarse pass only (no prune-param refinement)")
+    seal.add_argument(ap)
     args = ap.parse_args()
 
     global GRID_GAMMA, GRID_BETA, GRID_LAMBDA
@@ -250,6 +252,7 @@ def main() -> int:
     need = max(sw_hi, ho_hi, fu_hi)
 
     rows = load_test(resolve(args.workdir, args.test))[:need]
+    seal.check(rows, args.unseal_test, what="sweep_scoring.py")
     targets = [w.lower() for w, _, _, _ in rows]
     print(f"rows: {len(rows)}  sweep {sw_lo}:{sw_hi}  holdout {ho_lo}:{ho_hi}  "
           f"full {fu_lo}:{fu_hi}")

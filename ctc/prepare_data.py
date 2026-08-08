@@ -53,13 +53,24 @@ def adjacent_repeats(word: str) -> int:
 
 
 def trace_hash(word: str, xs: List[float], ys: List[float], ts: List[float]) -> bytes:
-    """Content hash over the word plus the EXACT float64 bytes of the full path.
+    """Content hash over the NORMALIZED word plus the exact float64 path bytes.
 
     Exact bytes (not rounded text) so the dedup cannot collapse genuinely
     distinct traces, and cannot miss bit-identical ones (audit finding #3).
+
+    The word is keyed through :func:`normalize_word`, i.e. on the same a–z form
+    the CTC target is built from. Keying on the *raw* word was the campaign-2
+    dedup defect: ``'arabian.'`` in a training tier and ``'arabian'`` in the
+    holdout hash to different values, so a row with a bit-identical input tensor
+    **and an identical label** survived the dedup. It let 588 val and 145 test
+    rows into `train_t3`; see `AUDIT_PREDECODE.md` §3 and `AUDIT_FINAL.md` §4.
+
+    ⚠ Two rows that differ only in punctuation now collide, which is exactly the
+    intent: they produce the same training target from the same path, so keeping
+    both is duplication, and keeping one across a split boundary is leakage.
     """
     h = hashlib.blake2b(digest_size=16)
-    h.update(word.encode("utf-8"))
+    h.update(normalize_word(word).encode("utf-8"))
     h.update(b"\x00")
     for arr in (xs, ys, ts):
         h.update(np.asarray(arr, np.float64).tobytes())
