@@ -187,10 +187,31 @@ SEALED this phase regardless.
       artifact; re-swept r2 gains +4.25 on untouched rows).
 - [x] E2 refinement head on the D1 seed-1234 base. NEGATIVE: -0.58 vs its own base on
       the same val[0:5000] at the E1 preset. Phase-2's null reproduces on a strong base.
-- [ ] E3a T4 tier = curated FUTO pool (688,025) + full HWS release, exact-trace dedup only.
-- [ ] E3b T3 with HWS rows oversampled 3x (index repetition, not row duplication).
+- [x] E3a T4 tier (curated FUTO at benchmark scale): -0.26 t1, negative on all five.
+      Third independent negative for the user's quality cascade. Rejected.
+- [x] E3b T3 with HWS oversampled 3x (npz concatenation, not row duplication):
+      +0.83 t1 at seed 1234, HWS half +1.45 vs FUTO +0.20. ADOPTED.
 - [x] E4 capacity ch=192 embed_hid=192 on T3: +0.48 t1 vs ch128 paired at seed 1234,
       inside the ~1 pt single-seed floor. Latency needs an idle re-measure (1.54 ms
       mean / 1.90 ms p90 taken under load, vs 0.49 ms for ch128).
 - [x] E5 beam-selection prefix 2000 -> 5000: +0.23 t1 paired at seed 1234. Adopted.
-- [ ] FINAL stack the adopted levers, 3 seeds, definitive table vs the bar. PHASE_E.md.
+- [x] FINAL stack (ch192 + T3-3xHWS + 5,000-row selection + E1 preset), 3 seeds.
+
+2026-08-08 (phase E) — GATE PASSES: all five FUTO-ceiling numbers beaten on val-9918
+
+- Seed-mean full val-9918 (seeds 1234/4321/7777, E1 preset):
+  t1 88.06 (sd 0.23) | t3 92.32 | t5 93.08 | <=3 90.86 | 4+ 86.62
+  bar 85.52 / 91.54 / 92.80 / 89.29 / 83.57  ->  +2.54 +0.78 +0.28 +1.57 +3.05. ALL PASS.
+- Also passes on the 4,959 val rows used by NEITHER the preset sweep nor checkpoint
+  selection: 87.58 / 92.03 / 92.85 / 90.67 / 85.98 (+2.06 +0.49 +0.05 +1.38 +2.41).
+  t5 is the narrow one there -- level with the ceiling rather than ahead of it.
+- test-2400 NOT decoded. eval_arms.py/train.py guards untouched. Orchestrator owns
+  the milestone + audit.
+- Biggest lever by far was the SCORING PRESET, not the model: the published
+  encoderOnly preset is ~0.6 off in gamma and 60x off in lambda for our emissions.
+  Four grids hit a boundary before the fifth converged.
+- ch192 vs ch128 at the final tier, 3 PAIRED seeds: +0.19 t1 (not the +0.48 one seed
+  showed), -0.12 on <=3, 1.9x latency. ch128 clears the same gate at 0.470 ms and is
+  the better shipping trade.
+- Machine rebooted mid-phase; E3a/E3b were resumed from last.pt with the cosine
+  horizon intact (step-budget mode makes --resume exact).
