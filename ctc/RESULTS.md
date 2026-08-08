@@ -132,8 +132,20 @@ parameters — while being *behind* on the ≤3 stratum. ch 192
 (`artifacts/ch192_s1234.onnx`, 0.877 ms) is the max-accuracy alternative if the
 device budget allows.
 
+**Or ship the Phase-F speed variant, with its weaker evidence stated.**
+`artifacts/fast_resbn80_s1234.onnx` — 279,346 params, **0.213 ms**, 1.1 MB — clears
+all five **val** bars on the seed mean and on every seed, at **2.23× the speed and
+41 % of the parameters** of ch 128, for −0.41 t1 on the val seed-mean (87.47 vs
+87.88, both three seeds). It uses the `resbn` trunk (dense convolutions with BatchNorms folded into
+them at export, so the graph carries no normalization node) and is distilled from
+our own ch 192 checkpoint. **It has never been decoded on test-2400 and never may
+be** — the seal is spent — so unlike ch 128 it carries val evidence only.
+`PHASE_F.md` has the frontier: the ≤0.15 ms models measured in that phase all miss
+top-5, by 0.19 pt at 0.141 ms and by 0.13 pt (three seeds) at 0.162 ms.
+
 **Set `CtcScoringParams` to the E1 preset** — this is a required change, not an
-option: at the published preset the same model clears only 3 of 5 bars.
+option, for either artifact: at the published preset the same model clears only
+3 of 5 bars.
 
 ```kotlin
 CtcScoringParams(gamma = 1.05, lambda = 1.1, beta = 0.2, alpha = 0.0,
@@ -156,6 +168,18 @@ the audited decode ran on (verified by sha256 against `ckpt/<arm>/`).
 | `ch192_s7777.onnx` | `phaseE-FINAL-s7777` | 1,525,378 | 6,144,249 | `a182191152ad77b233a73bc79750b0dda51bdbcf7fcb76ddaaad6d17016eee79` |
 | `ctc_model_golden.json` | golden fixture, from `ch128_s1234` **at the E1 preset** | — | 118,964 | `365405469c8ed6884ba3e6e89902a6093c29d6fcb710ed25f1e0b34a1f2030fd` |
 | `ctc_swipe_encoder.onnx` | ⚠ **superseded** pre-campaign `r2` | 394,114 | 1,619,140 | `fcf1633167b10f5c28e7c4dc16a9bba178bacc9e2b76efb06d792162dc99d0b7` |
+
+Phase-F additions — **val-validated only**, never decoded on the sealed test split.
+Same contract, opset 17, fp32, plus zero normalization nodes (BatchNorm folded at
+export). Full table, parity checks and the frontier in `PHASE_F.md` §6/§8/§9.
+
+| file | arm | params | bytes | ms | all five val bars |
+|---|---|---|---|---|---|
+| `fast_resbn80_s1234.onnx` ← Phase-F candidate | `phaseF-I-resbn80x4` | 279,346 | 1,142,727 | 0.213 | **yes**, every seed |
+| `fast_resbn80_s4321.onnx` | `phaseF-FINAL-resbn80x4-s4321` | 279,346 | 1,142,727 | 0.213 | **yes** |
+| `fast_resbn80_s7777.onnx` | `phaseF-FINAL-resbn80x4-s7777` | 279,346 | 1,142,727 | 0.213 | **yes** |
+| `fast_resbn64_s{1234,4321,7777}.onnx` ⚠ frontier evidence | `phaseF-{D,FAST}-resbn64x4*` | 185,058 | 766,727 | 0.162 | **no** — t5 92.67 vs 92.80 |
+| `fast_resbn56_s1234.onnx` ⚠ frontier evidence | `phaseF-G-resbn56x4` | 145,594 | 609,445 | 0.141 | **no** — t5 92.61 vs 92.80 |
 
 `ctc_model_golden.json` records its own `source_onnx_sha256` and `preset`, and was
 regenerated at `1.05,1.1,0.2,0.3734,0.9882` — the fixture must match the preset the

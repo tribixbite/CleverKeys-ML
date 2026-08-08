@@ -298,3 +298,33 @@ Phase F round 2 (same recipe, seed 1234):
   I resbn:80:1,2,4,8  279.3k  0.210 ms  (the pareto point above the target)
 Killed as dominated/too slow at 5-6 concurrent: E resbn:48:1,2,4,8,16,
 F resbn:40:1,2,4,8,1,2 (both trailing G at step 21000). Disclose as killed, not as arms.
+
+Phase F, seed 1234, full val-9918 at E1 (bar 85.52/91.54/92.80/89.29/83.57):
+  G resbn:56:1,2,4,8  145.6k  0.149 ms  86.25/91.67/92.61  <=3 89.52  4+ 84.55  4/5 (t5 -0.19)
+  D resbn:64:1,2,4,8  185.1k  0.160 ms  86.70/91.84/92.78  <=3 89.44  4+ 85.28  4/5 (t5 -0.02)
+  I resbn:80:1,2,4,8  279.3k  0.210 ms  87.41/92.18/92.85  <=3 90.38  4+ 85.86  **5/5**
+F3 (student + static int8) REJECTED: -1.03 (I) / -1.48 (G) t1, and int8 barely helps
+latency at this size (QDQ adds Q/DQ nodes; the graph is dispatch-bound, not
+arithmetic-bound). I int8 falls 5/5 -> 3/5.
+Killed for GPU budget, disclose as killed not as arms: E resbn:48x5, F resbn:40x6,
+H resbn:56x4 at 188k steps (the step-budget lever, untested), J the no-KD ablation.
+Seeding: FINAL = resbn:80:1,2,4,8 (5/5 at 0.210), FAST = resbn:64:1,2,4,8 (0.160,
+t5 knife-edge) -- seeds 4321/7777 each, 94k steps.
+
+PHASE F COMPLETE (PHASE_F.md). Answer: <=0.15 ms is NOT reachable with all five
+val bars intact. Measured boundary, 3 seeds each:
+  FAST resbn:64:1,2,4,8  185.1k  0.162 ms  86.82/91.85/92.67/89.86/85.24  4/5 (t5 -0.13)
+  FINAL resbn:80:1,2,4,8 279.3k  0.213 ms  87.47/92.13/92.89/90.35/85.98  **5/5 on the
+        seed mean AND on every individual seed**; 2.23x faster + 2.45x smaller than
+        the Phase-E ch128 candidate for -0.55 t1.
+Artifacts: artifacts/fast_resbn{80,64,56}_*.onnx, sha256 + parity in PHASE_F.md §9.
+VAL-ONLY: the seal is spent; ch128/ch192 remain the only test-validated anchors.
+Untested levers cut for GPU budget (PHASE_F §7.1): 188k-step schedule (the students
+underfit, train CTC 0.42-0.47 vs teacher 0.30 -- most promising remaining lever and
+free at inference), 5-/6-block narrow trunks, and the no-KD ablation.
+
+- [ ] NEXT (optional): re-run resbn:56/64 at 188k steps x 3 seeds to see whether the
+      free step budget closes the 0.13-0.19 pt on t5 at <=0.162 ms.
+- [ ] NEXT (optional): retrain ch128 itself with the resbn trunk -- folding BatchNorm
+      is a strict improvement (50 fewer ONNX nodes, no accuracy cost) and would make
+      the test-validated anchor faster without changing its capacity.
