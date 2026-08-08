@@ -215,3 +215,41 @@ SEALED this phase regardless.
   the better shipping trade.
 - Machine rebooted mid-phase; E3a/E3b were resumed from last.pt with the cosine
   horizon intact (step-budget mode makes --resume exact).
+
+2026-08-08 (post-decode) — SEAL SPENT, claim verified, hygiene landed
+
+- test-2400 decoded ONCE per checkpoint exactly as pre-registered (AUDIT_PREDECODE.md
+  §E), audited post-hoc (AUDIT_FINAL.md, 937e112). Verdict: claim holds AS REGISTERED.
+  ch192 seed-mean 88.36/92.65/93.50, <=3 91.37, 4+ 86.81
+  ch128 seed-mean 87.92/92.33/93.00, <=3 91.08, 4+ 86.29
+  bar 84.83/91.04/92.08/89.57/82.40 -> all five, and on all six individual runs.
+- BUT only 2 of 5 bars are statistically resolved (t1 z3.6, 4+ z3.4). t3 ~2sigma,
+  t5 1.9, <=3 1.2 -> positive point estimate, NOT resolved. Never quote "beats FUTO"
+  without the preset asymmetry: at the published preset the same model clears 3 of 5
+  on val (85.78/91.66/92.67/88.10/84.58). The tuning is worth +2.29 pt t1.
+- THE SEAL IS SPENT. No further test-2400 decode is legitimate, including a "fair
+  rematch" at the published preset -- argue that from the val control instead.
+
+- [x] HYGIENE 1: dedup key now normalize_word(word) in build_tiers.hash_row (via
+      scan_futo_sessions.trace_hash) and prepare_data.trace_hash. Tiers deliberately
+      NOT rebuilt per AUDIT_PREDECODE §E; audit bounded the defect at <0.05 val /
+      0.20 test pt, all bars still clearing on every seed, and the leaked rows score
+      4.34 pt BELOW comparable non-leaked ones (no memorization signal).
+- [x] HYGIENE 2: seal.py -- content guard replacing the filename substring. Hashes the
+      rows a run actually LOADS against 2,400 committed fingerprints; refuses >1%
+      overlap unless --unseal-test. Threshold non-zero because val and test genuinely
+      share 7 traces. Verified it refuses the split, a RENAMED copy and a 120-row
+      slice (both of which the old guard passed) and lets val through.
+      DISCLOSED: verifying the override branch decoded 3 test rows. No number used.
+- [x] Corrected PHASE_D.md §2 "caught every match on both sides" and PHASE_E.md §5
+      "removed bit-exactly" -- both false as written (AUDIT_FINAL §6.2).
+- [x] RESULTS.md Campaign 2 section; Campaign 1 retained + marked superseded.
+- [x] artifacts/: 6 ONNX (ch128/ch192 x 3 seeds, sha256 verified byte-identical to the
+      decoded checkpoints) + golden fixture regenerated from ch128_s1234 AT THE E1
+      PRESET (make_golden.py gained --preset + provenance).
+
+- [ ] APP-SIDE (not this repo): G3 wiring of ch128_s1234.onnx; CtcScoringParams ->
+      (1.05, 1.1, 0.2, alpha 0.0, 0.3734, 0.9882) -- REQUIRED, not optional; land
+      ctc_golden.json so CtcParityTest actually runs (it currently fails its own
+      file-existence assertion); NOTICE attribution for the FUTO corpus (MIT) and
+      How-We-Swipe / OSF sj67f (MIT); re-measure latency on a phone little core.
