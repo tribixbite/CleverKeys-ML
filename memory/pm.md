@@ -273,3 +273,28 @@ test-2400 is SEALED-SPENT — Phase F evidence is val-only, by construction.
       our own ch192 teacher.
 - [ ] F3 = F2 + static int8, if it pays.
 - [ ] Final candidate at 3 seeds + PHASE_F.md.
+
+Phase F round 1 (seed 1234, T3+2xT3hws, 94k steps, KD w1.0 T2 from ch192-s1234),
+full val-9918 at the E1 preset — bar 85.52/91.54/92.80/89.29/83.57:
+
+  A resbn:64:1,2,4    143.7k  0.135 ms  85.89/91.48/92.50  <=3 88.76  4+ 84.41  2/5
+  B resbn:48:1,2,4,8  111.3k  0.120 ms  86.39/91.41/92.38  <=3 89.82  4+ 84.61  3/5
+  C dwsep:128:1,2,4,8  97.8k  0.141 ms  85.78/91.39/92.27  <=3 88.40  4+ 84.42  2/5
+
+- t1, 4+ and (for B) <=3 clear comfortably; **t3 and t5 are the binding bars**.
+- Depth beats width at equal latency (B > A) and dense beats depthwise-separable
+  (B > C) — the brief's dwsep hypothesis is measurably the wrong shape here, because
+  dense and separable have the SAME MAC/param ratio at T=32 and the dense kernel
+  vectorizes ~1.8x better (68 vs 38 GMAC/s measured).
+- Re-tuning the scoring preset on B buys +0.12 t1 / +0.05 t3 / +0.03 t5 over the
+  transferred E1 preset. The preset transfers; t3/t5 must come from the model.
+
+Phase F round 2 (same recipe, seed 1234):
+  D resbn:64:1,2,4,8  185.1k  0.160 ms  86.70/91.84/92.78  <=3 89.44  4+ 85.28  4/5
+    -> misses ONLY t5, by 0.02 pt. Same knife-edge Phase E hit at E1 (92.79 vs 92.80).
+  G resbn:56:1,2,4,8  145.6k  0.149 ms  (running)
+  H = G's arch at 188k steps (the free lever: these students underfit badly,
+      ctc_loss 0.42-0.47 against the teacher's 0.30)
+  I resbn:80:1,2,4,8  279.3k  0.210 ms  (the pareto point above the target)
+Killed as dominated/too slow at 5-6 concurrent: E resbn:48:1,2,4,8,16,
+F resbn:40:1,2,4,8,1,2 (both trailing G at step 21000). Disclose as killed, not as arms.
