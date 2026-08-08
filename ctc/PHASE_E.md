@@ -475,7 +475,28 @@ number from those phases is understated by 2–5 pt.
 
 ---
 
-## 7. Reproduction
+## 7. Workdir notes
+
+Two run dirs under `~/ctc-train/ckpt/` are **not** results and should not be read
+as arms:
+
+* `phaseE-E4-ch192-s4321` — a hedge run started before the E3 tier decision was
+  in, deliberately killed at step 9,000 of 94,000 when it became clear the final
+  tier would not be plain T3. Never evaluated, never quoted.
+* `phaseE-E4-ch192-last` — the `last.pt` export of `phaseE-E4-ch192`, used only
+  for the selected-vs-final checkpoint check in §3.
+
+The host rebooted partway through the phase. `phaseE-E3a-T4` and
+`phaseE-E3b-hws3x` were resumed from their `last.pt` at step 48,000 with the same
+run names and arguments; because `--total-steps` mode keys the cosine schedule to
+the restored global step, the resumed half of those runs is on the identical LR
+trajectory the uninterrupted run would have had. The only difference from an
+unbroken run is that `--resume` restarts at the next *epoch* boundary, discarding
+the remainder of the in-flight epoch's shuffle.
+
+---
+
+## 8. Reproduction
 
 ```bash
 python build_tiers.py --tiers t4,t3hws
