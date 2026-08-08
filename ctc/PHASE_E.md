@@ -233,6 +233,61 @@ metrics, largest on 4+ (+0.57). That is inside the ~1 pt single-seed noise floor
 and so is *not* resolvable at one seed — it goes to the 3-seed round rather than
 being adopted here.
 
+---
+
+## 4. E3 — the data-mix arms. Oversampling How-We-Swipe is the model-side win
+
+Both arms are ch 128, seed 1234, 94,000 steps, 5,000-row selection — paired with
+`phaseE-E5base` on everything but the training pool. Full val-9918, E1 preset.
+
+| arm | training pool | rows | t1 | t3 | t5 | ≤3 | 4+ | FUTO | HWS |
+|---|---|---|---|---|---|---|---|---|---|
+| `phaseE-E5base` | T3 | 1,005,336 | 87.19 | 92.09 | 92.87 | 90.06 | 85.71 | 94.80 | 79.64 |
+| `phaseE-E3a-T4` | T4 (curated FUTO) | 764,771 | 86.93 | 91.58 | 92.47 | 90.00 | 85.34 | 94.80 | 79.12 |
+| **`phaseE-E3b-hws3x`** | **T3, HWS 3×** | **1,158,832** | **88.02** | **92.27** | **93.03** | **91.12** | **86.41** | **95.00** | **81.09** |
+
+### E3a — curation does not pay at benchmark scale either
+
+T4 is T3's contamination policy (exact-trace dedup only) applied to T1's curated
+688,025-row FUTO pool instead of the raw corpus, so T3 vs T4 isolates the user's
+curation at benchmark scale. **T4 is −0.26 t1 and negative on all five metrics.**
+Phase A found the quality cascade net-harmful on the FUTO half at 385 k rows;
+this reproduces the sign at 765 k rows against a different comparator. The
+curation is not the lever — third independent look, third negative. `futo_leak_xy`
+was **0** on the curated pool, confirming Phase A's finding that the user's
+train/val FUTO pools were already exact-trace disjoint.
+
+### E3b — 3× How-We-Swipe is +0.83 t1, and it fixes the half that was broken
+
+Duplicating rows inside a tier jsonl would be undone by `prepare_data.py`'s exact
+self-dedup, so the arm concatenates a standalone 76,748-row HWS cache onto T3
+twice (`--train-npz train_t3.npz,train_t3hws.npz,train_t3hws.npz`) — exact 3×
+repetition under a plain without-replacement shuffle rather than a weighted
+sampler's with-replacement approximation.
+
+**+0.83 t1, and positive on every metric and both strata** (≤3 **+1.06**, 4+
++0.70). The mechanism is legible and is the one the campaign has been describing
+since Phase A: the holdout is ~50 % How-We-Swipe, our HWS half has trailed the
+FUTO half by 15 pt throughout, and T3 is 92 % FUTO by row count. Oversampling the
+under-represented corpus moves **HWS +1.45** (79.64 → 81.09) against FUTO +0.20 —
+almost all of the aggregate gain comes from the half that was weak.
+
+At +0.83 this is at the edge of the ~1 pt single-seed floor and is *not* resolved
+by one seed. What raises confidence above the bare number is that all five
+metrics, both strata and both corpora move the same way, with the largest move on
+the exact sub-population the intervention targets. It goes into the final stack
+and is tested at three seeds there.
+
+> ⚠ **T3's disclosure carries to T3-3× and to T4 unchanged** (`PHASE_D.md` §2).
+> None of these tiers applies session or participant exclusion, so every val row's
+> contributor is in training. They are benchmark tiers, comparable with published
+> FUTO numbers; **none can support a generalization claim.** Oversampling HWS
+> makes this *worse* in one specific way worth stating: the HWS half is the more
+> contributor-contaminated of the two (98.4 % of T0's HWS rows share a participant
+> with the holdout), so tripling it triples the exposure of exactly those
+> contributors. The +1.45 pt HWS gain is therefore an upper bound on what a new
+> user would see, by an unknown margin.
+
 ### Checkpoint selection is on a plateau, so the selection preset does not matter
 
 Phase E reports at a preset far from the one the selection beam scores at, which
