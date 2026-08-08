@@ -298,3 +298,86 @@ at the E1 preset — 0.02 pt apart. Under a cosine-to-zero schedule the last
 ~10,000 steps are indistinguishable, so which of them a selection rule picks
 cannot move the result. Every Phase-E arm therefore keeps published-preset
 selection, which also keeps them all mutually paired.
+
+### Latency, measured idle
+
+Single-thread, batch-1, fixed-shape ONNX Runtime CPU, 300 runs × 3 interleaved
+rounds, best round, machine idle.
+
+| config | params | mean ms | p90 ms |
+|---|---|---|---|
+| `phaseE-E5base` (ch 128) | 689 k | 0.474 | 0.489 |
+| `phaseE-E3b-hws3x` (ch 128) | 689 k | 0.470 | 0.485 |
+| **`phaseE-E4-ch192`** | **1.525 M** | **0.898** | **0.914** |
+
+ch 192 costs **1.9×** ch 128, landing at 0.90 ms — inside the 0.8–1.0 ms it was
+budgeted at. An earlier reading of 1.54 ms / 1.90 ms p90 was taken with three
+training runs on the box and is **withdrawn**: it measured contention, not the
+graph. Latency figures in this campaign are only valid taken idle, which is what
+the Phase-C protocol already said and what this nearly got wrong.
+
+---
+
+## 5. FINAL — the stacked configuration at three seeds
+
+**Configuration.** ch 192 / `embed_hid` 192 residual trunk (E4), trained on T3
+with its How-We-Swipe half oversampled 3× (E3b), 94,000 steps, batch 256, lr 3e-3,
+wd 0.01, warmup 1,000, fp32, checkpoint selected on beam top-1 over a 5,000-row
+val prefix (E5), decoded at the E1 preset. 1,525,378 params, 0.898 ms.
+Seeds 1234 / 4321 / 7777.
+
+E3a (T4) and E2 (the refinement head) were measured and **not** stacked — both
+were negative.
+
+### The preset used, and why it is the *less* contaminated choice
+
+The E1 preset was tuned on `phaseD-D1`'s emissions — a **different model**
+(ch 128, plain T3). Re-tuned from scratch on the final seed-1234 model, the sweep
+lands at γ 0.975, λ 1.1, β 0.3, γp 0.3734, βp 0.5 and scores
+**88.23 / 92.22 / 93.00** (≤3 91.12, 4+ 86.74) on full val, against
+**88.22 / 92.23 / 93.08** (≤3 91.15, 4+ 86.71) for the transferred E1 preset —
+identical within 0.08 pt on every metric.
+
+Since re-tuning buys nothing measurable, the results below are reported at the
+**transferred E1 preset**, which was never fitted to this model at all. That the
+preset transfers unchanged across both a capacity change and a data-mix change is
+also the best evidence available that it fits the task and the lexicon rather than
+one model's quirks.
+
+### Results — full val-9918, E1 preset
+
+| metric | s1234 | s4321 | s7777 | **seed-mean** | sd | **the bar** | **Δ** | gate |
+|---|---|---|---|---|---|---|---|---|
+| overall t1 | 88.22 | 87.80 | 88.17 | **88.06** | 0.23 | 85.52 | **+2.54** | **PASS** |
+| t3 | 92.23 | 92.34 | 92.38 | **92.32** | 0.08 | 91.54 | **+0.78** | **PASS** |
+| t5 | 93.08 | 93.17 | 92.99 | **93.08** | 0.09 | 92.80 | **+0.28** | **PASS** |
+| ≤3 t1 (n=3,389) | 91.15 | 90.62 | 90.82 | **90.86** | 0.27 | 89.29 | **+1.57** | **PASS** |
+| 4+ t1 (n=6,529) | 86.71 | 86.34 | 86.80 | **86.62** | 0.24 | 83.57 | **+3.05** | **PASS** |
+
+Per-source seed-mean: **FUTO 94.99**, **HWS 81.19** (against 92.87 / 76.80 at the
+end of Phase D). Seed sd on t1 is **0.23**, against `D1`-on-T3's 0.56 in Phase D —
+the oversampled mix is also markedly more stable across seeds.
+
+### The same table on rows that were never used for anything
+
+Full val is the basis the gate was specified on, but half of it (`0:4959`) fed the
+E1 preset sweep and the first 5,000 rows fed checkpoint selection. Rows
+`4959:9918` fed **neither** (a 41-row overlap aside). That subset is the strictest
+estimate available:
+
+| metric | seed-mean, holdout half | sd | the bar | Δ | gate |
+|---|---|---|---|---|---|
+| overall t1 | **87.58** | 0.32 | 85.52 | **+2.06** | **PASS** |
+| t3 | **92.03** | 0.07 | 91.54 | **+0.49** | **PASS** |
+| t5 | **92.85** | 0.11 | 92.80 | **+0.05** | **PASS** |
+| ≤3 t1 | **90.67** | 0.53 | 89.29 | **+1.38** | **PASS** |
+| 4+ t1 | **85.98** | 0.22 | 83.57 | **+2.41** | **PASS** |
+
+All five clear on both bases. **t5 is the number to read carefully: +0.28 on full
+val but +0.05 on untouched rows** — on the strictest reading top-5 is *level* with
+the FUTO ceiling rather than above it. Every other metric keeps a margin far
+outside anything this campaign can attribute to noise.
+
+**test-2400 was not decoded.** `eval_arms.py` refuses any split whose filename
+contains `test` and `train.py` refuses it as a selection split; neither guard was
+touched or bypassed in this phase.
