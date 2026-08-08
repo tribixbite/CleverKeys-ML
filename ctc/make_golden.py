@@ -29,7 +29,8 @@ from futo_decoder_ceiling import (ENC_BETA, ENC_BETA_PRUNE, ENC_GAMMA,  # noqa: 
                                   ENC_GAMMA_PRUNE, ENC_LAMBDA, futo_viterbi_beam,
                                   slice_emissions)
 from model import MAX_KEYS, T_OUT  # noqa: E402
-from paths import DEFAULT_LAYOUT, DEFAULT_WORKDIR, resolve  # noqa: E402
+from paths import (DEFAULT_LAYOUT, DEFAULT_WORKDIR, resolve,  # noqa: E402
+                   sha256_file)
 
 LEXICON = [("cat", 150.0), ("car", 180.0), ("cart", 120.0), ("care", 140.0),
            ("the", 250.0), ("hello", 160.0), ("keyboard", 110.0)]
@@ -62,7 +63,25 @@ def main() -> int:
     ap.add_argument("--layout", type=Path, default=DEFAULT_LAYOUT)
     ap.add_argument("--onnx", default="ctc_swipe_encoder.onnx")
     ap.add_argument("--out", default="ctc_model_golden.json")
+    ap.add_argument("--preset", default="",
+                    help="scoring preset the beam cases are generated at, as "
+                         "'gamma,lambda,beta,gammaPrune,betaPrune'. Defaults to the "
+                         "published encoderOnly preset. The fixture must be "
+                         "generated at whatever preset the app ships in "
+                         "CtcScoringParams, or the parity test asserts against a "
+                         "configuration that is never run.")
     args = ap.parse_args()
+
+    gamma, lam, beta, gamma_prune, beta_prune = (
+        ENC_GAMMA, ENC_LAMBDA, ENC_BETA, ENC_GAMMA_PRUNE, ENC_BETA_PRUNE)
+    if args.preset:
+        vals = [float(v) for v in args.preset.split(",")]
+        if len(vals) != 5:
+            raise SystemExit("--preset needs 5 floats: "
+                             "gamma,lambda,beta,gammaPrune,betaPrune")
+        gamma, lam, beta, gamma_prune, beta_prune = vals
+    print(f"beam cases at gamma={gamma} lambda={lam} beta={beta} "
+          f"gammaPrune={gamma_prune} betaPrune={beta_prune}")
 
     letters, centers = load_layout(args.layout)
     num_letters = len(letters)
@@ -89,8 +108,7 @@ def main() -> int:
         lp = slice_emissions(full, num_letters, MAX_KEYS)             # [32,27]
         greedy = greedy_ctc(lp, letters, num_letters)
         topk = futo_viterbi_beam(lp, letters, num_letters, trie, BEAM_WIDTH, TOP_K,
-                                 ENC_GAMMA, ENC_LAMBDA, ENC_BETA,
-                                 ENC_GAMMA_PRUNE, ENC_BETA_PRUNE)
+                                 gamma, lam, beta, gamma_prune, beta_prune)
         cases.append({
             "kind": "beam", "name": f"model_{word}",
             "alphabet": "".join(letters), "frames": T_OUT,
@@ -99,16 +117,20 @@ def main() -> int:
             "features": [float(v) for v in feats.reshape(-1)],        # [128] x-row then y-row
             "emissions": [[float(v) for v in row] for row in lp],
             "lexicon": [[w, f] for w, f in LEXICON],
-            "params": {"gamma": ENC_GAMMA, "lambda": ENC_LAMBDA, "beta": ENC_BETA,
-                       "alpha": 0.0, "gammaPrune": ENC_GAMMA_PRUNE,
-                       "betaPrune": ENC_BETA_PRUNE, "beamWidth": BEAM_WIDTH,
+            "params": {"gamma": gamma, "lambda": lam, "beta": beta,
+                       "alpha": 0.0, "gammaPrune": gamma_prune,
+                       "betaPrune": beta_prune, "beamWidth": BEAM_WIDTH,
                        "topK": TOP_K},
             "greedy": greedy,
             "topk": [[w, s] for w, s in topk],
         })
     out_path = resolve(args.workdir, args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(json.dumps({"cases": cases}, indent=1))
+    out_path.write_text(json.dumps(
+        {"source_onnx": str(resolve(args.workdir, args.onnx)),
+         "source_onnx_sha256": sha256_file(resolve(args.workdir, args.onnx)),
+         "preset": [gamma, lam, beta, gamma_prune, beta_prune],
+         "cases": cases}, indent=1))
     print(f"wrote {out_path} ({len(cases)} cases)")
     return 0
 
