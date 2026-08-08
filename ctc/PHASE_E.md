@@ -381,3 +381,126 @@ outside anything this campaign can attribute to noise.
 **test-2400 was not decoded.** `eval_arms.py` refuses any split whose filename
 contains `test` and `train.py` refuses it as a selection split; neither guard was
 touched or bypassed in this phase.
+
+### The capacity lever, resolved at three paired seeds
+
+The ch 128 control was run at the same three seeds on the same tier, so ch 192 vs
+ch 128 is a fully paired test at the final data mix:
+
+| metric | s1234 | s4321 | s7777 | mean Δ | paired t(2) |
+|---|---|---|---|---|---|
+| t1 | +0.20 | +0.17 | +0.19 | **+0.19** | 21.2 |
+| t3 | −0.04 | +0.15 | +0.15 | +0.09 | 1.4 |
+| t5 | +0.05 | +0.25 | +0.05 | +0.12 | 1.8 |
+| ≤3 | +0.03 | −0.23 | −0.15 | **−0.12** | −1.5 |
+| 4+ | +0.30 | +0.39 | +0.37 | **+0.35** | 13.0 |
+
+**Capacity is real but much smaller than one seed suggested.** On plain T3 at
+seed 1234 it measured +0.48 t1 (§3); paired at three seeds on the oversampled
+tier it is **+0.19**. It is sign-stable on t1 and 4+ and the paired t clears the
+4.30 threshold on both — though a t at n=3 rests on a 2-df variance estimate and
+should be read as "consistent", not "precise". The stratum signature is the one
+this campaign has seen from every sharpening lever since Phase B: **4+ +0.35, ≤3
+−0.12**.
+
+### ⚠ ch 128 also passes the gate, at half the latency
+
+| config | params | ms | t1 | t3 | t5 | ≤3 | 4+ | all five? |
+|---|---|---|---|---|---|---|---|---|
+| the bar | — | — | 85.52 | 91.54 | 92.80 | 89.29 | 83.57 | — |
+| **ch 128** + 3× HWS | 689 k | **0.470** | 87.88 | 92.23 | 92.96 | **90.98** | 86.26 | **PASS** |
+| **ch 192** + 3× HWS | 1.525 M | 0.898 | **88.06** | **92.32** | **93.08** | 90.86 | **86.62** | **PASS** |
+
+Both seed-means beat all five numbers. ch 192 buys +0.19 t1 for **1.9× the
+encoder time and 2.2× the parameters**, and is actually *behind* on the ≤3
+stratum. Reported as the headline because it is the best-measured configuration
+and was the stacked arm the brief asked for, but **ch 128 is the better shipping
+trade** and clears the same gate — that choice should be made on device budget,
+not on these 0.19 pt.
+
+---
+
+## 6. Summary of decisions
+
+* **Adopt the re-tuned scoring preset (E1)** — `gamma 1.05, lambda 1.1, beta 0.2,
+  gammaPrune 0.3734, betaPrune 0.9882`. Worth **+2.7 to +4.6 pt top-1** depending
+  on the model, more on untouched rows than on the tuning rows, verified against
+  the real per-row decoder, and stable across a capacity change and a data-mix
+  change. This is the largest single lever in the entire campaign, and it is
+  free at inference.
+* **Adopt 3× How-We-Swipe oversampling (E3b)** — +0.83 t1 at one seed, and the
+  gain lands on the corpus half that was 15 pt behind. Also cuts seed sd from
+  0.56 to 0.23.
+* **Adopt the 5,000-row selection prefix (E5)** — +0.23 t1, the size and sign
+  Phase D predicted in advance, for ~3 s per validation.
+* **Adopt ch 192 only if the device budget allows it** — +0.19 t1 paired at three
+  seeds for 1.9× encoder latency, and −0.12 on ≤3. ch 128 passes the same gate.
+* **Reject T4 / curation at benchmark scale (E3a)** — −0.26 t1, negative on all
+  five. Third independent negative for the user's quality cascade.
+* **Reject the refinement head (E2)** — negative on every metric and stratum under
+  both its own preset and E1's. Phase 2 stays closed.
+* **The prune params are fine as published** — searched 0.25–1.35 for the first
+  time; `gammaPrune` wants to stay low and collapses above ~1.0.
+
+### Withdrawn claims
+
+| claim | where | status |
+|---|---|---|
+| "the guide's free win does not exist for this model" | `README.md` | **withdrawn** — grid too narrow |
+| "+0.21 pt maximum" scoring headroom on `r2` | `README.md` | **withdrawn** — real gain +4.25 pt on untouched rows |
+| "re-tuning does not rescue them" (0.08–1.03 pt per arm) | `PHASE_B.md` §4 | **bounded by its grid**; the arm ranking still stands |
+| ch 192 latency 1.54 ms / 1.90 ms p90 | this doc, earlier revision | **withdrawn** — measured under load; idle is 0.898 / 0.914 |
+| ch 192 is worth +0.48 t1 | §3, one seed | superseded by **+0.19** at three paired seeds |
+
+Every Phase A–D **arm-vs-arm** conclusion survives: all those arms were decoded at
+the same published preset, so the mis-tuning was common-mode. Every **absolute**
+number from those phases is understated by 2–5 pt.
+
+### What is still not established
+
+1. **Generalization.** T3-3× applies no session or participant exclusion, and
+   oversampling HWS triples the exposure of the more contaminated corpus. These
+   are benchmark numbers, comparable with published FUTO figures because the
+   holdout traces are removed bit-exactly where FUTO kept them — **not** a claim
+   about an unseen user.
+2. **Preset transfer beyond this holdout.** λ moved 0.0176 → 1.1, a 60× increase
+   in the word-frequency weight. It helps the out-of-distribution HWS half *more*
+   than the FUTO half, which is the strongest evidence available that it is not a
+   val artifact, but it is tuned on val-9918's vocabulary distribution and its
+   behaviour on rare words and proper nouns is untested.
+3. **The comparison is now asymmetric in our favour.** Our preset is tuned; the
+   FUTO ceiling was measured at its own published preset. A fair rematch would
+   re-tune both. This asymmetry did not exist in Phase D and does now.
+4. **t5 on untouched rows is +0.05** — level with the ceiling, not above it.
+
+---
+
+## 7. Reproduction
+
+```bash
+python build_tiers.py --tiers t4,t3hws
+python prepare_data.py --extra-train data/tier_t3hws.jsonl --out-name train_t3hws --jobs 10
+python prepare_data.py --extra-train data/tier_t4.jsonl   --out-name train_t4   --jobs 10
+
+# the final stacked arm, one seed
+python train.py --train-npz train_t3.npz,train_t3hws.npz,train_t3hws.npz \
+                --run-name phaseE-FINAL-s1234 --ch 192 --embed-hid 192 \
+                --total-steps 94000 --val-every 3000 --batch 256 --lr 3e-3 \
+                --weight-decay 0.01 --warmup 1000 --seed 1234 \
+                --beam-val-rows 5000 --beam-jobs 10
+python export_onnx.py --ckpt ckpt/phaseE-FINAL-s1234/best.pt \
+                      --out ckpt/phaseE-FINAL-s1234/ctc_swipe_encoder.onnx
+
+# the E1 preset sweep (note the WIDE grid — the narrow one hides the whole effect)
+python sweep_scoring.py --onnx ckpt/phaseE-FINAL-s1234/ctc_swipe_encoder.onnx \
+       --cache ckpt/phaseE-FINAL-s1234/eval_emissions.npz \
+       --sweep-rows 0:4959 --holdout-rows 4959:9918 --full-rows 0:9918 \
+       --grid-gamma 0.85,0.95,1.05,1.15,1.25,1.4 --grid-beta 0.05,0.125,0.2,0.3 \
+       --grid-lambda 0.6,0.8,1.1,1.4,1.8 \
+       --grid-gamma-prune 0.25,0.3734,0.5 --grid-beta-prune 0.5,0.9882
+
+# report (test-2400 is refused)
+python eval_arms.py --arms phaseE-FINAL-s1234,phaseE-FINAL-s4321,phaseE-FINAL-s7777 \
+       --preset 1.05,1.1,0.2,0.3734,0.9882 --own-mask T0 --also-masks "" \
+       --latency-runs 300
+```
