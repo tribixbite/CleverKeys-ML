@@ -205,3 +205,41 @@ at 67 % — applies with more force to a base that is now stronger still, and th
 one stratum that had looked promising was evidently the weak base's slack rather
 than a property of the lever. **Phase 2 stays closed, now on much better
 evidence.**
+
+---
+
+## 3. E5 and E4 — selection width and capacity
+
+All arms in this section are **seed 1234, T3, 94,000 steps**, selected on beam
+top-1 over a **5,000**-row val prefix at the published preset, and reported on
+full val-9918 at the E1 preset. They are therefore paired with each other on
+everything except the one variable named.
+
+| arm | ch | params | t1 | t3 | t5 | ≤3 | 4+ | FUTO | HWS |
+|---|---|---|---|---|---|---|---|---|---|
+| `phaseD-D1` (2,000-row selection) | 128 | 689 k | 86.96 | 91.85 | 92.78 | 89.70 | 85.54 | 94.60 | 79.38 |
+| `phaseE-E5base` (5,000-row selection) | 128 | 689 k | 87.19 | 92.09 | 92.87 | 90.06 | 85.71 | 94.80 | 79.64 |
+| **`phaseE-E4-ch192`** | **192** | **1.525 M** | **87.67** | **92.11** | **92.90** | **90.35** | **86.28** | 95.22 | 80.16 |
+
+**E5 (2,000 → 5,000-row selection prefix): +0.23 t1**, and positive on all five
+metrics. Phase D predicted "worth ~0.2 pt" from the measured −0.17 pt that the
+noisy 2,000-row rule had cost `D1`; the measured value is +0.23. One seed, so it
+is not resolvable on its own, but it is a prediction made in advance that came
+back the right size and sign, it costs ~3 s per validation, and it cannot be
+harmful in expectation. **Adopted.**
+
+**E4 (ch 128 → 192): +0.48 t1** paired against `E5base`, positive on all five
+metrics, largest on 4+ (+0.57). That is inside the ~1 pt single-seed noise floor
+and so is *not* resolvable at one seed — it goes to the 3-seed round rather than
+being adopted here.
+
+### Checkpoint selection is on a plateau, so the selection preset does not matter
+
+Phase E reports at a preset far from the one the selection beam scores at, which
+is a real mismatch. `train.py --select-preset` was added to close it, but the
+measurement says there is nothing to close: for `E4`, the selected checkpoint
+(step 87,000) and the final step (94,000) score **87.67 and 87.65** on full val
+at the E1 preset — 0.02 pt apart. Under a cosine-to-zero schedule the last
+~10,000 steps are indistinguishable, so which of them a selection rule picks
+cannot move the result. Every Phase-E arm therefore keeps published-preset
+selection, which also keeps them all mutually paired.
