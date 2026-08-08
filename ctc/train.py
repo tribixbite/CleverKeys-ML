@@ -41,8 +41,10 @@ from futo_decoder_ceiling import (ENC_BETA, ENC_BETA_PRUNE, ENC_GAMMA,  # noqa: 
                                   ENC_GAMMA_PRUNE, ENC_LAMBDA, futo_viterbi_beam)
 from futo_decoder_eval import (load_combined_vocab, load_layout,  # noqa: E402
                                load_test)
-from model import MAX_KEYS, T_OUT, CtcSwipeEncoder, slice_head_torch  # noqa: E402
-from paths import DEFAULT_LAYOUT, DEFAULT_WORKDIR, resolve  # noqa: E402
+from model import (MAX_KEYS, T_OUT, CtcSwipeEncoder,  # noqa: E402
+                   encoder_from_checkpoint, slice_head_torch)
+from paths import (DEFAULT_LAYOUT, DEFAULT_WORKDIR, resolve,  # noqa: E402
+                   sha256_file)
 
 BLANK = MAX_KEYS  # 64 — full-head blank index (the Kotlin slice relocates it to K)
 
@@ -535,8 +537,12 @@ def main() -> int:
                     dest="feat_version",
                     help="1 = 8 path channels; 2 = 14 kinematic channels + a "
                          "learned reduction of the key-proximity field (B1)")
-    ap.add_argument("--block", default="res", choices=("res", "convnext"),
-                    help="trunk block: original residual, or depthwise/GLU/GRN/SE (B2)")
+    ap.add_argument("--block", default="res",
+                    choices=("res", "convnext", "dwsep", "resbn"),
+                    help="trunk block: original residual, depthwise/GLU/GRN/SE (B2), "
+                         "the Phase-F depthwise-separable block (dwsep), or the "
+                         "original dense block with foldable BatchNorms (resbn). "
+                         "Both Phase-F blocks export with zero normalization nodes.")
     ap.add_argument("--dilations", default="1,2,4,8",
                     help="comma-separated dilation per trunk block")
     ap.add_argument("--total-steps", type=int, default=0, dest="total_steps",
@@ -570,6 +576,15 @@ def main() -> int:
                     help="AOSP lexicon for the selection beam")
     ap.add_argument("--val-jsonl", default="data/val_hwsfuto.jsonl", dest="val_jsonl",
                     help="canonical val split; supplies the beam targets")
+    ap.add_argument("--kd-teacher", default="", dest="kd_teacher",
+                    help="checkpoint whose log_emissions the student is distilled "
+                         "towards (Phase F). Must be one of OUR OWN checkpoints — "
+                         "distilling any FUTO output would re-import their licence.")
+    ap.add_argument("--kd-weight", type=float, default=0.0, dest="kd_weight",
+                    help="weight on the KD term; 0 disables distillation")
+    ap.add_argument("--kd-temp", type=float, default=2.0, dest="kd_temp",
+                    help="softmax temperature for the KD term (loss is scaled by "
+                         "T^2 so its gradient magnitude is temperature-invariant)")
     ap.add_argument("--patience", type=int, default=40)
     ap.add_argument("--seed", type=int, default=1234)
     ap.add_argument("--workers", type=int, default=8)
@@ -647,6 +662,55 @@ def main() -> int:
                                      block=args.block).to(device)
         print(f"EMA on (decay {args.ema_decay}); val and export use averaged weights")
 
+    # ── knowledge distillation (Phase F) ────────────────────────────────────────
+    # The teacher is one of OUR checkpoints (never FUTO weights or FUTO outputs —
+    # the licence defines models trained on their outputs as derivatives). It runs
+    # frozen in eval() on the same augmented batch as the student, so the two see
+    # the identical slot permutation and the identical geometric jitter; the KD
+    # term is therefore a per-frame comparison of two distributions over the SAME
+    # column assignment, which is what makes it well defined under permutation.
+    teacher = None
+    if args.kd_teacher and args.kd_weight > 0:
+        tpath = resolve(args.workdir, args.kd_teacher)
+        tck = torch.load(tpath, map_location=device, weights_only=True)
+        teacher = encoder_from_checkpoint(tck).to(device).eval()
+        teacher.load_state_dict(tck["model"])
+        for p in teacher.parameters():
+            p.requires_grad_(False)
+        args.kd_teacher_sha256 = sha256_file(tpath)
+        tp = sum(p.numel() for p in teacher.parameters())
+        print(f"KD: teacher {tpath} ch={teacher.ch} block={teacher.block} "
+              f"{tp / 1e6:.3f}M params, weight {args.kd_weight}, T {args.kd_temp}, "
+              f"sha {args.kd_teacher_sha256[:12]}")
+    elif args.kd_teacher or args.kd_weight > 0:
+        raise SystemExit("--kd-teacher and --kd-weight must be given together")
+
+    def kd_loss(student_log_e: torch.Tensor,
+                teacher_log_e: torch.Tensor) -> torch.Tensor:
+        """Temperature-scaled KL(teacher || student) over the emission head.
+
+        Both tensors are already log-softmaxed over the 65 columns, so they are
+        valid logits (they differ from the pre-softmax logits by a per-frame
+        constant, which the softmax removes). Dividing by ``T`` and re-normalizing
+        is therefore exactly the usual temperature-scaled distillation.
+
+        Taken over all 65 columns rather than the 27-wide sliced view, which is
+        the same quantity: the 38 pad columns sit at ``MASK_NEG`` for *both*
+        models, so ``exp(teacher/T)`` is exactly 0 there and they contribute
+        nothing to the sum — while the sum over the real key columns plus blank is
+        precisely the sliced view. ``MASK_NEG`` is finite (-1e4), so no ``-inf``
+        ever enters the expression.
+        """
+        t = args.kd_temp
+        tgt = torch.log_softmax(teacher_log_e / t, dim=-1)
+        src = torch.log_softmax(student_log_e / t, dim=-1)
+        # Summed over classes, averaged over frames AND batch, so the term is a
+        # per-frame KL in nats and sits on the same scale as the per-sequence CTC
+        # loss. `batchmean` would leave a factor T=32 in it and make any published
+        # --kd-weight meaningless outside this exact frame count.
+        kl = F.kl_div(src, tgt, reduction="sum", log_target=True)
+        return kl / (student_log_e.shape[0] * student_log_e.shape[1]) * (t * t)
+
     ctc = torch.nn.CTCLoss(blank=BLANK, zero_infinity=True)
     opt = torch.optim.AdamW(model.parameters(), lr=args.lr,
                             weight_decay=args.weight_decay)
@@ -707,21 +771,33 @@ def main() -> int:
     for epoch in range(start_epoch, args.epochs):
         t0 = time.time()
         running = 0.0
+        running_kd = 0.0
         nb = 0
         for feats, keys, mask, targets, tlens in train_dl:
             feats = feats.to(device, non_blocking=True)
             keys = keys.to(device, non_blocking=True)
             mask = mask.to(device, non_blocking=True)
             log_e, _, _ = model(feats, keys, mask)              # [B,32,65] fp32
+            kd = None
+            if teacher is not None:
+                with torch.no_grad():
+                    t_log_e, _, _ = teacher(feats, keys, mask)
+                kd = kd_loss(log_e, t_log_e)
             log_e = log_e.permute(1, 0, 2)                      # [T=32,B,65] for CTCLoss
             in_lens = torch.full((log_e.shape[1],), T_OUT, dtype=torch.long)
             loss = ctc(log_e, targets, in_lens, tlens)
+            # `running` stays the CTC term alone, so the logged `ctc_loss` remains
+            # comparable across every arm in the campaign whether KD is on or off.
+            ctc_val = float(loss.detach())
+            if kd is not None:
+                running_kd += float(kd.detach())
+                loss = loss + args.kd_weight * kd
             opt.zero_grad(set_to_none=True)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             opt.step()
             sched.step()
-            running += loss.item()
+            running += ctc_val
             nb += 1
             step += 1
             if ema is not None:
@@ -739,17 +815,21 @@ def main() -> int:
                 lr_now = sched.get_last_lr()[0]
                 secs = time.time() - t0
                 mean_loss = running / max(nb, 1)
-                running, nb, t0 = 0.0, 0, time.time()
+                mean_kd = running_kd / max(nb, 1)
+                running, running_kd, nb, t0 = 0.0, 0.0, 0, time.time()
                 evals += 1
                 bstr = (f"  beam t1 {bm[0]:5.2f} t3 {bm[1]:5.2f} t5 {bm[2]:5.2f} "
                         f"({beam_secs:.1f}s)" if bm else "")
-                print(f"epoch {epoch:3d} step {step:6d}  ctc_loss {mean_loss:.4f}  "
-                      f"val_greedy {acc * 100:.2f}%{bstr}  lr {lr_now:.2e}  "
-                      f"{secs:.1f}s", flush=True)
+                kdstr = f"  kd {mean_kd:.4f}" if teacher is not None else ""
+                print(f"epoch {epoch:3d} step {step:6d}  ctc_loss {mean_loss:.4f}"
+                      f"{kdstr}  val_greedy {acc * 100:.2f}%{bstr}  "
+                      f"lr {lr_now:.2e}  {secs:.1f}s", flush=True)
                 with open(metrics_path, "a") as mf:
                     rec = {"epoch": epoch, "step": step, "ctc_loss": mean_loss,
                            "val_greedy": acc, "lr": lr_now,
                            "seconds": round(secs, 3)}
+                    if teacher is not None:
+                        rec["kd_loss"] = mean_kd
                     if bm:
                         rec.update({"val_beam_t1": bm[0], "val_beam_t3": bm[1],
                                     "val_beam_t5": bm[2],

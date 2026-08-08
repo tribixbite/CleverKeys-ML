@@ -166,20 +166,95 @@ class KeyProximity(nn.Module):
 
 
 class ResBlock(nn.Module):
-    """Dilated temporal-conv residual block (the TCN body)."""
+    """Dilated temporal-conv residual block (the TCN body).
 
-    def __init__(self, ch: int, dilation: int) -> None:
+    :param batch_norm: use ``BatchNorm1d`` instead of ``GroupNorm``. Mathematically
+        a different normalizer during training, but in ``eval()`` it is a
+        per-channel affine over running statistics and therefore folds into the
+        preceding convolution at export (:meth:`CtcSwipeEncoder.fold_bn`), taking
+        the block from fourteen ONNX nodes to five. This is the ``resbn`` trunk.
+    """
+
+    def __init__(self, ch: int, dilation: int, batch_norm: bool = False) -> None:
         super().__init__()
         pad = 2 * dilation
         self.conv1 = nn.Conv1d(ch, ch, 5, padding=pad, dilation=dilation)
         self.conv2 = nn.Conv1d(ch, ch, 5, padding=pad, dilation=dilation)
-        self.norm1 = nn.GroupNorm(8, ch)
-        self.norm2 = nn.GroupNorm(8, ch)
+        norm = (lambda: nn.BatchNorm1d(ch)) if batch_norm \
+            else (lambda: nn.GroupNorm(8, ch))
+        self.norm1 = norm()
+        self.norm2 = norm()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         h = F.gelu(self.norm1(self.conv1(x)))
         h = self.norm2(self.conv2(h))
         return F.gelu(x + h)
+
+    def fold_bn(self) -> int:
+        """Fuse both ``Conv1d + BatchNorm1d`` pairs; 0 for the GroupNorm variant."""
+        from torch.nn.utils.fusion import fuse_conv_bn_eval
+        folded = 0
+        for cname, nname in (("conv1", "norm1"), ("conv2", "norm2")):
+            norm = getattr(self, nname)
+            if isinstance(norm, nn.BatchNorm1d):
+                setattr(self, cname, fuse_conv_bn_eval(getattr(self, cname), norm))
+                setattr(self, nname, nn.Identity())
+                folded += 1
+        return folded
+
+
+class DWSepBlock(nn.Module):
+    """Depthwise-separable residual block with **foldable** normalization (Phase F).
+
+    ``ResBlock`` costs two dense 5-tap convolutions per block, and ONNX-Runtime
+    profiling of the ch-128 ship candidate put **66 % of its 0.47 ms in ``Conv``**
+    (8 nodes at ~46 us each) with a further ~9 % in the ``GroupNorm`` decomposition
+    (``Reshape -> InstanceNormalization -> Reshape -> Mul -> Add``, five nodes per
+    norm, nine norms). This block attacks both:
+
+    * **Separable convolution.** ``dw`` is a 5-tap depthwise conv (``ch*5*T`` MACs)
+      and ``pw`` a 1x1 pointwise conv (``ch*ch*T``), so one block costs
+      ``ch*T*(5 + ch)`` MACs against ``ResBlock``'s ``2*ch*ch*5*T`` — 9.4x fewer at
+      ch 128.
+    * **BatchNorm instead of GroupNorm.** Batch statistics are meaningless at the
+      batch-1 inference this model ships at — but a BatchNorm in ``eval()`` mode uses
+      its *running* statistics, which are a per-channel affine and therefore fold
+      exactly into the preceding convolution's weight and bias
+      (:meth:`CtcSwipeEncoder.fold_bn`). After folding the exported graph contains
+      **no normalization node at all**, so the block's whole normalization cost at
+      inference is zero while training still gets a real normalizer.
+
+    Node budget per block after folding: ``Conv, Gelu, Conv, Add, Gelu`` — five,
+    against ``ResBlock``'s fourteen. At batch 1 on 32 frames, per-node dispatch is
+    a material share of the runtime, so the node count matters as much as the MACs.
+    """
+
+    def __init__(self, ch: int, dilation: int, kernel: int = 5) -> None:
+        super().__init__()
+        self.dw = nn.Conv1d(ch, ch, kernel, padding=(kernel // 2) * dilation,
+                            dilation=dilation, groups=ch)
+        self.norm1 = nn.BatchNorm1d(ch)
+        self.pw = nn.Conv1d(ch, ch, 1)
+        self.norm2 = nn.BatchNorm1d(ch)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        h = F.gelu(self.norm1(self.dw(x)))
+        h = self.norm2(self.pw(h))
+        return F.gelu(x + h)
+
+    def fold_bn(self) -> int:
+        """Fuse both ``Conv1d + BatchNorm1d`` pairs; -> number of folds performed."""
+        from torch.nn.utils.fusion import fuse_conv_bn_eval
+        folded = 0
+        if isinstance(self.norm1, nn.BatchNorm1d):
+            self.dw = fuse_conv_bn_eval(self.dw, self.norm1)
+            self.norm1 = nn.Identity()
+            folded += 1
+        if isinstance(self.norm2, nn.BatchNorm1d):
+            self.pw = fuse_conv_bn_eval(self.pw, self.norm2)
+            self.norm2 = nn.Identity()
+            folded += 1
+        return folded
 
 
 class GRN(nn.Module):
@@ -259,7 +334,9 @@ class CtcSwipeEncoder(nn.Module):
     :param feat_version: 1 = the original 8 path channels; 2 = 14 kinematic
         channels plus a learned reduction of the key-proximity field.
     :param block: ``"res"`` for the original two-conv residual block, ``"convnext"``
-        for the depthwise/GLU/GRN/SE block.
+        for the depthwise/GLU/GRN/SE block, ``"dwsep"`` for the Phase-F
+        depthwise-separable block with foldable BatchNorm, ``"resbn"`` for the
+        original dense block with its GroupNorms swapped for foldable BatchNorms.
     """
 
     def __init__(self, ch: int = 96, dilations: tuple = (1, 2, 4, 8),
@@ -274,11 +351,19 @@ class CtcSwipeEncoder(nn.Module):
         in_ch = feat_channels(feat_version)
         self.prox = KeyProximity() if feat_version >= 2 else None
         self.stem = nn.Conv1d(in_ch, ch, 5, stride=2, padding=2)  # 64 -> 32 frames
-        self.stem_norm = nn.GroupNorm(8, ch)
+        # dwsep pairs every conv with a BatchNorm so the whole normalizer folds away
+        # at export; the other blocks keep GroupNorm, which cannot fold (it is a
+        # function of the activations, not of running statistics).
+        foldable = block in ("dwsep", "resbn")
+        self.stem_norm = (nn.BatchNorm1d(ch) if foldable
+                          else nn.GroupNorm(8, ch))
         if block == "convnext":
             self.blocks = nn.ModuleList(ConvNeXtBlock(ch, d) for d in dilations)
+        elif block == "dwsep":
+            self.blocks = nn.ModuleList(DWSepBlock(ch, d) for d in dilations)
         else:
-            self.blocks = nn.ModuleList(ResBlock(ch, d) for d in dilations)
+            self.blocks = nn.ModuleList(
+                ResBlock(ch, d, batch_norm=(block == "resbn")) for d in dilations)
         self.coeff_head = nn.Linear(ch, NUM_COEFF)                # [B,32,64]
         self.lambda_head = nn.Linear(ch, 1)                       # positive gate
         self.blank_head = nn.Linear(ch, 1)                        # CTC blank logit
@@ -334,6 +419,29 @@ class CtcSwipeEncoder(nn.Module):
         logits = torch.cat([key_logits, blank], dim=-1)           # [B,32,65]
         log_emissions = F.log_softmax(logits, dim=-1)
         return log_emissions, coeff, lam
+
+    def fold_bn(self) -> int:
+        """Fuse every ``Conv1d + BatchNorm1d`` pair in the trunk (inference only).
+
+        A no-op for the ``res``/``convnext`` trunks, which use GroupNorm/LayerNorm.
+        Call on an ``eval()`` model immediately before export: the fused graph is
+        numerically equivalent (asserted in ``export_onnx.py``) and drops every
+        normalization node, which is worth more at batch 1 than its FLOP count
+        suggests because each folded ``BatchNormalization`` also removes a node
+        dispatch from a 32-frame graph.
+
+        :returns: number of Conv/BN pairs folded.
+        """
+        from torch.nn.utils.fusion import fuse_conv_bn_eval
+        folded = 0
+        if isinstance(self.stem_norm, nn.BatchNorm1d):
+            self.stem = fuse_conv_bn_eval(self.stem, self.stem_norm)
+            self.stem_norm = nn.Identity()
+            folded += 1
+        for blk in self.blocks:
+            if hasattr(blk, "fold_bn"):
+                folded += blk.fold_bn()
+        return folded
 
     @torch.no_grad()
     def key_embedding_matrix(self, centers: torch.Tensor) -> torch.Tensor:

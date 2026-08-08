@@ -35,6 +35,8 @@ from paths import DEFAULT_LAYOUT, DEFAULT_WORKDIR, resolve  # noqa: E402
 
 PARITY_TRIALS = 100
 PARITY_TOL = 1e-4
+#: Conv+BN folding is exact in exact arithmetic; this bounds the float32 residue.
+FOLD_TOL = 2e-3
 
 
 def main() -> int:
@@ -45,6 +47,9 @@ def main() -> int:
     ap.add_argument("--ckpt", default="ckpt/best.pt")
     ap.add_argument("--out", default="ctc_swipe_encoder.onnx")
     ap.add_argument("--opset", type=int, default=17)
+    ap.add_argument("--no-fold-bn", dest="fold_bn", action="store_false",
+                    help="export BatchNorm as its own node instead of folding "
+                         "it into the preceding conv (dwsep trunks only)")
     args = ap.parse_args()
 
     ckpt_path = resolve(args.workdir, args.ckpt)
@@ -58,6 +63,24 @@ def main() -> int:
     print(f"arch: ch={model.ch} block={model.block} feat_v{model.feat_version} "
           f"dil={model.dilations}  params "
           f"{sum(p.numel() for p in model.parameters())}")
+
+    # BatchNorm in eval mode is a per-channel affine, so it folds exactly into the
+    # preceding conv (Phase F). Verified numerically here rather than assumed: a
+    # silent fold error would show up as a small accuracy drift nothing else checks.
+    if args.fold_bn:
+        probe = (torch.rand(1, 2, T_IN), torch.rand(1, MAX_KEYS, 2),
+                 torch.zeros(1, MAX_KEYS, dtype=torch.bool))
+        probe[2][:, :num_letters] = True
+        with torch.no_grad():
+            before = model(*probe)[0]
+        n_folded = model.fold_bn()
+        if n_folded:
+            with torch.no_grad():
+                after = model(*probe)[0]
+            drift = float((after - before).abs().max())
+            print(f"folded {n_folded} Conv+BatchNorm pairs; max |Δlog_emissions| "
+                  f"= {drift:.2e}")
+            assert drift < FOLD_TOL, f"BN fold changed the output by {drift:.2e}"
 
     feats = torch.rand(1, 2, T_IN)
     keys = torch.rand(1, MAX_KEYS, 2)

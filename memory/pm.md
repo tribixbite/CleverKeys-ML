@@ -253,3 +253,23 @@ SEALED this phase regardless.
       ctc_golden.json so CtcParityTest actually runs (it currently fails its own
       file-existence assertion); NOTICE attribution for the FUTO corpus (MIT) and
       How-We-Swipe / OSF sj67f (MIT); re-measure latency on a phone little core.
+
+2026-08-08 — PHASE F (latency): target <=0.15 ms single-thread batch-1 CPU
+
+Goal: an ONNX encoder at <=0.15 ms (half the campaign-1 r2 artifact's 0.306 ms,
+~3x the ch128 ship candidate's 0.455 ms) that still clears all five FUTO-ceiling
+VAL bars (85.52/91.54/92.80, <=3 89.29, 4+ 83.57) at the E1 preset, 3-seed mean.
+test-2400 is SEALED-SPENT — Phase F evidence is val-only, by construction.
+
+- [x] Instruments: bench_latency.py (AUDIT_PREDECODE §7 protocol + ORT op profiling
+      + optimized-graph serialization), quantize_onnx.py (dynamic/static QDQ int8
+      with exclusion lists), arch_latency.py (price an architecture at random init
+      before training it).
+- [x] PROFILE: ch128 is 66 % Conv (8 nodes, ~46 us each), ~9 % GroupNorm
+      (Reshape/InstanceNorm/Reshape/Mul/Add = 5 nodes x 9 norms), rest is
+      per-node dispatch on a 32-frame graph. Node COUNT matters as much as MACs.
+- [x] F1 quantization measured (see PHASE_F.md).
+- [ ] F2 students: resbn (dense + foldable BatchNorm) and dwsep blocks, KD from
+      our own ch192 teacher.
+- [ ] F3 = F2 + static int8, if it pays.
+- [ ] Final candidate at 3 seeds + PHASE_F.md.
