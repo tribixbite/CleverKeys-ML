@@ -331,8 +331,11 @@ a better representation — and it is direct evidence that the cross-layout ceil
 here is set by *augmentation*, not by parameters. Scaling the model up would make
 transfer worse, not better.
 
-(`fast_resbn80` carries val-only evidence on en_qwerty — `PHASE_F.md` §11.1 — so it
-is not proposed as a ship swap here. The point is diagnostic.)
+(`fast_resbn80` was test-validated on en_qwerty in the second unsealing, landed
+concurrently at `368426b` — it clears all five test bars on the seed mean and on
+every seed. It is still not proposed as a ship swap *on this evidence*: the
+cross-layout numbers above are single-seed and their purpose here is diagnostic,
+not a selection.)
 
 Even so, resbn80 on dvorak (67.28) still loses to the geometric engine's 76.8 by
 9.5 pt. A better-transferring architecture narrows the dvorak gap; it does not close
