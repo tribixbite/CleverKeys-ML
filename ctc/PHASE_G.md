@@ -286,5 +286,102 @@ regenerated regardless and the divergence cost collapses. Decision:
 
 ## 6. (reserved — the per-model preset sweep)
 
-## 7. (reserved — pre-registration of the third unsealing; written and committed
-before any decode, only if §5 passes)
+## 7. Pre-registration — the third unsealing of test-2400 (`resbn80g`)
+
+**Written and committed before any decode runs.** Everything below is fixed at
+commit time; §7.5 (results) is appended afterwards and may not restate the plan.
+
+### 7.1 Authority, and why this is not iterative tuning
+
+**The user — who owns this benchmark — directed on 2026-08-09: "retrain and
+reexport and re-run tests on new onnx (resbn80)", gating the decode on the
+3-seed val seed-mean clearing all five val bars.** §4/§5 record that gate as
+passed, with margins ≥ the incumbent's on all five. That directive is the entire
+authority for this decode, exactly as the user's order was for the second
+unsealing (`PHASE_F.md` §16.1).
+
+Why this is a first decode, not a selection loop: the `phaseG-C80-188k-nokd`
+recipe (architecture, width, dilations, schedule, **no distillation**, coupled
+affine sampler, per-seed checkpoints selected on beam top-1 over a 5,000-row
+*val* prefix) and both decode presets were fixed on val-9918 and committed
+(§3–§6) before this section was written; the artifact sha256s are frozen in
+§7.3. No Phase-G model has ever touched test-2400. The result cannot feed back:
+Phase G's training is closed. What it costs is stated: **test-2400 will have
+been read three times**, and every future claim rests on a yet more worn split.
+
+### 7.2 The claim being registered
+
+> On the 2,400-row test split, `resbn80g` (279,346 params, 0.215 ms class),
+> decoded at the frozen presets below, is compared against (a) FUTO's published
+> encoder+refinement ceiling at FUTO's published preset — the published bar —
+> and (b) the val-tuned equal-footing bar from `FAIR_REMATCH.md` (config A
+> only, where that bar exists). A pass on (a) moves `resbn80g` to
+> **test-validated**. Comparison (b) is reported for calibration; §5 already
+> shows the val seed-mean does not clear the equal-footing val bar, so no
+> equal-footing superiority claim is being attempted, and none may be written
+> from this decode.
+
+### 7.3 The runs — hard cap, one decode each, no iteration
+
+**Maximum 2 configurations × 3 seeds = 6 decodes. Nothing more.** No fourth
+seed, no alternate preset, no `--limit` warm-up, no retry on partial output.
+
+| # | trie | preset | bar |
+|---|---|---|---|
+| A | AOSP STRIP 146,964 (`data/futo_en_wordlist.combined`) | E1 `1.05,1.1,0.2,0.3734,0.9882` | published `84.83/91.04/92.08/89.57/82.40`; equal-footing `87.12/92.29/92.96/89.94/85.68` |
+| B | app `en_enhanced.json` STRIP 98,081, `--vocab-kind json-strip` | **the adopted app preset** `0.9,4.0,0.25,0.25,0.9882` (§6) | trie-matched published-preset bar `84.92/91.54/92.96/89.57/82.52` (`PHASE_F.md` §15.2) |
+
+Config B decodes at the preset the app will actually ship (§6). Its bar is
+FUTO's published preset on the same trie, so config B is a tuned-vs-published
+comparison — **the asymmetry is declared here, in advance**: no val-tuned FUTO
+bar exists on the app trie, and config B supports a shipping-validation claim,
+not an equal-footing one.
+
+Frozen: beam width 100, top-k 8, OOV = miss, strata ≤3 n=815 / 4+ n=1,585,
+seed-mean over 1234/4321/7777, per-source split read from
+`cache/holdout_source_tags.json["test"]` without extra decodes. Artifacts
+(byte-identical to `ckpt/<arm>/ctc_swipe_encoder.onnx`, sliced-view parity
+100/100 at export):
+
+```
+330cadfbaa7334eaeaeab93762084181b70710fe9d59cbd69600a6de468fe1a0  resbn80g_s1234.onnx
+c9379c60a23bec4ca300512d2930b7a724aad91b761597972446a6577f5d5bab  resbn80g_s4321.onnx
+3e303d46abaff4bfe31779de35fb9fc81e63f1ae8fd5ab554a9db205f167191a  resbn80g_s7777.onnx
+```
+
+```bash
+for a in phaseG-C80-188k-nokd phaseG-C80-188k-nokd-s4321 phaseG-C80-188k-nokd-s7777; do
+  python3 eval_beam.py --onnx ckpt/$a/ctc_swipe_encoder.onnx \
+    --test data/test_hwsfuto.jsonl --preset 1.05,1.1,0.2,0.3734,0.9882 \
+    --beam-width 100 --top-k 8 --unseal-test --out ckpt/$a/test2400_g_e1.jsonl
+  python3 eval_beam.py --onnx ckpt/$a/ctc_swipe_encoder.onnx \
+    --test data/test_hwsfuto.jsonl --preset 0.9,4.0,0.25,0.25,0.9882 \
+    --vocab <app en_enhanced.json> --vocab-kind json-strip \
+    --beam-width 100 --top-k 8 --unseal-test --out ckpt/$a/test2400_g_app.jsonl
+done
+```
+
+### 7.4 Pre-stated expectations (so a miss cannot be re-explained afterwards)
+
+The val→test shift used is the one measured **on this same architecture class**
+at the second unsealing (`PHASE_F.md` §16.5: config A −0.18/−0.24/−0.07/+0.82/
+−0.68; config B −0.42/−0.11/−0.26/+0.25/−0.74), not the ch128/ch192 shift that
+§16.4 wrongly extrapolated from.
+
+* Config A val seed-mean 87.72/92.25/92.97/90.78/86.14 → **predicted test
+  87.54 / 92.01 / 92.90 / 91.60 / 85.46**, i.e. +2.71/+0.97/+0.82/+2.03/+3.06
+  over the published bar — expected pass on all five, t5 narrowest.
+* Config B val seed-mean (app preset: 88.76+88.69+88.18, 93.22+93.30+93.00,
+  94.18+94.02+93.99, 92.42+92.12+91.21, 86.86+86.90+86.61 → 88.54 / 93.17 /
+  94.06 / 91.92 / 86.79) → **predicted test 88.12 / 93.06 / 93.80 / 92.17 /
+  86.05**, i.e. +3.20/+1.52/+0.84/+2.60/+3.53 over the trie-matched bar —
+  expected pass on all five.
+* Against the equal-footing bar (config A only): predicted +0.42 t1, −0.28 t3,
+  −0.06 t5, +1.66 ≤3, −0.22 4+ — **expected NOT to clear all five**, matching
+  §5's val verdict. This is stated so a mixed result there cannot later be
+  spun either way.
+
+**A 4-of-5 result against the published bar is a failed gate** and will be
+written as one. All five numbers for both configurations are reported
+regardless of outcome; the tier moves only if config A clears all five on the
+seed mean *and* on every seed — the same rule as both prior unsealings.
