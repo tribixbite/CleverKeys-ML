@@ -44,6 +44,8 @@ from futo_decoder_ceiling import (ENC_BETA, ENC_BETA_PRUNE, ENC_GAMMA,  # noqa: 
                                   ENC_GAMMA_PRUNE, ENC_LAMBDA, futo_viterbi_beam)
 from futo_decoder_eval import (load_combined_vocab, load_layout,  # noqa: E402
                                load_test)
+from layout_aug import (DEFAULT_REAL_POOL, LayoutAugmenter,  # noqa: E402
+                        load_az_centers, warp_path)
 from model import (MAX_KEYS, T_OUT, CtcSwipeEncoder,  # noqa: E402
                    encoder_from_checkpoint, slice_head_torch)
 from paths import (DEFAULT_LAYOUT, DEFAULT_WORKDIR, resolve,  # noqa: E402
@@ -63,6 +65,29 @@ AFFINE_TRIES = 10
 PATH_NOISE = 0.005
 CENTER_NOISE = 0.01
 PERMUTE_P = 0.5
+
+
+def affine_axis_bounds(centers: np.ndarray) -> List[Tuple[float, float, float]]:
+    """Per-axis ``(lo, hi, s_hi)`` for the coupled affine sampler (Phase G).
+
+    A scale about 0.5 with translate ``|t| <= TRANS_ABS`` keeps every center in
+    [0,1] iff all three hold (lo/hi = min/max center on the axis):
+      span:  (hi - lo) * s <= 1
+      left:  (0.5 - lo) * s <= 0.5 + TRANS_ABS
+      right: (hi - 0.5) * s <= 0.5 + TRANS_ABS
+    Phase H computes these per sampled geometry, not just for the canonical
+    layout, so the shared affine stays exact under layout resampling.
+    """
+    out = []
+    for ax in range(2):
+        lo, hi = float(centers[:, ax].min()), float(centers[:, ax].max())
+        s_max = 1.0 / max(hi - lo, 1e-9)
+        if lo < 0.5:
+            s_max = min(s_max, (0.5 + TRANS_ABS) / (0.5 - lo))
+        if hi > 0.5:
+            s_max = min(s_max, (0.5 + TRANS_ABS) / (hi - 0.5))
+        out.append((lo, hi, max(SCALE_LO, min(SCALE_HI, s_max))))
+    return out
 
 
 def load_layout_centers(path: Path) -> np.ndarray:
@@ -102,7 +127,8 @@ class SwipeDataset(Dataset):
     def __init__(self, npz_path, centers: np.ndarray, augment: bool,
                  permute: bool = True, path_offset_sigma: float = 0.0,
                  path_scale_sigma: float = 0.0,
-                 affine_sampler: str = "coupled") -> None:
+                 affine_sampler: str = "coupled",
+                 layout_aug: "Optional[LayoutAugmenter]" = None) -> None:
         paths = [npz_path] if isinstance(npz_path, (str, Path)) else list(npz_path)
         feats, tgts, tlens = [], [], []
         for p in paths:
@@ -125,32 +151,26 @@ class SwipeDataset(Dataset):
             raise ValueError(f"affine_sampler must be 'coupled' or 'legacy', "
                              f"got {affine_sampler!r}")
         self.affine_sampler = affine_sampler
-        # Phase G: per-axis feasible scale ceiling for the coupled sampler.
-        # A scale about 0.5 with translate |t| <= TRANS_ABS keeps every center in
-        # [0,1] iff all three hold (lo/hi = min/max center on the axis):
-        #   span:  (hi - lo) * s <= 1
-        #   left:  (0.5 - lo) * s <= 0.5 + TRANS_ABS
-        #   right: (hi - 0.5) * s <= 0.5 + TRANS_ABS
-        # For en_qwerty x (cx 0.05..0.95) the span bound binds at s = 1/0.90 =
-        # 1.111 — the nominal SCALE_HI = 1.15 is geometrically infeasible in x on
-        # this layout under center containment, at ANY translate. The coupled
-        # sampler therefore realizes U(SCALE_LO, min(SCALE_HI, s_max)) exactly,
-        # instead of the legacy rejection loop whose survivors were biased toward
-        # compression (realized sx mean 0.955, ALT_LAYOUT_EVAL.md §7.2b).
-        self._axis_bounds = []
-        for ax in range(2):
-            lo, hi = float(centers[:, ax].min()), float(centers[:, ax].max())
-            s_max = 1.0 / max(hi - lo, 1e-9)
-            if lo < 0.5:
-                s_max = min(s_max, (0.5 + TRANS_ABS) / (0.5 - lo))
-            if hi > 0.5:
-                s_max = min(s_max, (0.5 + TRANS_ABS) / (hi - 0.5))
-            self._axis_bounds.append((lo, hi, max(SCALE_LO, min(SCALE_HI, s_max))))
+        # Phase H: optional per-sample geometry resampler (layout_aug.py). The
+        # canonical bounds are precomputed; alternative geometries get theirs
+        # computed per draw (26x2 min/max — negligible).
+        self.layout_aug = layout_aug
+        # Phase G: per-axis feasible scale ceiling for the coupled sampler; see
+        # affine_axis_bounds. For en_qwerty x (cx 0.05..0.95) the span bound
+        # binds at s = 1/0.90 = 1.111 — the nominal SCALE_HI = 1.15 is
+        # geometrically infeasible in x on this layout under center containment,
+        # at ANY translate. The coupled sampler realizes
+        # U(SCALE_LO, min(SCALE_HI, s_max)) exactly, instead of the legacy
+        # rejection loop whose survivors were biased toward compression
+        # (realized sx mean 0.955, ALT_LAYOUT_EVAL.md §7.2b).
+        self._axis_bounds = affine_axis_bounds(centers)
 
     def __len__(self) -> int:
         return len(self.tgt_len)
 
-    def _sample_affine(self) -> Tuple[float, float, float, float, bool]:
+    def _sample_affine(self, centers: np.ndarray,
+                       axis_bounds: List[Tuple[float, float, float]]
+                       ) -> Tuple[float, float, float, float, bool]:
         """Sample an affine that keeps every key center in [0,1].
 
         ``coupled`` (Phase G, the default): per axis, draw the scale uniformly
@@ -171,7 +191,7 @@ class SwipeDataset(Dataset):
         """
         if self.affine_sampler == "coupled":
             out = []
-            for lo, hi, s_hi in self._axis_bounds:
+            for lo, hi, s_hi in axis_bounds:
                 s = float(np.random.uniform(SCALE_LO, s_hi))
                 t_lo = max(-TRANS_ABS, -((lo - 0.5) * s + 0.5))
                 t_hi = min(TRANS_ABS, 0.5 - (hi - 0.5) * s)
@@ -180,7 +200,7 @@ class SwipeDataset(Dataset):
                 out.append((s, float(np.random.uniform(t_lo, t_hi))))
             (sx, tx), (sy, ty) = out
             return sx, sy, tx, ty, bool(np.random.rand() < MIRROR_P)
-        cx, cy = self.centers[:, 0], self.centers[:, 1]
+        cx, cy = centers[:, 0], centers[:, 1]
         for _ in range(AFFINE_TRIES):
             sx, sy = np.random.uniform(SCALE_LO, SCALE_HI, 2)
             tx, ty = np.random.uniform(-TRANS_ABS, TRANS_ABS, 2)
@@ -193,10 +213,24 @@ class SwipeDataset(Dataset):
     def __getitem__(self, i: int):
         feats = self.features[i].astype(np.float32).copy()          # [2,64]
         target = self.tgt_flat[self.tgt_off[i]:self.tgt_off[i + 1]].copy()
-        centers = self.centers.copy()                               # [K,2]
+        axis_bounds = self._axis_bounds
+
+        # Phase H: with probability p, re-target the sample onto an alternative
+        # geometry — warp the cached path onto the same word's key centers there
+        # and swap the key centers the model is shown. Runs BEFORE the shared
+        # affine, so the affine/noise/permutation stack applies identically to
+        # canonical and resampled geometries.
+        base_centers = self.centers
+        if self.augment and self.layout_aug is not None:
+            alt = self.layout_aug.sample_geometry()
+            if alt is not None:
+                feats = warp_path(feats, target, self.centers, alt)
+                base_centers = alt
+                axis_bounds = affine_axis_bounds(alt)
+        centers = base_centers.copy()                               # [K,2]
 
         if self.augment:
-            sx, sy, tx, ty, mirror = self._sample_affine()
+            sx, sy, tx, ty, mirror = self._sample_affine(base_centers, axis_bounds)
             for arr_x, arr_y in ((feats[0], feats[1]),
                                  (centers[:, 0], centers[:, 1])):
                 arr_x[:] = (arr_x - 0.5) * sx + 0.5 + tx
@@ -618,6 +652,23 @@ def main() -> int:
                          "bias); 'legacy' is the pre-G rejection loop that "
                          "silently truncated sx (ALT_LAYOUT_EVAL.md §7.2b), kept "
                          "for reproducing Phase A–F arms")
+    ap.add_argument("--layout-alt-p", type=float, default=0.0, dest="layout_alt_p",
+                    help="Phase H: probability a training sample is re-targeted "
+                         "onto an alternative keyboard geometry (path warped via "
+                         "layout_aug.warp_path, key centers swapped). 0 = off. "
+                         "The 1-p remainder stays canonical QWERTY")
+    ap.add_argument("--layout-synth-frac", type=float, default=2.0 / 3.0,
+                    dest="layout_synth_frac",
+                    help="Phase H: within re-targeted samples, fraction drawn "
+                         "from synth_geometry() (random letter arrangement on a "
+                         "plausible 3/4-row lattice); the rest come uniformly "
+                         "from --layout-alt-real")
+    ap.add_argument("--layout-alt-real", default=",".join(DEFAULT_REAL_POOL),
+                    dest="layout_alt_real",
+                    help="comma-separated futo layout names for the real pool. "
+                         "dvorak is EXCLUDED by default — it is the held-out "
+                         "transfer probe (ALT_LAYOUT_EVAL.md) — and qwerty is "
+                         "the canonical geometry. Empty = synthetic only")
     ap.add_argument("--ema-decay", type=float, default=0.0, dest="ema_decay",
                     help="C2: EMA decay for the evaluated/exported weights (0 = off)")
     ap.add_argument("--beam-val-rows", type=int, default=2000, dest="beam_val_rows",
@@ -692,10 +743,25 @@ def main() -> int:
     for p in train_npz:
         if not p.exists():
             raise SystemExit(f"--train-npz: missing {p}")
+    layout_aug = None
+    if args.layout_alt_p > 0.0:
+        real_names = [n.strip() for n in args.layout_alt_real.split(",") if n.strip()]
+        if "dvorak" in real_names:
+            # Not an error — but it must never happen silently: dvorak is the
+            # held-out transfer probe and training on it voids that eval.
+            print("⚠ layout-alt real pool INCLUDES dvorak — the dvorak eval is "
+                  "no longer a held-out transfer test")
+        layout_dir = Path(__file__).resolve().parent / "layouts"
+        reals = [load_az_centers(layout_dir / f"futo_{n}.json") for n in real_names]
+        layout_aug = LayoutAugmenter(args.layout_alt_p, args.layout_synth_frac,
+                                     reals)
+        print(f"layout-alt: p={args.layout_alt_p} synth_frac="
+              f"{args.layout_synth_frac:.3f} real pool={real_names or 'none'}")
     train_ds = SwipeDataset(train_npz, centers, augment=True,
                             path_offset_sigma=args.path_offset_sigma,
                             path_scale_sigma=args.path_scale_sigma,
-                            affine_sampler=args.affine_sampler)
+                            affine_sampler=args.affine_sampler,
+                            layout_aug=layout_aug)
     val_ds = SwipeDataset(cache_dir / "val.npz", centers, augment=False)
     train_dl = DataLoader(train_ds, args.batch, shuffle=True, collate_fn=collate,
                           num_workers=args.workers, pin_memory=True, drop_last=True,
