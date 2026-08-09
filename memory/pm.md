@@ -540,3 +540,39 @@ ledger in test2400_seal.json["test-2400"]["unsealings"].
       the untuned comparison.
 - [ ] NOT verified by me: the resbn80 config-B bar (app 98,081 trie) from PHASE_F
       15.2. Out of scope here; only config A was re-checked.
+
+2026-08-09 — Phase G (affine-sampler fix + upgraded resbn student recipe)
+
+User directive (2026-08-09): fix the latent affine-sampler truncation, upgrade the
+recipe, retrain the resbn80-class ship candidate to push BOTH accuracy and latency,
+per-model FULL preset sweep, export+validate winner, and a PRE-AUTHORIZED third
+unsealing of test-2400 ("retrain and reexport and re-run tests on new onnx
+(resbn80)") gated on the 3-seed val seed-mean clearing all five val bars.
+
+- [ ] G0 fix train.py affine sampler: couple translate to sampled scale, sample
+      uniformly over the per-axis feasible region (acceptance 1.0 by construction);
+      keep legacy path behind --affine-sampler legacy; verify before/after realized
+      scale distribution + acceptance rate; document.
+- [ ] G0b train.py: comma-separated --kd-teacher -> ensemble teacher
+      (log of arithmetic-mean prob via logsumexp - log n).
+- [ ] G1 lever decomposition at ch80/188k, seed 1234, paired arms:
+      A legacy sampler (schedule lever vs phaseF-I-resbn80x4@94k),
+      B coupled sampler (affine lever vs A),
+      C no-KD (KD ablation vs B — never measured in F),
+      D 3-seed ch192 ensemble teacher (teacher lever vs B).
+- [ ] G2 winner recipe -> seeds 4321/7777; val gate: all five val bars with
+      margins >= current resbn80 seed-mean (87.47/92.13/92.89/90.35/85.98).
+- [ ] G3 latency push: resbn72 (and optionally 64) at the winner recipe;
+      promote to 3 seeds only if s1234 clears all five.
+- [ ] G4 per-model FULL preset sweep (wide, tune 0:4959 / confirm 4959:9918,
+      boundary-reject) on AOSP trie + app-trie lambda check; decide preset;
+      golden-fixture implications documented.
+- [ ] G5 export 3 seeds, sliced-view parity 100/100, bench_latency idle,
+      artifacts/ + sha256.
+- [ ] G6 IF val gate passes: pre-register third unsealing in PHASE_G.md (commit
+      BEFORE decode; max 1 model x 3 seeds x <=2 lexicons, frozen preset, numeric
+      expectations), decode test-2400 once per registered run via --unseal-test,
+      append seal ledger, report vs published bar 84.83/91.04/92.08/89.57/82.40
+      AND equal-footing bar 87.12/92.29/92.96/89.94/85.68. If val fails: stop, report.
+- [ ] G7 PHASE_G.md (lever table, affine before/after, preset decision),
+      RESULTS.md update with evidence tiers, pm.md close-out.
