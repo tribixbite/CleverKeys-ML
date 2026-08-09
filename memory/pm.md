@@ -385,3 +385,24 @@ Artifacts: fast_resbn72_s{1234,4321,7777}, fast_resbn80_s{1234,4321,7777},
  PHASE_F.md 9. STILL VAL-ONLY: seal spent, ch128/ch192 remain the test anchors.
 - [ ] Only unmeasured lever left: the no-KD ablation (PHASE_F 11.3). KD weight also
       never swept. Everything else in the phase brief has been run.
+
+2026-08-08 — FUTO WEIGHTS VERIFICATION (independent re-run of the bar on this box)
+
+- [x] Download FUTO's real weights (HF `futo-org/futo-swipe`) and re-run the app repo's
+      harness on val-9918 + test-2400 to verify the committed bar numbers on x86_64.
+      sha256 of both .pte VERIFIED against the documented values (encoder 725242ba…,
+      decoder 01eaf16a…). ExecuTorch 1.2.0 cp310 manylinux x86_64 + torch 2.11.0+cpu
+      runs both XNNPACK-delegated .pte natively — no proot/aarch64 needed.
+- [x] test-2400 at the pre-fix DROP trie (131,544, the config of the committed table):
+      ceiling 84.83/91.04/92.08, <=3 89.57, 4+ 82.40, in-vocab 88.48/94.96/96.05,
+      greedy 69.12, macro 91.39 — EXACT on every published digit. Floor 79.25/87.71,
+      strata 82.45/77.60, macro 83.28 exact; only t5 +0.04 and greedy -0.13.
+- [x] val-9918 at the STRIP trie (146,964, the config the val row used):
+      ceiling 85.54/91.52/92.78, <=3 89.29, 4+ 83.60 vs the bar 85.52/91.54/92.80/
+      89.29/83.57 -> +0.02/-0.02/-0.02/0.00/+0.03. All five bar metrics inside 0.04 pt.
+- VERDICT: the bar is CONFIRMED on this hardware; no bar metric moves enough to change
+      any Phase-E/F gate outcome (smallest margin was t5 +0.28, drift is 0.02).
+- LICENSE: FUTO weights were RUN for benchmarking only. No FUTO output entered any
+      training loop, was saved as training data, or influenced model/preset selection.
+- Report: `ctc/FUTO_WEIGHTS_VERIFICATION.md`. Scratch run tree (not committed):
+      `~/ctc-train/futo_verify/` (venv, artifacts, verbatim harness copies, per-trace out).
