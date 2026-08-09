@@ -328,8 +328,9 @@ same lexicons, same row sets:
 The 2.5×-smaller model is **behind on en_qwerty and ahead on every single
 alt-layout**, and its margin grows monotonically with how hard the layout is
 (+1.03 on the easiest, +4.24 on the hardest). This inverts the en_qwerty ordering:
-Phase F measured resbn80 at −0.61 t1 against ch 128 on val-9918, and that ranking
-reverses the moment the keyboard changes.
+Phase F measured resbn80 at −0.61 t1 against ch 128 on val-9918, and the ranking
+reverses the moment the keyboard changes. (The −0.47 measured here on val[0:2000]
+reproduces that direction independently.)
 
 The reading that fits this and §7 together: **ch 128's extra capacity went into
 QWERTY-specific structure that does not transfer.** It is a memorization effect, not
@@ -337,11 +338,15 @@ a better representation — and it is direct evidence that the cross-layout ceil
 here is set by *augmentation*, not by parameters. Scaling the model up would make
 transfer worse, not better.
 
-(`fast_resbn80` was test-validated on en_qwerty in the second unsealing, landed
-concurrently at `368426b` — it clears all five test bars on the seed mean and on
-every seed. It is still not proposed as a ship swap *on this evidence*: the
-cross-layout numbers above are single-seed and their purpose here is diagnostic,
-not a selection.)
+(**`fast_resbn80`'s en_qwerty standing is not settled and is not this document's
+to settle** — it moved twice while this evaluation was being written, from
+val-only to test-validated at `368426b`, then to *fails three of five against the
+val-tuned FUTO bar* at `8d7462c`, which found its five-of-five pass to be an
+artifact of an untuned opponent. `RESULTS.md` is the authority; nothing here
+should be read as a claim about it. **The finding above is a within-this-document
+paired comparison** — the same corpora, rows, preset, lexicons and harness for
+both models — so it is unaffected by how the en_qwerty question resolves. It is
+diagnostic, not a ship recommendation: the cross-layout numbers are single-seed.)
 
 Even so, resbn80 on dvorak (67.28) still loses to the geometric engine's 76.8 by
 9.5 pt. A better-transferring architecture narrows the dvorak gap; it does not close
