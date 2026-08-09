@@ -549,30 +549,27 @@ per-model FULL preset sweep, export+validate winner, and a PRE-AUTHORIZED third
 unsealing of test-2400 ("retrain and reexport and re-run tests on new onnx
 (resbn80)") gated on the 3-seed val seed-mean clearing all five val bars.
 
-- [ ] G0 fix train.py affine sampler: couple translate to sampled scale, sample
+- [x] G0 fix train.py affine sampler (coupled; acceptance 1.0; legacy kept; affine_stats.py verifies: legacy sx mean 0.9554/31.4% rejects -> coupled uniform [0.85,1.1111] mean 0.9807): couple translate to sampled scale, sample
       uniformly over the per-axis feasible region (acceptance 1.0 by construction);
       keep legacy path behind --affine-sampler legacy; verify before/after realized
       scale distribution + acceptance rate; document.
-- [ ] G0b train.py: comma-separated --kd-teacher -> ensemble teacher
-      (log of arithmetic-mean prob via logsumexp - log n).
-- [ ] G1 lever decomposition at ch80/188k, seed 1234, paired arms:
+- [x] G0b ensemble --kd-teacher implemented (logsumexp - log n).
+- [x] G1 lever decomposition DONE (full val, E1): A legacy+KD 87.46; B coupled+KD 87.52; C coupled+noKD 88.04; D ensemble-KD 87.07; E legacy+noKD 87.94. KD is -0.5 t1 (first-ever ablation); affine fix +0.06/+0.10; 188k at ch80+KD only +0.05. at ch80/188k, seed 1234, paired arms:
       A legacy sampler (schedule lever vs phaseF-I-resbn80x4@94k),
       B coupled sampler (affine lever vs A),
       C no-KD (KD ablation vs B — never measured in F),
       D 3-seed ch192 ensemble teacher (teacher lever vs B).
-- [ ] G2 winner recipe -> seeds 4321/7777; val gate: all five val bars with
-      margins >= current resbn80 seed-mean (87.47/92.13/92.89/90.35/85.98).
+- [x] G2 winner (coupled+noKD+188k, resbn80g) 3 seeds: val seed-mean 87.72/92.25/92.97/90.78/86.14 -- all five bars, every seed, margins >= incumbent on all five. Equal-footing val bar NOT cleared on seed mean (t3 -0.06, t5 -0.06, 4+ -0.15).
 - [ ] G3 latency push: resbn72 (and optionally 64) at the winner recipe;
       promote to 3 seeds only if s1234 clears all five.
-- [ ] G4 per-model FULL preset sweep (wide, tune 0:4959 / confirm 4959:9918,
-      boundary-reject) on AOSP trie + app-trie lambda check; decide preset;
-      golden-fixture implications documented.
+- [x] G4 preset sweep: AOSP converges to E1 exactly (keep); app trie interior winner 0.9/4.0/0.25/0.25/0.9882 (+1.39 t1 holdout-confirmed) -- ADOPTED as app preset; golden fixture regenerated from resbn80g_s1234 at that preset (sha ce3b5456...).
 - [ ] G5 export 3 seeds, sliced-view parity 100/100, bench_latency idle,
       artifacts/ + sha256.
-- [ ] G6 IF val gate passes: pre-register third unsealing in PHASE_G.md (commit
-      BEFORE decode; max 1 model x 3 seeds x <=2 lexicons, frozen preset, numeric
-      expectations), decode test-2400 once per registered run via --unseal-test,
-      append seal ledger, report vs published bar 84.83/91.04/92.08/89.57/82.40
-      AND equal-footing bar 87.12/92.29/92.96/89.94/85.68. If val fails: stop, report.
+- [x] G6 third unsealing: pre-registered (commit 46aecb1) then decoded 6 runs.
+      Config A (AOSP/E1) test seed-mean 87.68/92.18/92.82/90.80/86.08 -- ALL FIVE
+      published bars, every seed -> resbn80g TEST-VALIDATED. Config B (app trie,
+      app preset) 88.14/93.22/93.90/91.86/86.23 -- all five, every seed, worst-seed
+      t5 margin +0.75. Equal-footing: 3 of 5, McNemar unresolved every seed (+17
+      p.17/+23 p.052/+0 p1.0) -- level, no claim. Ledger appended (unsealings[2]).
 - [ ] G7 PHASE_G.md (lever table, affine before/after, preset decision),
       RESULTS.md update with evidence tiers, pm.md close-out.
