@@ -108,7 +108,36 @@ accuracy; the honest prior from the small distribution shift is "small".
 
 ## 3. The lever table — paired single-seed arms at ch 80 / 188 k
 
-*(results pending — arms A–D training)*
+All arms: `resbn:80:1,2,4,8`, embed_hid 96, T3 + 3× HWS, 188,000 steps, batch
+256, lr 3e-3, wd 0.01, warmup 1,000, 5,000-row beam-t1 selection, seed 1234.
+Full val-9918, E1 preset, decoded through the exported ONNX graph. KD (where on)
+is teacher `phaseE-FINAL-s1234`, weight 1.0, temp 2 — the exact Phase-F setting.
+
+| arm | sampler | KD | t1 | t3 | t5 | ≤3 | 4+ |
+|---|---|---|---|---|---|---|---|
+| `phaseF-I-resbn80x4` @94k (the shipping baseline) | legacy | ch192 s1234 | 87.41 | 92.18 | 92.85 | 90.38 | 85.86 |
+| **A** `phaseG-A80-188k-legacy` | legacy | ch192 s1234 | 87.46 | 92.28 | 92.95 | 90.76 | 85.74 |
+| **B** `phaseG-B80-188k` | **coupled** | ch192 s1234 | 87.52 | 92.15 | 92.76 | 91.03 | 85.69 |
+| **C** `phaseG-C80-188k-nokd` | **coupled** | **none** | **88.04** | **92.39** | **93.18** | **91.30** | **86.35** |
+
+Paired reads (single seed; sign-consistency across the five metrics is the
+evidence, not any one 0.1):
+
+* **188 k schedule at ch 80** (A − baseline): **+0.05 t1** — the +0.5 measured
+  at ch 56/64 (`PHASE_F.md` §13) does *not* transfer to ch 80 *with KD on*.
+* **Affine fix, KD on** (B − A): +0.06 t1, −0.13 t3, −0.19 t5, +0.27 ≤3 —
+  mixed, ~null, as the small distribution repair (§1.3) predicted.
+* **KD ablation** (C − B): **+0.52 t1, +0.24 t3, +0.42 t5, +0.27 ≤3, +0.66 4+
+  — dropping distillation wins on every metric.** Phase F's largest stated
+  evidence hole (§11.3: "the distillation contribution is unmeasured") resolves
+  in the direction nobody assumed: at ch 80 / 188 k, KD from the ch 192 teacher
+  was *capping* the student, not helping it. The selection-prefix beam
+  (published preset) ranked C *last* of the three (84.84 vs 86.02/85.76) while
+  full-val E1 ranks it first by half a point — one more instance of the
+  selection-metric/report-metric divergence Phase B first flagged.
+
+*(pending: D — ensemble teacher; E — legacy + no-KD, the fourth factorial cell,
+which attributes C's gain between the sampler and the KD removal.)*
 
 ---
 
