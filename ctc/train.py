@@ -13,8 +13,11 @@ Audit fixes applied here:
   * #8  run isolation: ckpt/<run-name>/{last.pt,best.pt,metrics.jsonl}.
   * #10 epoch budget re-based on the measured ~5 s/epoch (defaults 300/40).
   * #12 warmup uses (step+1)/warmup so the first step does not run at lr 0.
-  * #13 the shared affine is rejection-sampled to keep every transformed key
-        center inside [0,1]; centers are never clipped.
+  * #13 the shared affine keeps every transformed key center inside [0,1];
+        centers are never clipped. Phase G replaced the rejection loop (which
+        silently truncated + biased the x-scale, ALT_LAYOUT_EVAL.md §7.2b) with
+        a coupled sampler that is exact by construction; --affine-sampler legacy
+        reproduces the Phase A–F behaviour.
   * #14 persistent_workers + explicit NpzFile close.
   * #16 --workdir pathing; layout defaults to the script's own directory.
 """
@@ -51,7 +54,8 @@ BLANK = MAX_KEYS  # 64 — full-head blank index (the Kotlin slice relocates it 
 #: Args that define the architecture; a --resume must agree on all of them.
 ARCH_ARGS = ("ch", "embed_hid", "feat_version", "block", "dilations")
 
-#: Affine augmentation bounds (audit fix #13 rejection-samples within these).
+#: Affine augmentation bounds (audit fix #13; Phase G samples the feasible
+#: sub-region of these exactly — see SwipeDataset._sample_affine).
 SCALE_LO, SCALE_HI = 0.85, 1.15
 TRANS_ABS = 0.05
 MIRROR_P = 0.25
@@ -97,7 +101,8 @@ class SwipeDataset(Dataset):
 
     def __init__(self, npz_path, centers: np.ndarray, augment: bool,
                  permute: bool = True, path_offset_sigma: float = 0.0,
-                 path_scale_sigma: float = 0.0) -> None:
+                 path_scale_sigma: float = 0.0,
+                 affine_sampler: str = "coupled") -> None:
         paths = [npz_path] if isinstance(npz_path, (str, Path)) else list(npz_path)
         feats, tgts, tlens = [], [], []
         for p in paths:
@@ -116,17 +121,65 @@ class SwipeDataset(Dataset):
         self.path_offset_sigma = path_offset_sigma
         self.path_scale_sigma = path_scale_sigma
         self.k = centers.shape[0]
+        if affine_sampler not in ("coupled", "legacy"):
+            raise ValueError(f"affine_sampler must be 'coupled' or 'legacy', "
+                             f"got {affine_sampler!r}")
+        self.affine_sampler = affine_sampler
+        # Phase G: per-axis feasible scale ceiling for the coupled sampler.
+        # A scale about 0.5 with translate |t| <= TRANS_ABS keeps every center in
+        # [0,1] iff all three hold (lo/hi = min/max center on the axis):
+        #   span:  (hi - lo) * s <= 1
+        #   left:  (0.5 - lo) * s <= 0.5 + TRANS_ABS
+        #   right: (hi - 0.5) * s <= 0.5 + TRANS_ABS
+        # For en_qwerty x (cx 0.05..0.95) the span bound binds at s = 1/0.90 =
+        # 1.111 — the nominal SCALE_HI = 1.15 is geometrically infeasible in x on
+        # this layout under center containment, at ANY translate. The coupled
+        # sampler therefore realizes U(SCALE_LO, min(SCALE_HI, s_max)) exactly,
+        # instead of the legacy rejection loop whose survivors were biased toward
+        # compression (realized sx mean 0.955, ALT_LAYOUT_EVAL.md §7.2b).
+        self._axis_bounds = []
+        for ax in range(2):
+            lo, hi = float(centers[:, ax].min()), float(centers[:, ax].max())
+            s_max = 1.0 / max(hi - lo, 1e-9)
+            if lo < 0.5:
+                s_max = min(s_max, (0.5 + TRANS_ABS) / (0.5 - lo))
+            if hi > 0.5:
+                s_max = min(s_max, (0.5 + TRANS_ABS) / (hi - 0.5))
+            self._axis_bounds.append((lo, hi, max(SCALE_LO, min(SCALE_HI, s_max))))
 
     def __len__(self) -> int:
         return len(self.tgt_len)
 
     def _sample_affine(self) -> Tuple[float, float, float, float, bool]:
-        """Rejection-sample an affine that keeps every key center in [0,1].
+        """Sample an affine that keeps every key center in [0,1].
 
-        Falls back to the identity affine after ``AFFINE_TRIES`` failures, so a
-        center is never clipped into a neighbour (audit fix #13). Mirroring maps
-        [0,1] onto itself and therefore never affects acceptance.
+        ``coupled`` (Phase G, the default): per axis, draw the scale uniformly
+        over the *feasible* range precomputed in ``__init__``, then draw the
+        translate uniformly over the exact interval that keeps the transformed
+        centers inside [0,1], intersected with the nominal ±``TRANS_ABS`` window.
+        Acceptance is 1.0 by construction and the realized scale is uniform over
+        the feasible range — no compression bias, no identity fallback.
+
+        ``legacy`` (pre-G, kept for reproduction of Phase A–F runs):
+        rejection-sample scale and translate independently; fall back to the
+        identity affine after ``AFFINE_TRIES`` failures (audit fix #13). On
+        en_qwerty this silently truncated and biased the x-scale (accepted sx
+        mean 0.955, max 1.111, 31.5 % first-draw rejects — ALT_LAYOUT_EVAL.md
+        §7.2b).
+
+        Mirroring maps [0,1] onto itself and never affects acceptance.
         """
+        if self.affine_sampler == "coupled":
+            out = []
+            for lo, hi, s_hi in self._axis_bounds:
+                s = float(np.random.uniform(SCALE_LO, s_hi))
+                t_lo = max(-TRANS_ABS, -((lo - 0.5) * s + 0.5))
+                t_hi = min(TRANS_ABS, 0.5 - (hi - 0.5) * s)
+                if t_hi < t_lo:                     # degenerate layout guard
+                    t_lo = t_hi = 0.5 * (t_lo + t_hi)
+                out.append((s, float(np.random.uniform(t_lo, t_hi))))
+            (sx, tx), (sy, ty) = out
+            return sx, sy, tx, ty, bool(np.random.rand() < MIRROR_P)
         cx, cy = self.centers[:, 0], self.centers[:, 1]
         for _ in range(AFFINE_TRIES):
             sx, sy = np.random.uniform(SCALE_LO, SCALE_HI, 2)
@@ -557,6 +610,14 @@ def main() -> int:
     ap.add_argument("--path-scale-sigma", type=float, default=0.0,
                     dest="path_scale_sigma",
                     help="C1: per-trace gaussian scale jitter on the PATH only")
+    ap.add_argument("--affine-sampler", default="coupled",
+                    choices=("coupled", "legacy"), dest="affine_sampler",
+                    help="Phase G: 'coupled' samples the shared-affine scale "
+                         "uniformly over the per-axis feasible range and couples "
+                         "the translate to it (acceptance 1.0, no compression "
+                         "bias); 'legacy' is the pre-G rejection loop that "
+                         "silently truncated sx (ALT_LAYOUT_EVAL.md §7.2b), kept "
+                         "for reproducing Phase A–F arms")
     ap.add_argument("--ema-decay", type=float, default=0.0, dest="ema_decay",
                     help="C2: EMA decay for the evaluated/exported weights (0 = off)")
     ap.add_argument("--beam-val-rows", type=int, default=2000, dest="beam_val_rows",
@@ -633,7 +694,8 @@ def main() -> int:
             raise SystemExit(f"--train-npz: missing {p}")
     train_ds = SwipeDataset(train_npz, centers, augment=True,
                             path_offset_sigma=args.path_offset_sigma,
-                            path_scale_sigma=args.path_scale_sigma)
+                            path_scale_sigma=args.path_scale_sigma,
+                            affine_sampler=args.affine_sampler)
     val_ds = SwipeDataset(cache_dir / "val.npz", centers, augment=False)
     train_dl = DataLoader(train_ds, args.batch, shuffle=True, collate_fn=collate,
                           num_workers=args.workers, pin_memory=True, drop_last=True,
@@ -669,19 +731,30 @@ def main() -> int:
     # the identical slot permutation and the identical geometric jitter; the KD
     # term is therefore a per-frame comparison of two distributions over the SAME
     # column assignment, which is what makes it well defined under permutation.
-    teacher = None
+    # Phase G: --kd-teacher accepts a comma-separated list; two or more
+    # checkpoints form an ENSEMBLE teacher whose target is the log of the
+    # arithmetic mean of the members' probabilities (logsumexp - log n, exact
+    # and finite — pad columns sit at MASK_NEG for every member).
+    teachers: List[torch.nn.Module] = []
     if args.kd_teacher and args.kd_weight > 0:
-        tpath = resolve(args.workdir, args.kd_teacher)
-        tck = torch.load(tpath, map_location=device, weights_only=True)
-        teacher = encoder_from_checkpoint(tck).to(device).eval()
-        teacher.load_state_dict(tck["model"])
-        for p in teacher.parameters():
-            p.requires_grad_(False)
-        args.kd_teacher_sha256 = sha256_file(tpath)
-        tp = sum(p.numel() for p in teacher.parameters())
-        print(f"KD: teacher {tpath} ch={teacher.ch} block={teacher.block} "
-              f"{tp / 1e6:.3f}M params, weight {args.kd_weight}, T {args.kd_temp}, "
-              f"sha {args.kd_teacher_sha256[:12]}")
+        shas = []
+        for spec in args.kd_teacher.split(","):
+            tpath = resolve(args.workdir, spec.strip())
+            tck = torch.load(tpath, map_location=device, weights_only=True)
+            teacher = encoder_from_checkpoint(tck).to(device).eval()
+            teacher.load_state_dict(tck["model"])
+            for p in teacher.parameters():
+                p.requires_grad_(False)
+            shas.append(sha256_file(tpath))
+            tp = sum(p.numel() for p in teacher.parameters())
+            print(f"KD: teacher {tpath} ch={teacher.ch} block={teacher.block} "
+                  f"{tp / 1e6:.3f}M params, weight {args.kd_weight}, "
+                  f"T {args.kd_temp}, sha {shas[-1][:12]}")
+            teachers.append(teacher)
+        args.kd_teacher_sha256 = ",".join(shas)
+        if len(teachers) > 1:
+            print(f"KD: ensemble of {len(teachers)} teachers "
+                  f"(target = log mean prob)")
     elif args.kd_teacher or args.kd_weight > 0:
         raise SystemExit("--kd-teacher and --kd-weight must be given together")
 
@@ -779,9 +852,11 @@ def main() -> int:
             mask = mask.to(device, non_blocking=True)
             log_e, _, _ = model(feats, keys, mask)              # [B,32,65] fp32
             kd = None
-            if teacher is not None:
+            if teachers:
                 with torch.no_grad():
-                    t_log_e, _, _ = teacher(feats, keys, mask)
+                    t_logs = [t(feats, keys, mask)[0] for t in teachers]
+                    t_log_e = t_logs[0] if len(t_logs) == 1 else \
+                        torch.logsumexp(torch.stack(t_logs), 0) - math.log(len(t_logs))
                 kd = kd_loss(log_e, t_log_e)
             log_e = log_e.permute(1, 0, 2)                      # [T=32,B,65] for CTCLoss
             in_lens = torch.full((log_e.shape[1],), T_OUT, dtype=torch.long)
@@ -820,7 +895,7 @@ def main() -> int:
                 evals += 1
                 bstr = (f"  beam t1 {bm[0]:5.2f} t3 {bm[1]:5.2f} t5 {bm[2]:5.2f} "
                         f"({beam_secs:.1f}s)" if bm else "")
-                kdstr = f"  kd {mean_kd:.4f}" if teacher is not None else ""
+                kdstr = f"  kd {mean_kd:.4f}" if teachers else ""
                 print(f"epoch {epoch:3d} step {step:6d}  ctc_loss {mean_loss:.4f}"
                       f"{kdstr}  val_greedy {acc * 100:.2f}%{bstr}  "
                       f"lr {lr_now:.2e}  {secs:.1f}s", flush=True)
@@ -828,7 +903,7 @@ def main() -> int:
                     rec = {"epoch": epoch, "step": step, "ctc_loss": mean_loss,
                            "val_greedy": acc, "lr": lr_now,
                            "seconds": round(secs, 3)}
-                    if teacher is not None:
+                    if teachers:
                         rec["kd_loss"] = mean_kd
                     if bm:
                         rec.update({"val_beam_t1": bm[0], "val_beam_t3": bm[1],
