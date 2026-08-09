@@ -187,11 +187,38 @@ ceiling is quoted at its own published preset. The control, measured on **val**
 | E1 tuned preset | 88.06 | 92.32 | 93.08 | 90.86 | 86.62 | 5 of 5 |
 
 **The tuning is worth +2.29 pt top-1 on this exact model** — comparable to the
-entire test margin on t1 and larger than the margin on t3, t5 and ≤3. Whether
-FUTO's emissions have comparable headroom under the same sweep is untested and,
-with no FUTO weights on this machine, untestable here. **A test pass does not
-resolve this and no headline may omit it.** No second test decode may be spent on
-a "fair rematch"; it must be argued from this val control.
+entire test margin on t1 and larger than the margin on t3, t5 and ≤3.
+
+### ⚠ SUPERSEDED 2026-08-08 — the rematch was run, and the asymmetry was material
+
+This section previously said FUTO's headroom was "untested and, with no FUTO weights
+on this machine, untestable here", and that no test decode may be spent on a fair
+rematch. FUTO's weights were downloaded, hash-verified and re-run
+(`FUTO_WEIGHTS_VERIFICATION.md`), and their scoring preset was then swept on val by
+the same wide grid that produced E1 (`FAIR_REMATCH.md`). **Our models were not
+re-decoded** — the frozen `test2400_e1.jsonl` dumps were re-read — so our seal was
+not touched; only FUTO's fixed third-party engine was decoded again.
+
+**The equal-footing question is answered.** Tuning is worth **+1.94 pt t1 to FUTO**
+against +2.29 to us — the same order. Against the val-tuned bar (test-2400, STRIP
+trie, both engines tuned on the same val rows):
+
+| | t1 | t3 | t5 | ≤3 | 4+ |
+|---|---|---|---|---|---|
+| FUTO ceiling, val-tuned (the equal-footing bar) | 87.12 | 92.29 | 92.96 | 89.94 | 85.68 |
+| ch 192 Δ | **+1.24** | **+0.36** | **+0.54** | **+1.43** | **+1.14** |
+| ch 128 Δ | **+0.79** | **+0.04** | **+0.04** | **+1.15** | **+0.61** |
+
+All five point estimates still favour us for both configurations, but the margins
+shrink by roughly two thirds, and ch 128's t3/t5 leads (+0.04 = one trace) are ties.
+Exact paired McNemar on top-1 — now possible, since FUTO's per-row output exists —
+**resolves ch 192 on two of three seeds and ch 128 on none.**
+
+The prohibition on writing *that this model beats FUTO's decoder on equal footing*
+is lifted **for ch 192, qualified**; it **still stands for ch 128**, the shipping
+candidate, whose lead is not statistically resolvable at n = 2,400. See
+`FAIR_REMATCH.md` §5 for the verdict table and §7 for the caveats (chief among them:
+FUTO's context LM is still not in the bar).
 
 ## ⚠ Retraction — the old "+0.21 pt maximum headroom" scoring claim
 

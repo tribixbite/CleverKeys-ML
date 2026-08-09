@@ -503,3 +503,31 @@ a per-split constant that extrapolates across architectures.
 Tier: fast_resbn80 val-only -> TEST-VALIDATED. fast_resbn72 and everything else in
 Phase F remain val-only and were NOT decoded. test-2400 has now been read twice;
 ledger in test2400_seal.json["test-2400"]["unsealings"].
+
+2026-08-08 — FAIR REMATCH (both engines val-tuned): the equal-footing question is answered
+
+- [x] Swept FUTO's scoring preset on val-9918 with Phase E's own machinery
+      (sweep_scoring.py imported, not reimplemented; tune val[0:4959], confirm
+      val[4959:9918], reject boundary winners). Ceiling converged interior after 4
+      grids: gamma 1.15 lambda 1.3 beta 0.2 gp 0.3734 bp 0.7. Floor after 4 grids:
+      0.35 / 4.8 / 1.6 / 0.05 / 1.4.
+- [x] Tuning buys FUTO +1.94 t1 on val (85.54 -> 87.48) and +2.20 on test
+      (84.92 -> 87.12), vs the +2.29 it bought us. THE ASYMMETRY WAS MATERIAL:
+      ~2/3 of the published test margin was the untuned-vs-tuned comparison.
+- [x] One test-2400 decode of FUTO's engine (ours NOT re-decoded; frozen
+      test2400_e1.jsonl dumps re-read only). Equal footing, STRIP trie:
+      bar 87.12/92.29/92.96/89.94/85.68
+      ch192 +1.24/+0.36/+0.54/+1.43/+1.14 -- all five still win
+      ch128 +0.79/+0.04/+0.04/+1.15/+0.61 -- t3/t5 are ties (1 trace)
+- [x] Exact paired McNemar (now possible): ch192 resolves on 2 of 3 seeds,
+      ch128 on 0 of 3. The ranking survives the rematch; the size of the lead
+      does not. Equal-footing claim allowed for ch192 (qualified), still
+      forbidden for ch128 -- the ship candidate.
+- SIDE FINDING: the val-tuned FLOOR (encoder only, 85.97) beats the PUBLISHED
+      ceiling (85.54). magic_macaw is worth +1.51 val / +1.33 test once both
+      configs are tuned, not +5.88 -- futo-decoder-eval-notes' "the decoder is
+      the whole lever" is preset-conditional.
+- OPEN: hungry_jellyfish (FUTO's context LM) is still not in the bar -> the bar
+      remains a floor on FUTO's full published stack. FUTO floor sweep may not be
+      fully exhausted (was still creeping when it went interior).
+- Report: `ctc/FAIR_REMATCH.md`; RESULTS.md asymmetry section marked SUPERSEDED.

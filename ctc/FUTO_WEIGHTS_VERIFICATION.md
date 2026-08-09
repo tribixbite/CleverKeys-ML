@@ -283,14 +283,22 @@ Nothing about the campaign's conclusions needs revision on account of the bar.
 
 The claim in `AUDIT_PREDECODE.md` §5a that "no FUTO `.pte` encoder/decoder exists under
 `/home/will`" and that a fair rematch "cannot be run here" is now **out of date**: the
-weights are present and runnable. That audit's substantive point survives untouched, though
-— it concerns the *preset asymmetry* (our E1 preset was grid-fitted on val-9918 rows while
-FUTO's ceiling used its published preset), and that asymmetry is a question about tuning
-fairness, not about whether the bar reproduces. This verification says the bar is the right
-number for FUTO's published preset. It says nothing about what FUTO's engine would score
-under an equivalent sweep, and no sweep of FUTO's preset was run — doing so would risk
-turning a benchmarking run into an input to our own selection, which the license statement
-in §0 forbids.
+weights are present and runnable. That audit's substantive point — the *preset asymmetry*,
+our E1 preset having been grid-fitted on val-9918 rows while FUTO's ceiling used its
+published preset — is a question about tuning fairness, not about whether the bar
+reproduces. This verification says the bar is the right number for **FUTO's published
+preset**, and nothing more.
+
+**Follow-up: the asymmetry was then measured.** `FAIR_REMATCH.md` sweeps FUTO's scoring
+preset on val-9918 with the same wide grid that produced E1 and decodes test-2400 once at
+the result. Tuning is worth **+1.94 pt t1 to FUTO** (val) / **+2.20** (test), against the
++2.29 it bought us — the same order. Our frozen numbers still clear the stronger bar on all
+five metrics, but by roughly a third of the published margin, and the ch 128 lead does not
+resolve statistically. Our models were **not** re-decoded for that exercise; the frozen
+dumps were re-read. The license position in §0 is unchanged and holds for both documents:
+FUTO's outputs are benchmark artifacts only and were never a training input, and the sweep
+tunes FUTO's own parameters against FUTO's own emissions — nothing crosses over into any
+decision about our models, all of which were frozen before either exercise began.
 
 ---
 
