@@ -174,9 +174,52 @@ Per candidate, all through the exported ONNX graph:
 * Ship-candidate criterion (pre-stated): **dvorak (held-out) t1 ≥ 76.8** while
   the en_qwerty gate holds; if unreachable, map the pareto and say so.
 
-## 5. The p ablation
+## 5. The p ablation — every arm transfers, p=0.5 dominates
 
-*(pending)*
+Seed 1234, exported ONNX, E1 preset. Alt-layout numbers are in-dict az26
+(`eval_altlayout.py`); val is full val-9918 all-rows (`eval_beam.py`), AOSP
+trie. Baselines: `resbn80g` = the Phase-G ship candidate (val = 3-seed
+seed-mean; alt-layout = `fast_resbn80` s1234, the closest measured proxy —
+resbn80g itself was never alt-layout-evaled); ch128 = the D1 ship artifact
+from `ALT_LAYOUT_EVAL.md`.
+
+| arm | val-9918 t1/t3/t5/≤3/4+ | dvorak | azerty | qwertz | german | spanish | dvorak app-98k |
+|---|---|---|---|---|---|---|---|
+| ch128 (no layout aug) | 88.02 / 92.27 / 93.03 / 91.12 / 86.41 (s1234) | 63.04 | 75.31 | 76.66 | 72.08 | 81.34 | 60.93 |
+| resbn80 (no layout aug) | 87.72 / 92.25 / 92.97 / 90.78 / 86.14 (g, seed-mean) | 67.28 | 76.03 | 78.77 | 76.17 | 82.37 | — |
+| `phaseH-p15` | 87.31 / 92.29 / 93.00 / 90.82 / 85.48 | 86.94 | 82.49 | 82.81 | 79.08 | 85.55 | 85.75 |
+| `phaseH-p30` | 87.57 / 92.14 / 93.01 / 90.68 / 85.95 | 88.36 | 83.01 | 82.65 | 80.31 | 88.74 | 86.28 |
+| **`phaseH-p50`** | **87.66 / 92.24 / 93.05 / 90.88 / 85.99** | **88.85** | **83.64** | **84.16** | **81.45** | 88.51 | **88.20** |
+| geo engine (anchors) | — | 76.8 | 76.9 | 76.2 | 71.1 | 73.9 | 76.8 |
+
+Reads:
+
+* **The dose-response is monotone on the transfer axis and nearly flat on the
+  QWERTY axis.** dvorak climbs 86.94 → 88.36 → 88.85 as p rises, while
+  en_qwerty t1 *rises* with p in this sweep (87.31 → 87.57 → 87.66) — the
+  opposite of the naive dilution expectation. At 188 k steps the model is
+  nowhere near capacity-limited by the canonical data (the Phase-G §3 result
+  that 94 k→188 k bought +0.05 says the same thing); geometry diversity acts
+  as regularization, not as a data tax. p15's val deficit (−0.41 vs the
+  seed-mean bar) is single-seed noise territory, but it is in any case
+  dominated by p50 on every single column.
+* **p=0.5 wins everywhere except spanish** (−0.23 vs p30, inside noise) —
+  best val, best dvorak, best on every other layout. **Winner: p=0.5**, taken
+  to three seeds in §6.
+* **Val greedy falls** (71.2 % ch128 → 63.3 % p50) while beam t1 holds: the
+  emission head trades QWERTY-specific sharpness for cross-layout robustness,
+  and the lexicon beam — the metric that ships — keeps everything it needs.
+* Mid-train probe (p50 best.pt at 45 k steps, dvorak `--limit 800`): t1 90.41
+  — most of the transfer is learned in the first quarter of the schedule.
+
+### Against the geometric engine, single seed
+
+`phaseH-p50` beats the geo anchors on **all six** layouts, including the one
+the whole phase was for: dvorak **+12.1** at the AOSP footing, **+11.4** on
+the like-for-like app-98k-trie footing (88.20 vs 76.8) — where ch128 lost by
+15.9. The four previous wins widen to +6.7…+14.6. The `ALT_LAYOUT_EVAL.md` §9
+tuning asymmetry still applies (E1 is en_qwerty-fitted; the anchors are
+self-tuned), so these deltas remain floors.
 
 ## 6. The winner at three seeds
 
