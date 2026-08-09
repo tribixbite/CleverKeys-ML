@@ -597,3 +597,15 @@ HELD OUT of training-geometry sampling (true transfer probe). NO test-2400.
 - [ ] H4 winner 3 seeds, export + parity + latency, artifacts/ + sha256.
 - [ ] H5 PHASE_H.md (design rationale, warp validation, p ablation, per-layout
       tables, routing/gate update); RESULTS.md Phase-H section appended at top.
+
+2026-08-09 — MODEL_COMPARISON.md (cross-phase reference, standalone)
+
+- [x] ctc/MODEL_COMPARISON.md — model cards (resbn80g / fast_resbn80 superseded /
+      ch128 / ch192 / old shipped transformer / FUTO published + val-tuned),
+      accuracy tables on all three footings kept in separate columns, the latency
+      ladder incl. per-stage web-demo + desktop-JVM + Python figures with the
+      non-comparability caveat, the four deltas that matter, a ship matrix with
+      the fixture+preset move-together rule, and the caveat register (incl.
+      resbn80g cross-layout UNMEASURED). Every number cited to a named doc
+      section; no new measurement run. Phase-G F72/H64 latency probes noted as
+      in progress.
