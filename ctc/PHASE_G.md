@@ -136,8 +136,80 @@ evidence, not any one 0.1):
   full-val E1 ranks it first by half a point — one more instance of the
   selection-metric/report-metric divergence Phase B first flagged.
 
-*(pending: D — ensemble teacher; E — legacy + no-KD, the fourth factorial cell,
-which attributes C's gain between the sampler and the KD removal.)*
+| **D** `phaseG-D80-188k-kdens` | **coupled** | **3-seed ch192 ensemble** | 87.07 | 91.97 | 92.80 | 91.18 | 84.94 |
+
+* **Ensemble teacher** (D − B): −0.45 t1, −0.18 t3, −0.75 4+ — averaging the
+  three ch 192 seeds' probabilities makes the teacher *worse* for the student,
+  not better. Both KD arms lose to no-KD; the teacher choice does not rescue
+  the lever. (D also trained ~2× slower per step — three teacher forwards —
+  so the lever costs GPU and accuracy at once.)
+
+*(pending: E — legacy + no-KD, the fourth factorial cell, which attributes C's
+gain between the sampler and the KD removal.)*
+
+### 3.1 Why Phase F adopted KD in the first place — and why this is not a contradiction
+
+Phase F never ran a no-KD control (`PHASE_F.md` §7.1/§11.3 said so explicitly);
+KD was adopted on the *a-priori* argument that a 5–6×-larger teacher should help
+a small student, and every Phase-F arm inherited it. The ablation here is the
+first measurement, and it says the CTC task + 3×-HWS tier already carry more
+signal than the teacher's soft targets at this capacity: the KD term was pulling
+the student toward a teacher whose *own* HWS half sits 15 pt below its FUTO
+half, and toward its calibration rather than the data's. Phase-F *arm-vs-arm*
+conclusions survive (all arms shared the same teacher — common-mode), but every
+Phase-F absolute number at ≤280 k params should be read as ~0.5 t1 understated,
+and the "capacity crosses t5 at 210–230 k" boundary (§14) was measured *with*
+the KD handicap and may sit lower without it.
+
+---
+
+## 6. The per-model preset sweep — E1 confirmed on AOSP; the app footing wants λ 4
+
+`sweep_scoring.py` on arm C's emissions, wide grids, tune val`[0:4959]` /
+confirm `[4959:9918]`, boundary-reject (grids widened until the winner is
+interior).
+
+**AOSP STRIP 146,964 (the benchmark footing).** Grid 6γ × 4β × 5λ × 6 prune
+pairs. The winner is **E1 exactly** — γ 1.05, λ 1.1, β 0.2 — with the prune
+pair flat to ±0.06 (gp 0.25 ties gp 0.3734 at 88.57 on the sweep half; full-val
+88.10 vs 88.04, inside noise). Third model in a row (`PHASE_E.md` §5, `PHASE_F.md`
+§4) for which E1 transfers unchanged on this trie: **keep E1 for every
+benchmark-footing number.** No golden-fixture churn from this footing.
+
+**App `en_enhanced` 98,081 STRIP (the shipping footing).** First grid put the
+winner at λ = 4.0 — the grid edge — so λ was widened to {3,4,5,6,8} with γ/β
+refined; the winner is then interior and stable:
+
+```
+gamma 0.9, lambda 4.0, beta 0.25, gammaPrune 0.25, betaPrune 0.9882
+```
+
+| arm C, app trie, full val | t1 | t3 | t5 | ≤3 | 4+ |
+|---|---|---|---|---|---|
+| E1 (λ 1.1) | 87.37 | 92.90 | 93.86 | 90.50 | 85.74 |
+| **app-tuned (λ 4.0)** | **88.76** | **93.22** | **94.18** | **92.42** | **86.86** |
+| Δ | **+1.39** | +0.32 | +0.32 | **+1.92** | **+1.12** |
+
+The gain is confirmed on the untouched holdout half (+4.15 t1 over the
+published-preset baseline there vs +4.66 on the tuning half — no sweep-overfit
+signature) and is positive on all five metrics. This is `PHASE_F.md` §15.4's
+λ-scale finding (slope-matched λ ≈ 3.8–6.2 for the compressed app-trie
+`log_freq`) landing where the arithmetic said it would, now with γ/β allowed to
+adapt (γ 1.05 → 0.9, β 0.2 → 0.25).
+
+**Preset decision.** Phase F §15.4 declined a λ-only +1.09 because the golden
+fixture, `CtcScoringParams`, and every published number were frozen at λ = 1.1
+for an already-shipped model. Phase G ships a **new** model, so the fixture is
+regenerated regardless and the divergence cost collapses. Decision:
+
+* **Benchmark footing (AOSP trie): E1, unchanged** — the sweep converged to it.
+* **Shipping footing (app trie): adopt `0.9 / 4.0 / 0.25 / 0.25 / 0.9882`** as
+  the app preset for this model, worth +1.39 t1 / +0.32 t5 on the configuration
+  users actually run. The golden fixture for the shipped model must be
+  regenerated at THIS preset (fixture must match what the app runs).
+* Caveat that travels with λ 4.0: the user-dictionary merge injects
+  top-of-scale (freq 255) competitors, and a 3.6× larger λ amplifies them.
+  No eval here includes a user dictionary (`PHASE_F.md` §15.5, unchanged).
 
 ---
 
