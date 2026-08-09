@@ -573,3 +573,27 @@ unsealing of test-2400 ("retrain and reexport and re-run tests on new onnx
       p.17/+23 p.052/+0 p1.0) -- level, no claim. Ledger appended (unsealings[2]).
 - [ ] G7 PHASE_G.md (lever table, affine before/after, preset decision),
       RESULTS.md update with evidence tiers, pm.md close-out.
+
+2026-08-09 — Phase H (layout-resampling augmentation: close the dvorak gap)
+
+Directive: build the geometry-sampling augmentation the recipe named and skipped
+(train-ctc-swipe-model.md §6 item 3; evidence ALT_LAYOUT_EVAL.md — dvorak t1
+63.04 vs geo engine 76.8; cause = key re-arrangement, not slot permutation).
+Recipe otherwise Phase-G (resbn80 class, 188k, coupled sampler, no KD). Dvorak
+HELD OUT of training-geometry sampling (true transfer probe). NO test-2400.
+
+- [ ] H0 warp design: residual re-anchoring of cached [2,64] QWERTY paths onto a
+      sampled geometry via the word's ideal polyline (monotone-DP point-to-segment
+      correspondence, tangent/normal residual transfer); ctc/layout_aug.py with
+      validation CLI (identity round-trip, ideal-path exactness, endpoint-proximity
+      stats vs ALT_LAYOUT_EVAL §2 real-corpus band).
+- [ ] H1 train.py: --layout-alt-p / --layout-synth-frac / real-layout pool
+      (azerty,qwertz,german,spanish; dvorak+qwerty excluded); per-geometry affine
+      feasible bounds; commit atomically (concurrent phaseG runs unaffected).
+- [ ] H2 p sweep 0.15/0.3/0.5 at seed 1234 (phaseH-p15/p30/p50), Phase-G recipe.
+- [ ] H3 eval per candidate: eval_altlayout.py all six real corpora at E1 (az26)
+      + dvorak app-trie arm + full val-9918 eval_beam (AOSP/E1). Gate: dvorak t1
+      >= 76.8 with en_qwerty val within 0.3 of 87.72 seed-mean; else map pareto.
+- [ ] H4 winner 3 seeds, export + parity + latency, artifacts/ + sha256.
+- [ ] H5 PHASE_H.md (design rationale, warp validation, p ablation, per-layout
+      tables, routing/gate update); RESULTS.md Phase-H section appended at top.
