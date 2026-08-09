@@ -264,6 +264,12 @@ and near-identical coverage, 96.9 % vs 96.4 % — is worse still: −15.9 / −7
 **On four of five layouts the CTC encoder matches or beats the shipped geometric
 engine, with its largest wins on top-3/top-5. On dvorak it loses decisively.**
 
+Note the tuning asymmetry (§9, first bullet): the geometric engine is at its own
+shipped tuning while the CTC model is at a preset fitted on en_qwerty, so these
+deltas understate the CTC side. That makes the four wins safe and the dvorak loss
+the conservative reading of a real gap, not an artifact — but the *sizes* are
+provisional until a per-layout sweep is run.
+
 ### The lexicon-scale confound does not change any of this
 
 §3 warned that `lambda = 1.1` carries 6-7× less ranking signal on the compressed
@@ -524,6 +530,20 @@ That is a two-line check against the layout the IME already has in hand.
 
 ## 9. Open questions
 
+* **⚠ Every CTC number here is at a preset tuned on a *different* layout, and the
+  geometric anchors are not.** E1 was fitted on en_qwerty val-9918; it is applied
+  unchanged to five layouts it never saw. The geometric engine's config A is its own
+  shipped tuning. So this comparison is *tuned-vs-untuned in the geometric engine's
+  favour* — the mirror image of the asymmetry `FAIR_REMATCH.md` found in the FUTO
+  head-to-head, where roughly two thirds of a published margin turned out to be an
+  untuned opponent. The λ=0 ablation in §6 bounds how big this lever is on these
+  corpora and it is **large**: the frequency term alone is worth 8–19 pt per
+  alt-layout against 2.2 pt on en_qwerty, so the alt-layout numbers are the ones
+  most likely mis-tuned. Direction of the bias: **the CTC results below are a floor,
+  not a ceiling.** A per-layout preset sweep (`sweep_scoring.py`, tune on half the
+  corpus, confirm on the untouched half, reject grid-edge winners) is the obvious
+  next run, and would firm up the four wins and probably narrow — though on a 13.8 pt
+  gap, very unlikely to close — the dvorak loss.
 * **Where between 0.11 and 0.43 does it break?** Only five layouts exist in this
   corpus and there is a wide gap between german (0.1071) and dvorak (0.4313). The
   routing threshold above is therefore bounded, not located. Colemak would land near
