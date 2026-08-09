@@ -144,8 +144,75 @@ evidence, not any one 0.1):
   the lever. (D also trained ~2× slower per step — three teacher forwards —
   so the lever costs GPU and accuracy at once.)
 
-*(pending: E — legacy + no-KD, the fourth factorial cell, which attributes C's
-gain between the sampler and the KD removal.)*
+| **E** `phaseG-E80-188k-legacy-nokd` | legacy | **none** | 87.94 | 92.33 | 92.98 | 91.12 | 86.29 |
+
+### 3.2 The 2×2 factorial, attributed
+
+|  | KD on | KD off | Δ (KD off − on) |
+|---|---|---|---|
+| legacy sampler | A 87.46 | E 87.94 | **+0.48** |
+| coupled sampler | B 87.52 | C **88.04** | **+0.52** |
+| Δ (coupled − legacy) | +0.06 | +0.10 | |
+
+* **KD removal is the dominant lever: +0.48 / +0.52 t1**, consistent across
+  both sampler states, and positive on all five metrics in the no-KD column
+  (C − B: +0.52/+0.24/+0.42/+0.27/+0.66; E − A: +0.48/+0.05/+0.03/+0.36/+0.55).
+* **The affine fix is a small consistent positive: +0.06 / +0.10 t1**, and
+  without KD it is positive on all five (C − E: +0.10/+0.06/+0.20/+0.18/+0.06,
+  including the +0.20 on t5 — the metric the fix's x-expansion coverage most
+  plausibly serves). With KD it is mixed on t3/t5. Both deltas are far inside
+  the single-seed floor; the sign-consistency and the mechanism (§1) are the
+  evidence. Its *cross-layout* value (`ALT_LAYOUT_EVAL.md` predicted the sampler
+  bias hurts transfer most) is not measured here and remains the stronger
+  argument for it.
+* **The 188 k schedule at ch 80 with KD was +0.05** (A vs the 94 k baseline) —
+  the +0.5 measured at ch 56/64 in Phase F does not transfer to ch 80 with KD
+  on. No 94 k no-KD arm was run, so schedule×KD at ch 80 is not decomposed;
+  the winner recipe simply takes 188 k, which is at worst neutral.
+
+---
+
+## 4. The winner — `resbn:80:1,2,4,8`, 188 k, coupled sampler, **no distillation** — at three seeds
+
+Fresh trainings at seeds 1234 / 4321 / 7777 (`phaseG-C80-188k-nokd[-s*]`).
+Full val-9918, E1 preset, AOSP STRIP trie, exported ONNX graphs
+(sliced-view parity 100/100 argmax on all three).
+
+| metric | s1234 | s4321 | s7777 | **seed-mean** | sd | the bar | **Δ** | worst seed | resbn80@94k seed-mean (the incumbent) | **Δ vs incumbent** |
+|---|---|---|---|---|---|---|---|---|---|---|
+| overall t1 | 88.04 | 87.82 | 87.31 | **87.72** | 0.37 | 85.52 | **+2.20** | 87.31 PASS | 87.47 | **+0.25** |
+| t3 | 92.39 | 92.27 | 92.09 | **92.25** | 0.15 | 91.54 | **+0.71** | 92.09 PASS | 92.13 | **+0.12** |
+| t5 | 93.18 | 92.83 | 92.90 | **92.97** | 0.18 | 92.80 | **+0.17** | 92.83 PASS | 92.89 | **+0.08** |
+| ≤3 t1 (n=3,389) | 91.30 | 91.09 | 89.94 | **90.78** | 0.73 | 89.29 | **+1.49** | 89.94 PASS | 90.35 | **+0.43** |
+| 4+ t1 (n=6,529) | 86.35 | 86.12 | 85.94 | **86.14** | 0.21 | 83.57 | **+2.57** | 85.94 PASS | 85.98 | **+0.16** |
+
+**All five bars clear on the seed mean and on every individual seed, with
+margins larger than the incumbent's on all five.** The t5 margin roughly
+doubles (+0.17 vs +0.09) and the worst-seed t5 margin moves 0.05 → 0.03 —
+still a knife edge, as every model in this family has been on t5. Same graph,
+same 279,346 params, same 0.215 ms latency class as the incumbent: the gain is
+free at inference.
+
+Per-source seed-mean t1: FUTO **94.56**, HWS **80.86** (incumbent: 94.79 /
+80.29) — the upgrade comes from the harder HWS half (+0.57), with the FUTO half
+giving back 0.23.
+
+## 5. The gate, and the stretch bar
+
+* **Primary target (the §7 decode gate): PASS.** 3-seed val seed-mean clears
+  all five val bars, every seed clears individually, and all five margins are
+  ≥ the shipping `resbn80`'s (`PHASE_F.md` §8).
+* **Stretch — the equal-footing val bar** (FUTO ceiling val-tuned,
+  `FAIR_REMATCH.md` §2: 87.48 / 92.31 / 93.03 / 89.76 / 86.29): **NOT met on
+  the seed mean** — t1 +0.24 and ≤3 +1.02 clear, but t3 −0.06, t5 −0.06 and
+  4+ −0.15 do not. Seed 1234 alone clears all five (88.04/92.39/93.18/
+  91.30/86.35), but a single seed is not the gate and is not claimed. The
+  0.215 ms class gets *level* with the val-tuned FUTO ceiling (three metrics
+  inside ±0.15) where the incumbent was clearly behind it (−0.18 t3 / −0.14 t5
+  / −0.31 4+ on val seed-means); it does not beat it.
+* **Stretch — all-bars at ≤0.15 ms: not attempted.** Nothing in the lever
+  table moves t5 by the ~0.2 pt that class is short; §8's ch 64 probe tests
+  the 0.162 ms class instead.
 
 ### 3.1 Why Phase F adopted KD in the first place — and why this is not a contradiction
 
