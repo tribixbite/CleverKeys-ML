@@ -1,5 +1,73 @@
 # CTC Swipe Encoder — Training Results
 
+# Phase G (2026-08-09): the upgraded 0.215 ms candidate — `resbn80g` — test-validated, third unsealing
+
+**`resbn80g` supersedes `fast_resbn80` as the speed-class ship candidate.**
+Same graph, same 279,346 params, same 0.215 ms latency class — retrained with
+the Phase-G recipe: 188 k steps, the fixed (coupled) affine sampler, and **no
+distillation** (the first-ever KD ablation measured KD at −0.5 t1; the ensemble
+teacher was −0.45 worse still). Full record: `ctc/PHASE_G.md`.
+
+Evidence tier: **test-validated on both footings** — the third unsealing of
+test-2400 was pre-authorized by the user's directive of 2026-08-09 ("retrain
+and reexport and re-run tests on new onnx (resbn80)"), gated on the val bars,
+pre-registered in `PHASE_G.md` §7 (committed `46aecb1` before the decode), and
+executed exactly as registered (6 decodes, one per config × seed; ledger
+`test2400_seal.json["test-2400"]["unsealings"][2]`).
+
+| footing | seed-mean (s1234/s4321/s7777) | bar | Δ | worst-seed status |
+|---|---|---|---|---|
+| val, AOSP, E1 | **87.72 / 92.25 / 92.97 / 90.78 / 86.14** | 85.52/91.54/92.80/89.29/83.57 | +2.20/+0.71/+0.17/+1.49/+2.57 | all five clear, every seed |
+| test, AOSP, E1 (config A) | **87.68 / 92.18 / 92.82 / 90.80 / 86.08** | published 84.83/91.04/92.08/89.57/82.40 | **+2.85/+1.14/+0.74/+1.23/+3.68** | all five clear, every seed |
+| test, app trie, **app preset** (config B) | **88.14 / 93.22 / 93.90 / 91.86 / 86.23** | trie-matched 84.92/91.54/92.96/89.57/82.52 | **+3.22/+1.68/+0.94/+2.29/+3.71** | all five clear, every seed; worst-seed t5 margin **+0.75** vs the incumbent's +0.08 |
+
+Against the incumbent `fast_resbn80` at the same test footing (config A):
+**+0.39 t1 / +0.29 t3 / +0.00 t5 / −0.37 ≤3 / +0.78 4+.** Against the
+**equal-footing** bar (both engines val-tuned, `FAIR_REMATCH.md`:
+87.12/92.29/92.96/89.94/85.68): **+0.56 / −0.11 / −0.14 / +0.86 / +0.40 — 3 of
+5, McNemar unresolved on every seed (+17 p 0.17, +23 p 0.052, +0 p 1.00).**
+`resbn80g` is *level* with FUTO's val-tuned engine where `fast_resbn80` was
+behind it (three losses become two −0.1 ties and a win) — but **no
+equal-footing superiority claim is made or permitted** for it. ch 192 remains
+the only configuration with a (qualified) equal-footing win.
+
+**The preset changes for the app.** The per-model sweep (`PHASE_G.md` §6)
+confirms E1 on the AOSP/benchmark footing and finds the app-trie optimum at
+
+```kotlin
+// shipping preset for the app lexicon (en_enhanced.json), resbn80g
+CtcScoringParams(gamma = 0.9, lambda = 4.0, beta = 0.25, alpha = 0.0,
+                 gammaPrune = 0.25, betaPrune = 0.9882)
+```
+
+worth +1.39 t1 / +0.32 t5 on val over E1 on the shipping footing, confirmed on
+the untouched holdout half and then on test (config B above). The golden
+fixture was regenerated from `resbn80g_s1234` **at this preset** —
+`artifacts/ctc_model_golden.json`, sha256
+`ce3b5456ad13543ac09ac8c2610374bd8847b15f740f9004a98efea59d74f134` — and must
+ship with it (fixture and preset move together).
+
+Phase-G artifacts (same contract, opset 17, fp32, zero normalization nodes,
+sliced-view parity 100/100 at export):
+
+| file | arm | sha256 |
+|---|---|---|
+| `resbn80g_s1234.onnx` ← **ship** | `phaseG-C80-188k-nokd` | `330cadfbaa7334eaeaeab93762084181b70710fe9d59cbd69600a6de468fe1a0` |
+| `resbn80g_s4321.onnx` | `phaseG-C80-188k-nokd-s4321` | `c9379c60a23bec4ca300512d2930b7a724aad91b761597972446a6577f5d5bab` |
+| `resbn80g_s7777.onnx` | `phaseG-C80-188k-nokd-s7777` | `3e303d46abaff4bfe31779de35fb9fc81e63f1ae8fd5ab554a9db205f167191a` |
+
+Every Campaign-2 caveat travels unchanged (contributor contamination, the
+preset asymmetry on published-bar comparisons, per-source 14-pt spread —
+config A 94.80/80.36, config B 94.55/81.54). test-2400 has now been read
+**three** times; it is a worn split and a fourth read needs a better reason
+than any of the first three had.
+
+The sections below are the Campaign-2 record. Where they name `fast_resbn80`
+as the speed candidate or λ = 1.1 as the app preset, **Phase G supersedes
+them**; the numbers themselves remain the audited record of that campaign.
+
+---
+
 # Campaign 2 (2026-08-07/08): FUTO ceiling beaten as registered
 
 **Status: the sealed test-2400 decode happened once, was pre-registered, and was
