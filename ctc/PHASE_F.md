@@ -32,6 +32,16 @@ checkpoint, and a doubled schedule. §6 and §14 are the measured frontier, §7 
 > remain ch 128 (`phaseE-E3b-hws3x`) and ch 192 (`phaseE-FINAL`); a Phase-F
 > artifact is a *val-validated* variant of them and must never be quoted as
 > test-validated.
+>
+> **Footnote, 2026-08-08 — one exception, added after the fact.** The user, who
+> owns this benchmark, subsequently **ordered** a second unsealing of test-2400 to
+> test-validate `fast_resbn80`. It was pre-registered in §16 and committed before
+> the decode; the result is §16.5: **all five test bars clear on the seed mean and
+> on every seed, at both the AOSP and the shipped-app lexicon.** `fast_resbn80`
+> (`fast_resbn80_s{1234,4321,7777}.onnx`) is therefore **test-validated** and the
+> sentence above no longer applies to it. It still applies, without exception, to
+> **`fast_resbn72` and every other artifact in this document** — none of them has
+> been decoded on test-2400. Sections 1–15 are unchanged and remain val-only.
 
 ## 0. The bar, the preset and the measurement protocol
 
@@ -1174,3 +1184,101 @@ the binding metric** exactly as it was all through Phase F.
 for both configurations are reported regardless of outcome, and the tier claim in
 `RESULTS.md` moves only if config A clears all five on the seed mean *and* on
 every seed — the same rule Phase E was held to.
+
+### 16.5 Result — `fast_resbn80` clears all five test bars, on both lexicons, on every seed
+
+Run 2026-08-08 exactly as registered: six decodes, one per (config, seed), no
+warm-up, no retry, no fourth seed, nothing re-run after the numbers were seen.
+`seal.py` logged the 2,400/2,400 overlap and the `--unseal-test` override on every
+one. OOV is a miss (86 rows under config A, 64 under config B).
+
+#### Config A — AOSP STRIP 146,964, protocol-identical to the Phase-E decode
+
+| metric | s1234 | s4321 | s7777 | **seed-mean** | sd | worst seed | **the bar** | **Δ** | z | gate |
+|---|---|---|---|---|---|---|---|---|---|---|
+| overall t1 | 86.75 | 87.42 | 87.71 | **87.29** | 0.40 | 86.75 | 84.83 | **+2.46** | **3.4** | **PASS** |
+| t3 | 91.42 | 92.12 | 92.12 | **91.89** | 0.33 | 91.42 | 91.04 | **+0.85** | 1.5 | **PASS** |
+| t5 | 92.62 | 92.83 | 93.00 | **92.82** | 0.15 | 92.62 | 92.08 | **+0.74** | 1.3 | **PASS** |
+| ≤3 t1 (n=815) | 90.80 | 91.53 | 91.17 | **91.17** | 0.30 | 90.80 | 89.57 | **+1.60** | 1.5 | **PASS** |
+| 4+ t1 (n=1,585) | 84.67 | 85.30 | 85.93 | **85.30** | 0.51 | 84.67 | 82.40 | **+2.90** | **3.0** | **PASS** |
+
+**All five clear on the seed mean and on every individual seed.** Greedy-CTC
+66.33 / 67.83 / 67.79 %.
+
+#### Config B — the shipping lexicon, `en_enhanced.json` STRIP 98,081
+
+Compared against the **trie-matched** bar of §15.2 (`84.92 / 91.54 / 92.96 /
+89.57 / 82.52`), not the published one, which belongs to config A's trie.
+
+| metric | s1234 | s4321 | s7777 | **seed-mean** | sd | worst seed | **the bar** | **Δ** | z | gate |
+|---|---|---|---|---|---|---|---|---|---|---|
+| overall t1 | 85.96 | 86.38 | 87.21 | **86.51** | 0.52 | 85.96 | 84.92 | **+1.59** | 2.2 | **PASS** |
+| t3 | 91.92 | 92.42 | 92.50 | **92.28** | 0.26 | 91.92 | 91.54 | **+0.74** | 1.3 | **PASS** |
+| t5 | 93.04 | 93.33 | 93.38 | **93.25** | 0.15 | 93.04 | 92.96 | **+0.29** | 0.6 | **PASS** |
+| ≤3 t1 (n=815) | 90.18 | 90.55 | 91.53 | **90.76** | 0.57 | 90.18 | 89.57 | **+1.19** | 1.1 | **PASS** |
+| 4+ t1 (n=1,585) | 83.79 | 84.23 | 84.98 | **84.33** | 0.49 | 83.79 | 82.52 | **+1.81** | 1.9 | **PASS** |
+
+**All five clear on the seed mean and on every individual seed** — but the top-5
+margin on the worst seed is **+0.08 pt, two rows of 2,400.** That is a pass by the
+campaign's stated rule and it is not a margin to rely on; it is the same knife
+edge §8 and §14.1 flagged on val, moved onto test.
+
+#### The pre-registered expectation was wrong, in the *unfavourable* direction
+
+Registered prediction for config A was 87.64 / 92.35 / 93.12 / 90.66 / 86.09, from
+val plus the +0.17/+0.22/+0.23/+0.31/+0.11 mean shift the first unsealing showed.
+Measured: **−0.35 / −0.46 / −0.30 / +0.51 / −0.79** against that prediction. The
+actual val→test shift for this model is not the one ch 128 and ch 192 showed:
+
+| model | t1 | t3 | t5 | ≤3 | 4+ |
+|---|---|---|---|---|---|
+| ch 192 (first unsealing) | +0.30 | +0.33 | +0.42 | +0.51 | +0.19 |
+| ch 128 (first unsealing) | +0.04 | +0.10 | +0.04 | +0.10 | +0.03 |
+| **`resbn:80` config A** | **−0.18** | **−0.24** | **−0.07** | **+0.82** | **−0.68** |
+| **`resbn:80` config B** | **−0.42** | **−0.11** | **−0.26** | **+0.25** | **−0.74** |
+
+`resbn:80` moves *down* on four of five going val→test where both Phase-E anchors
+moved up, and *up* by 0.82 on the short stratum. It still passed everything, but
+the honest reading is that the val→test offset is not a stable per-split constant
+that can be extrapolated across architectures — a two-model base was too small to
+generalise from, and this decode says so.
+
+#### Per-source, and how it compares to the test-validated anchor
+
+Seed-mean top-1 by corpus half (`holdout_source_tags.json["test"]`, no extra decode):
+
+| config | FUTO half (n=1,217) | HWS half (n=1,183) | spread |
+|---|---|---|---|
+| ch 128 (first unsealing) | 95.07 | 80.56 | 14.51 |
+| `resbn:80` config A | **94.63** | **79.74** | 14.89 |
+| `resbn:80` config B | **93.37** | **79.46** | 13.91 |
+
+The 14-point internal spread `RESULTS.md` reports for ch 128/ch 192 is reproduced
+unchanged, and the aggregate still hides it. Note the app lexicon costs the FUTO
+half 1.26 pt while leaving the HWS half flat — the trie swap is not uniform across
+the corpus, and the aggregate change (−0.78 t1) understates what happens on the
+half that drives the headline.
+
+Against the test-validated ch 128 anchor at the same trie, `resbn:80` is
+**−0.63 t1 / −0.44 t3 / −0.18 t5 / +0.09 ≤3 / −0.99 4+** — consistent with the
+−0.61 t1 val gap §14.1 reported, so the val-measured trade between the two
+transfers to test essentially unchanged.
+
+#### What this does and does not change
+
+* `fast_resbn80`'s evidence tier moves from **val-only** to **test-validated**, at
+  both lexicons. `fast_resbn72` (0.186 ms) and every other Phase-F artifact remain
+  **val-only** and were not decoded.
+* **Statistical resolution is weaker than the first unsealing's.** Only t1 (z 3.4)
+  and 4+ (z 3.0) resolve against the bar under config A; t3, t5 and ≤3 are
+  positive but inside the noise 2,400 rows admit. Under config B nothing resolves
+  at z > 2.2. Same caveat, same cause (row sampling, not seed variance: seed sd is
+  0.15–0.57 throughout).
+* **Every Phase-E caveat still applies unchanged** — the preset asymmetry (~2.3 pt,
+  `RESULTS.md`), the T3 contributor contamination, the dedup defect, and the fact
+  that these are benchmark numbers rather than a generalization claim about an
+  unseen user. Distillation adds its own: this student inherits its teacher's
+  exposure to a contaminated tier.
+* **test-2400 has now been read twice.** The ledger is in
+  `test2400_seal.json["test-2400"]["unsealings"]`. A third unsealing needs a better
+  reason than either of the first two had.

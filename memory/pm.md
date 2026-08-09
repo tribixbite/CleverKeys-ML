@@ -411,18 +411,18 @@ Artifacts: fast_resbn72_s{1234,4321,7777}, fast_resbn80_s{1234,4321,7777},
 
 Two tasks, both scoped and pre-registered before any decode.
 
-- [ ] T1. O3 lexicon validation (val-9918, NOT sealed). The E1 preset was fitted
+- [x] T1. O3 lexicon validation (val-9918, NOT sealed). The E1 preset was fitted
       against the 146,964-word AOSP-frequency STRIP trie; the app ships the 98k
       `en_enhanced.json` trie (byte frequencies floored at 134..255). Verify the
       `--vocab-json` loader semantics (frequency scale vs the lambda term), then
       decode full val-9918 for `ch128_s1234` AND `fast_resbn80_s1234` at the E1
       preset with the app trie. Compare against the five val bars
       (85.52 / 91.54 / 92.80, <=3 89.29, 4+ 83.57).
-- [ ] T1b. If any bar fails: re-sweep LAMBDA ONLY (the frequency-scale knob) on
+- [x] T1b. If any bar fails: re-sweep LAMBDA ONLY (the frequency-scale knob) on
       val[0:4959], confirm on val[4959:9918], report the adjusted preset as the
       app-ship preset candidate.
-- [ ] T1c. Quantify the OOV impact of the 98k trie vs the 147k one.
-- [ ] T2. resbn80 test-validation — SECOND UNSEALING OF test-2400, ORDERED BY THE
+- [x] T1c. Quantify the OOV impact of the 98k trie vs the 147k one.
+- [x] T2. resbn80 test-validation — SECOND UNSEALING OF test-2400, ORDERED BY THE
       USER (the benchmark owner). fast_resbn80 was frozen on val-only evidence in
       Phase F; its training/selection never saw test; the first unsealing decoded
       only ch128/ch192. Decode test-2400 ONCE per seed for
@@ -434,7 +434,7 @@ Two tasks, both scoped and pre-registered before any decode.
       <=3 89.57, 4+ 82.40. Also at the en_enhanced trie IFF T1 makes that the ship
       configuration. HARD CAP: max 2 configs x 3 seeds, one decode each, no
       iteration.
-- [ ] T3. Document: RESULTS.md (resbn80 evidence tier val-only -> test-validated,
+- [x] T3. Document: RESULTS.md (resbn80 evidence tier val-only -> test-validated,
       with the second-unsealing disclosure paragraph), PHASE_F.md footnote, seal
       ledger. Commit.
 
@@ -465,3 +465,41 @@ by design, validated on nothing. Does it transfer? Answer with real corpora.
 - [x] A5. Decode all five layouts, both key-slot arms, vs the geometric-engine
       anchors. Lexicon-frequency-scale confound bounded by a lambda ablation.
 - [x] A6. Report: `ctc/ALT_LAYOUT_EVAL.md` + `eval_altlayout.py`. Commit.
+
+RESULT (both tasks complete, 2026-08-08).
+
+T1 -- O3 CLEARS AT THE UNCHANGED PRESET. The frequency-scale risk is real
+(log_freq spread 5.403 -> 0.643, sd 1.354 -> 0.089, Spearman 0.844 on the 83,113
+overlap) but coverage moves the OTHER way: the 98k app trie has FEWER OOV targets
+than the 147k AOSP one (val 2.52% vs 3.39%, test 2.67% vs 3.58%) -- only 12 val /
+2 test rows are in AOSP and not in the app trie, while it adds 14,820 words AOSP
+lacks. DROP vs STRIP is a null (en_enhanced has no apostrophes; 148 junk
+skeletons; every number bit-identical).
+The bar was RE-MEASURED on the app trie from FUTO's cached ceiling emissions so
+the comparison is trie-matched (validated: reproduces FUTO_WEIGHTS_VERIFICATION
+4b/4c to the digit). App-trie val bar 85.59/91.82/93.20/89.05/83.80 (t5 is +0.42
+HIGHER than the AOSP bar); app-trie test bar 84.92/91.54/92.96/89.57/82.52.
+val-9918, E1 preset, app trie, 3 seeds each -- ALL FIVE CLEAR, EVERY SEED:
+  ch128    87.96/92.77/93.67/91.49/86.12  (worst-seed margins +2.15..+2.16)
+  resbn80  86.93/92.39/93.51/90.51/85.07  (worst t5 93.45, +0.25)
+Controls at the AOSP trie reproduce the committed numbers exactly (ch128
+88.02/92.27/93.03/91.12/86.41; resbn80 87.41/92.18/92.85/90.38/85.86).
+lambda-only re-sweep (not required, ran anyway): optimum 2.0 (ch128) / 2.5
+(resbn80), +0.58 / +1.01 t1 on the untouched holdout half. NOT recommended --
+diverges the shipped preset from the fixture and every published number.
+
+T2 -- SECOND UNSEALING (user-ordered). Pre-registered in PHASE_F 16 and COMMITTED
+(50c303a) before the decode. 6 decodes, one each, no retry. fast_resbn80 test-2400:
+  config A (AOSP 146,964) 87.29/91.89/92.82/91.17/85.30 vs bar 84.83/91.04/92.08/
+    89.57/82.40 -> +2.46/+0.85/+0.74/+1.60/+2.90, ALL FIVE, EVERY SEED (z 3.4/1.5/
+    1.3/1.5/3.0)
+  config B (app 98,081)   86.51/92.28/93.25/90.76/84.33 vs bar 84.92/91.54/92.96/
+    89.57/82.52 -> +1.59/+0.74/+0.29/+1.19/+1.81, ALL FIVE, EVERY SEED; worst-seed
+    t5 margin +0.08 = 2 rows of 2400
+The pre-registered prediction was WRONG IN THE UNFAVOURABLE DIRECTION on 4 of 5
+(-0.35/-0.46/-0.30/+0.51/-0.79): resbn80's val->test shift is -0.18/-0.24/-0.07/
++0.82/-0.68, opposite in sign to both Phase-E anchors. The val->test offset is not
+a per-split constant that extrapolates across architectures.
+Tier: fast_resbn80 val-only -> TEST-VALIDATED. fast_resbn72 and everything else in
+Phase F remain val-only and were NOT decoded. test-2400 has now been read twice;
+ledger in test2400_seal.json["test-2400"]["unsealings"].

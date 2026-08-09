@@ -2404,7 +2404,34 @@
   ],
   "n": 2400,
   "note": "a-z-normalized word + float64 x/y; see seal.py",
+  "prior_contact": [
+   "pre-campaign r2 decode (disclosed, RESULTS.md caveat 7)",
+   "undisclosed 120-row smoke decode with a toy 898-word trie (found by AUDIT_FINAL.md sec 6.7)",
+   "3 rows decoded during the post-decode hygiene pass to verify the --unseal-test branch; no number published"
+  ],
   "source": "/home/will/ctc-train/data/test_hwsfuto.jsonl",
+  "unsealings": [
+   {
+    "authorised_by": "pre-registration AUDIT_PREDECODE.md sec E (campaign-2 decode gate)",
+    "date": "2026-08-08",
+    "decoded": "phaseE-FINAL-s{1234,4321,7777} (ch192) and phaseE-E3b-hws3x{,-s4321,-s7777} (ch128), 6 decodes",
+    "n": 1,
+    "note": "the seal was declared SPENT by AUDIT_FINAL.md sec 7 after this read",
+    "preset": "1.05,1.1,0.2,0.3734,0.9882",
+    "published_in": "RESULTS.md 'Verified test-2400 results'; AUDIT_FINAL.md",
+    "trie": "AOSP en_wordlist.combined STRIP, 146964 words"
+   },
+   {
+    "authorised_by": "the user (benchmark owner), explicit order to test-validate fast_resbn80",
+    "date": "2026-08-08",
+    "decoded": "phaseF-I-resbn80x4 and phaseF-FINAL-resbn80x4-s{4321,7777} (fast_resbn80), 2 configs x 3 seeds = 6 decodes",
+    "n": 2,
+    "note": "not a selection loop: fast_resbn80 was trained, seeded, checkpoint-selected and preset-fixed entirely on val-9918 and had never been decoded on test. Also logged: three FUTO-ceiling re-scores of test-2400 (external bar, no CleverKeys model) at the AOSP and app tries, PHASE_F.md sec 15.2",
+    "preset": "1.05,1.1,0.2,0.3734,0.9882 (frozen, unchanged from unsealing 1)",
+    "published_in": "PHASE_F.md sec 16; RESULTS.md 'The second unsealing'",
+    "trie": "config A: AOSP STRIP 146964; config B: app en_enhanced.json STRIP 98081"
+   }
+  ],
   "words_sha256": "f6053959aab98353337c0b9cbcf65497bdf76a1598c444db70d35bf03318b5d3"
  }
 }

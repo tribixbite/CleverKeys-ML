@@ -28,6 +28,13 @@ variant, preset, checkpoint or stratum. The guard therefore exists to stop an
 *accidental* re-decode; ``--unseal-test`` is the deliberate, logged override and
 carries the same warning.
 
+**The unsealing ledger.** Each sealed record carries an ``unsealings`` list — the
+append-only log of every authorised read of that split: when, who authorised it,
+what was decoded, and where the numbers were published. It is the answer to "how
+worn is this split?", which the fingerprints alone cannot give. ``--emit``
+preserves it across a fingerprint regeneration; entries are added by hand when a
+decode is authorised, and are never removed.
+
 Regenerate the fingerprint (does not decode anything — it only hashes rows):
 
     python seal.py --emit --split data/test_hwsfuto.jsonl --name test-2400
@@ -157,12 +164,16 @@ def main() -> int:
     if not args.emit:
         return 0
     seals = load_seals()
+    # The unsealing ledger outlives a fingerprint regeneration: it records reads of
+    # the split, not its contents, and losing it would erase how worn the split is.
+    prior = seals.get(args.name, {}).get("unsealings", [])
     seals[args.name] = {
         "source": str(path),
         "n": len(rows),
         "words_sha256": words_sha,
         "digest_bytes": DIGEST_BYTES,
         "note": "a-z-normalized word + float64 x/y; see seal.py",
+        "unsealings": prior,
         "fingerprints": sorted(set(fps)),
     }
     SEAL_FILE.write_text(json.dumps(seals, indent=1, sort_keys=True))

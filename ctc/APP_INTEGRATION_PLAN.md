@@ -1750,24 +1750,34 @@ user-reachable at commit 4.
 
 ## 6. Open decisions for the user (each with a recommendation)
 
-- **O1 — Which model ships (D1).** Recommend `ch128_s1234` (2.8 MB): it is the only
-  configuration with *test-validated* all-five-bars evidence. `fast_resbn80`
-  (1.1 MB, 0.215 ms) is a defensible alternative if APK size matters more than the
-  evidence tier — it clears all five **val** bars on every seed but "must never be
-  quoted as test-validated" (PHASE_F). If chosen, regenerate + re-land the fixture
-  from that artifact (§1d) and update RESULTS/NOTICE wording accordingly.
+- **O1 — Which model ships (D1). Updated 2026-08-08.** Recommend `ch128_s1234`
+  (2.8 MB) for maximum accuracy — 87.29 → 87.92 test t1 over `fast_resbn80` at the
+  AOSP trie. But the evidence-tier argument for it is **gone**: `fast_resbn80`
+  (1.1 MB, 0.215 ms) is now *also* test-validated, clearing all five test bars on
+  every seed at both the AOSP and the shipped app lexicon (`PHASE_F.md` §16.5),
+  so the choice is a straight −0.63 t1 for −1.7 MB and −0.24 ms. Watch its config-B
+  top-5: worst-seed margin +0.08 pt. If `fast_resbn80` is chosen, regenerate and
+  re-land the golden fixture from that artifact (§1d) and update RESULTS/NOTICE
+  wording accordingly. `fast_resbn72` (0.186 ms) remains **val-only**.
 - **O2 — Fast/accurate variant selector.** Recommend **no**: shipping both models
   costs +1.1–3.9 MB and doubles the parity-test matrix for a latency difference
   (0.26 ms) that is invisible next to the beam + pipeline cost. Revisit only if a
   low-end-device complaint materializes.
-- **O3 — Lexicon (D4).** Recommend `en_enhanced.json` + user words (zero new
-  assets, user dictionary respected, spec-prescribed). Residual risk: the tuned
-  preset was fitted against the 146,964-word AOSP-frequency STRIP trie; the app trie
-  is 98k words with a compressed frequency floor (134–255). Cheap pre-ship
-  validation in THIS repo (val is not sealed): run `futo_decoder_eval.py`
-  `--vocab-json` with the app's `en_enhanced.json` over val-9918 at the E1 preset
-  and confirm the five val bars still clear; re-sweep λ only if they don't. I
-  recommend actually running this before commit 3 lands.
+- **O3 — Lexicon (D4). RESOLVED 2026-08-08 — recommendation confirmed, no preset
+  change.** The validation this bullet asked for was run: `PHASE_F.md` §15.
+  `eval_beam.py --vocab-kind json-strip` (the app's own
+  `loadStrippingNonAlphabet` policy; `--vocab-kind json` is bit-identical here)
+  over full val-9918 at the E1 preset, both ship candidates, three seeds each,
+  against a bar **re-measured on the same 98,081-word trie** from FUTO's real
+  weights. **All five bars clear on the seed mean and on every seed at
+  λ = 1.1 unchanged.** The frequency-scale risk is real — `log_freq` spread
+  collapses 5.40 → 0.64 — but it is offset by coverage: the app trie has *fewer*
+  OOV targets (2.52 % of val vs 3.39 %) because the 63,851 words it drops are rare
+  forms nobody typed, and only 12 val rows are in AOSP and not in it. `resbn:80`
+  was additionally test-validated at this lexicon (§16.5). A λ-only re-sweep puts
+  the optimum at 2.0–2.5 (+0.6 to +1.1 t1 on untouched val rows) and is documented
+  in §15.4, but is **not** recommended: it would diverge the shipped preset from
+  the golden fixture and from every published number for a gain no gate needs.
 - **O4 — Non-QWERTY under ctc mode (D6).** Recommend the geometric hedge as
   diffed (never remove swipe coverage a mode switch away). Alternative
   (`Engine.NONE`) is simpler conceptually but strictly worse UX.

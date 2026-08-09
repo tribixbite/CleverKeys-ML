@@ -5,8 +5,13 @@
 **Status: the sealed test-2400 decode happened once, was pre-registered, and was
 independently audited post-hoc.** Both shipping configurations exceed all five
 published FUTO-ceiling numbers — on the seed-mean *and* on every one of six
-individual runs. The seal is now **spent**; no further decode of test-2400 is
-legitimate for any variant, preset, checkpoint or stratum.
+individual runs.
+
+> **Amended 2026-08-08 — test-2400 has since been read a second time, on the
+> user's explicit order, for `fast_resbn80` only.** See "The second unsealing"
+> below and `PHASE_F.md` §16. The split has now been read twice; the ledger of
+> both reads is in `test2400_seal.json["test-2400"]["unsealings"]`. Nothing else
+> was decoded, and no third unsealing is contemplated.
 
 Read in order: `PHASE_A.md` → `PHASE_B.md` → `PHASE_C.md` → `PHASE_D.md` →
 `PHASE_E.md`, then `AUDIT_PREDECODE.md` (the adversarial audit that gated the
@@ -69,6 +74,87 @@ own n's). **86 out-of-vocabulary targets are counted as misses**, not excluded.
 
 The 88.36 headline is the average of a 95.3 and an 81.2. On the How-We-Swipe half
 alone the model is 3.6–4.3 pt *below* the aggregate bar.
+
+## The second unsealing — `fast_resbn80` is test-validated (2026-08-08)
+
+### The disclosure, first
+
+**Who ordered it.** The user, who owns this benchmark, explicitly ordered
+test-validation of `fast_resbn80`. That is the entire authority for the decode.
+`AUDIT_FINAL.md` §7 had declared the seal spent and `PHASE_F.md` §11.1 had said
+throughout that no Phase-F artifact may be quoted as test-validated; both
+statements are superseded **for this one model only**, by instruction, not by
+anything that changed in the evidence.
+
+**Why it is not iterative tuning.** The seal doctrine exists to stop a selection
+loop from touching test. This decode is not one: `fast_resbn80`'s architecture,
+width, dilations, schedule, distillation teacher/weight/temperature, its three
+per-seed checkpoints (selected on beam top-1 over a 5,000-row **val** prefix) and
+the E1 preset it decodes at were all fixed on val-9918 and frozen in `PHASE_F.md`
+§8/§9 before this task existed; the published artifact sha256 are unchanged. The
+first unsealing decoded **ch 128 and ch 192 only** — no `resbn` model had ever
+touched test-2400, so this is a *first* decode for this model rather than a
+re-decode of a tuned variant. Nothing was being chosen: the preset is frozen, the
+seeds are the three already published, Phase F is closed, and the result cannot
+feed back into any model or hyper-parameter.
+
+**What was pre-stated, before the numbers were seen.** `PHASE_F.md` §16 was
+written and **committed before the decode ran** (commit `50c303a`). It registered:
+the claim wording; a hard cap of **2 configurations × 3 seeds = 6 decodes, one
+each, no warm-up, no retry on partial output**; the frozen preset, beam width,
+top-k, artifacts and metric definitions; the requirement to report all five
+numbers for both configurations regardless of outcome; that **a 4-of-5 result is a
+failed gate**; and a numeric prediction — config-A seed-mean
+87.64/92.35/93.12/90.66/86.09, derived from val plus the val→test shift the first
+unsealing showed. **That prediction was wrong in the unfavourable direction on
+four of five metrics** (measured −0.35/−0.46/−0.30/+0.51/−0.79 against it), which
+is recorded in `PHASE_F.md` §16.5 rather than quietly dropped.
+
+**What it costs.** test-2400 has now been read twice. Every future claim rests on
+a more worn split, and that is the price of this table.
+
+### The numbers
+
+`fast_resbn80` — 279,346 params, 0.215 ms, seeds 1234/4321/7777, E1 preset, beam
+100, top-k 8, OOV counted as a miss. Two configurations: **A** the AOSP STRIP
+146,964-word trie (protocol-identical to the Phase-E decode, comparable to the
+published bar) and **B** the shipping lexicon `en_enhanced.json` (98,081 words),
+compared against a bar re-measured on that same trie from FUTO's real weights
+(`PHASE_F.md` §15.2 — benchmarking only, no training contact).
+
+| config A (AOSP 146,964) | s1234 | s4321 | s7777 | **seed-mean** | sd | worst | bar | **Δ** | z |
+|---|---|---|---|---|---|---|---|---|---|
+| t1 | 86.75 | 87.42 | 87.71 | **87.29** | 0.40 | 86.75 | 84.83 | **+2.46** | **3.4** |
+| t3 | 91.42 | 92.12 | 92.12 | **91.89** | 0.33 | 91.42 | 91.04 | **+0.85** | 1.5 |
+| t5 | 92.62 | 92.83 | 93.00 | **92.82** | 0.15 | 92.62 | 92.08 | **+0.74** | 1.3 |
+| ≤3 (n=815) | 90.80 | 91.53 | 91.17 | **91.17** | 0.30 | 90.80 | 89.57 | **+1.60** | 1.5 |
+| 4+ (n=1,585) | 84.67 | 85.30 | 85.93 | **85.30** | 0.51 | 84.67 | 82.40 | **+2.90** | **3.0** |
+
+| config B (app 98,081) | s1234 | s4321 | s7777 | **seed-mean** | sd | worst | bar | **Δ** | z |
+|---|---|---|---|---|---|---|---|---|---|
+| t1 | 85.96 | 86.38 | 87.21 | **86.51** | 0.52 | 85.96 | 84.92 | **+1.59** | 2.2 |
+| t3 | 91.92 | 92.42 | 92.50 | **92.28** | 0.26 | 91.92 | 91.54 | **+0.74** | 1.3 |
+| t5 | 93.04 | 93.33 | 93.38 | **93.25** | 0.15 | 93.04 | 92.96 | **+0.29** | 0.6 |
+| ≤3 (n=815) | 90.18 | 90.55 | 91.53 | **90.76** | 0.57 | 90.18 | 89.57 | **+1.19** | 1.1 |
+| 4+ (n=1,585) | 83.79 | 84.23 | 84.98 | **84.33** | 0.49 | 83.79 | 82.52 | **+1.81** | 1.9 |
+
+**All five bars clear, on the seed mean and on every individual seed, under both
+lexicons.** `fast_resbn80`'s evidence tier is therefore **test-validated**, and it
+joins ch 128 and ch 192 as the only configurations that are. Two things to read
+carefully: config B's **top-5 worst-seed margin is +0.08 pt — two rows of 2,400**,
+the same knife edge Phase F flagged on val; and the statistical resolution is
+weaker than the first unsealing's — only t1 and 4+ resolve at z > 2 under config
+A, and nothing does under config B.
+
+Per-source seed-mean top-1: config A **94.63** FUTO / **79.74** HWS (spread 14.89),
+config B **93.37** / **79.46** (13.91), against ch 128's 95.07 / 80.56. The
+14-point internal spread is unchanged, and the app lexicon costs the FUTO half
+1.26 pt while leaving the HWS half flat.
+
+Against the ch 128 anchor at the same trie, `fast_resbn80` is **−0.63 t1 / −0.44
+t3 / −0.18 t5 / +0.09 ≤3 / −0.99 4+** — the val-measured −0.61 t1 trade transfers
+to test essentially unchanged. **`fast_resbn72` (0.186 ms) and every other Phase-F
+artifact remain val-only and were not decoded.**
 
 ## Statistical resolution — three of five bars are not resolved
 
@@ -142,10 +228,15 @@ the graph carries no normalization node), 188 k training steps, and is distilled
 from our own ch 192 checkpoint. **It has never been decoded on test-2400 and never
 may be** — the seal is spent — so unlike ch 128 it carries val evidence only.
 
-If you want top-5 margin, take `artifacts/fast_resbn80_s1234.onnx` instead
-(279,346 params, **0.215 ms**, 1.1 MB, 2.20×): its t5 seed-mean is statistically
-the same (92.89 vs 92.87) but its **worst seed clears the t5 bar by 0.05 pt against
-`resbn72`'s 0.01**.
+**`fast_resbn80` is the better-evidenced of the two speed variants, and as of
+2026-08-08 it is test-validated.** `artifacts/fast_resbn80_s1234.onnx` — 279,346
+params, **0.215 ms**, 1.1 MB, 2.20× — clears all five bars on **val and on
+test-2400**, on every seed, at both the AOSP tuning lexicon and the shipped
+`en_enhanced.json` (see "The second unsealing" above). Against `resbn72` its val
+t5 seed-mean is statistically the same (92.89 vs 92.87) but its **worst seed
+clears the val t5 bar by 0.05 pt against `resbn72`'s 0.01** — and unlike
+`resbn72` it now has test evidence. If APK size or latency matters more than the
+0.63 t1 gap to ch 128, this is the variant to take.
 
 `PHASE_F.md` has the frontier and the negative results. Everything at or under
 0.15 ms misses top-5 — by 0.19 pt at 0.141 ms and 0.13 pt (three seeds) at
@@ -179,18 +270,20 @@ the audited decode ran on (verified by sha256 against `ckpt/<arm>/`).
 | `ctc_model_golden.json` | golden fixture, from `ch128_s1234` **at the E1 preset** | — | 140,204 | `a18ea58cd662b0e18b6daadaf417361f93fd0b146ce6478d4d6a62e7e185fa8a` |
 | `ctc_swipe_encoder.onnx` | ⚠ **superseded** pre-campaign `r2` | 394,114 | 1,619,140 | `fcf1633167b10f5c28e7c4dc16a9bba178bacc9e2b76efb06d792162dc99d0b7` |
 
-Phase-F additions — **val-validated only**, never decoded on the sealed test split.
-Same contract, opset 17, fp32, plus zero normalization nodes (BatchNorm folded at
-export). Full table, parity checks and the frontier in `PHASE_F.md` §6/§8/§9.
+Phase-F additions. Same contract, opset 17, fp32, plus zero normalization nodes
+(BatchNorm folded at export). Full table, parity checks and the frontier in
+`PHASE_F.md` §6/§8/§9. The `resbn72` rows are **val-validated only** and have
+never been decoded on test-2400; the `resbn80` rows were test-validated by the
+second unsealing (`PHASE_F.md` §16.5).
 
-| file | arm | params | bytes | ms | all five val bars |
-|---|---|---|---|---|---|
-| `fast_resbn72_s1234.onnx` ← Phase-F candidate | `phaseF-N72-188k` | 229,642 | 944,487 | 0.186 | **yes**, every seed |
-| `fast_resbn72_s4321.onnx` | `phaseF-N72-188k-s4321` | 229,642 | 944,487 | 0.186 | **yes** |
-| `fast_resbn72_s7777.onnx` | `phaseF-N72-188k-s7777` | 229,642 | 944,487 | 0.186 | **yes** |
-| `fast_resbn80_s1234.onnx` — wider t5 margin | `phaseF-I-resbn80x4` | 279,346 | 1,142,727 | 0.215 | **yes**, every seed |
-| `fast_resbn80_s4321.onnx` | `phaseF-FINAL-resbn80x4-s4321` | 279,346 | 1,142,727 | 0.215 | **yes** |
-| `fast_resbn80_s7777.onnx` | `phaseF-FINAL-resbn80x4-s7777` | 279,346 | 1,142,727 | 0.215 | **yes** |
+| file | arm | params | bytes | ms | all five val bars | test |
+|---|---|---|---|---|---|---|
+| `fast_resbn72_s1234.onnx` ← Phase-F candidate | `phaseF-N72-188k` | 229,642 | 944,487 | 0.186 | **yes**, every seed | never decoded |
+| `fast_resbn72_s4321.onnx` | `phaseF-N72-188k-s4321` | 229,642 | 944,487 | 0.186 | **yes** | never decoded |
+| `fast_resbn72_s7777.onnx` | `phaseF-N72-188k-s7777` | 229,642 | 944,487 | 0.186 | **yes** | never decoded |
+| `fast_resbn80_s1234.onnx` — wider t5 margin | `phaseF-I-resbn80x4` | 279,346 | 1,142,727 | 0.215 | **yes**, every seed | **all five, both lexicons** |
+| `fast_resbn80_s4321.onnx` | `phaseF-FINAL-resbn80x4-s4321` | 279,346 | 1,142,727 | 0.215 | **yes** | **all five** |
+| `fast_resbn80_s7777.onnx` | `phaseF-FINAL-resbn80x4-s7777` | 279,346 | 1,142,727 | 0.215 | **yes** | **all five** |
 | `fast_resbn64_188k_s1234.onnx` ⚠ frontier evidence | `phaseF-L64-188k` | 185,058 | 766,727 | 0.162 | **no** — t5 92.76 vs 92.80 |
 | `fast_resbn56_188k_s1234.onnx` ⚠ frontier evidence | `phaseF-L56-188k` | 145,594 | 609,445 | 0.142 | **no** — t5 92.65 vs 92.80 |
 
@@ -230,7 +323,17 @@ accuracy artifact.
    the val comparison. The test bar was published on the 131,544-word DROP trie and
    re-measured unchanged on the 146,964 one, so the overall test comparison is
    trie-neutral; its **strata were not republished**, so ≤3 and 4+ on test are
-   compared across normalizers.
+   compared across normalizers. **The app will not ship that trie** — it ships the
+   bundled 98,140-entry `en_enhanced.json` (98,081 words after a–z stripping),
+   whose byte frequencies are floored at 134–255 and whose `log_freq` spread is
+   therefore 0.64 against the AOSP trie's 5.40, an 8× collapse of the scale the
+   E1 `lambda = 1.1` was fitted on. That was validated end-to-end in `PHASE_F.md`
+   §15: the app trie has **fewer** OOV targets (2.52 % of val vs 3.39 %), the bar
+   was re-measured on it from FUTO's real weights so the comparison stays
+   trie-matched, and **both ship candidates clear all five bars on every seed at
+   the unchanged preset**. A λ-only re-sweep is worth +0.6 to +1.1 t1 at λ 2.0–2.5
+   and is documented there, but is **not** taken: every number in this file and
+   the golden fixture are quoted at λ = 1.1.
 6. **Arm selection used full val.** The preset sweep (val `0:4959`) and checkpoint
    selection (5,000-row prefix) respected a holdout, but *which* arms were stacked
    was decided on full val-9918 tables.
@@ -240,7 +343,13 @@ accuracy artifact.
    120-row smoke decode with a toy 898-word trie. **7 traces are bit-exactly shared
    between val-9918 and test-2400.** During the post-decode hygiene pass, 3 test
    rows were decoded to verify the new `--unseal-test` override branch; no number
-   from that run appears anywhere.
+   from that run appears anywhere. **Second unsealing, 2026-08-08:** six more
+   decodes (`fast_resbn80` × 3 seeds × 2 lexicons) on the user's order, plus three
+   re-scores of FUTO's own cached ceiling emissions on test-2400 to obtain a
+   trie-matched bar (an external reference, no CleverKeys model involved). Both
+   reads, and the prior contact above, are now logged in
+   `test2400_seal.json["test-2400"]` under `unsealings` / `prior_contact`;
+   `seal.py --emit` preserves that ledger across a fingerprint regeneration.
 
 ## Next — app-side (not this repo)
 
@@ -260,6 +369,12 @@ accuracy artifact.
    the GPL-3.0 `swipe-library` are already committed on the app side.
 5. **Re-measure latency on a phone little core.** 0.455 ms is a desktop x86 core; the
    trie beam over 147 k words, not the encoder, dominates the per-swipe budget.
+   On device the beam runs over the **98 k** app trie, which is a third smaller.
+6. **O3 is closed: ship `dictionaries/en_enhanced.json`** via
+   `CtcLexiconTrie.loadStrippingNonAlphabet`, with the preset unchanged. Validated
+   in `PHASE_F.md` §15 on val (both candidates, three seeds each) and in §16.5 on
+   test (`fast_resbn80`, three seeds). No new dictionary asset is needed and no
+   λ change is required.
 
 ---
 
