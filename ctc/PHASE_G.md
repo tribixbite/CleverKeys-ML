@@ -385,3 +385,72 @@ at the second unsealing (`PHASE_F.md` §16.5: config A −0.18/−0.24/−0.07/+
 written as one. All five numbers for both configurations are reported
 regardless of outcome; the tier moves only if config A clears all five on the
 seed mean *and* on every seed — the same rule as both prior unsealings.
+
+### 7.5 Result — `resbn80g` clears all five test bars on both footings, on every seed
+
+Run 2026-08-09 exactly as registered: six decodes, one per (config, seed), no
+warm-up, no retry. `seal.py` logged the 2,400/2,400 overlap and the
+`--unseal-test` override on each; the ledger entry is
+`test2400_seal.json["test-2400"]["unsealings"][2]`. OOV = miss (86 rows config
+A, 64 config B). Greedy-CTC 70.96 / 69.71 / 67.96 %.
+
+#### Config A — AOSP STRIP 146,964, E1 preset
+
+| metric | s1234 | s4321 | s7777 | **seed-mean** | worst | **published bar** | **Δ** | gate |
+|---|---|---|---|---|---|---|---|---|
+| t1 | 87.83 | 88.08 | 87.12 | **87.68** | 87.12 | 84.83 | **+2.85** | **PASS** |
+| t3 | 92.29 | 92.38 | 91.88 | **92.18** | 91.88 | 91.04 | **+1.14** | **PASS** |
+| t5 | 93.04 | 92.92 | 92.50 | **92.82** | 92.50 | 92.08 | **+0.74** | **PASS** |
+| ≤3 (n=815) | 91.17 | 91.04 | 90.18 | **90.80** | 90.18 | 89.57 | **+1.23** | **PASS** |
+| 4+ (n=1,585) | 86.12 | 86.56 | 85.55 | **86.08** | 85.55 | 82.40 | **+3.68** | **PASS** |
+
+**All five clear on the seed mean and on every individual seed → `resbn80g` is
+test-validated.** Against the incumbent `fast_resbn80`'s config-A test
+seed-mean (87.29/91.89/92.82/91.17/85.30): **+0.39 t1, +0.29 t3, +0.00 t5,
+−0.37 ≤3, +0.78 4+** — the upgrade transfers to test on t1/t3/4+, t5 is level,
+and ≤3 gives back a third of its val gain.
+
+#### Config B — the shipping configuration: app trie 98,081 at the app-tuned preset
+
+| metric | s1234 | s4321 | s7777 | **seed-mean** | worst | **trie-matched bar** | **Δ** | gate |
+|---|---|---|---|---|---|---|---|---|
+| t1 | 88.42 | 88.29 | 87.71 | **88.14** | 87.71 | 84.92 | **+3.22** | **PASS** |
+| t3 | 93.17 | 93.38 | 93.12 | **93.22** | 93.12 | 91.54 | **+1.68** | **PASS** |
+| t5 | 94.08 | 93.92 | 93.71 | **93.90** | 93.71 | 92.96 | **+0.94** | **PASS** |
+| ≤3 (n=815) | 92.15 | 92.27 | 91.17 | **91.86** | 91.17 | 89.57 | **+2.29** | **PASS** |
+| 4+ (n=1,585) | 86.50 | 86.25 | 85.93 | **86.23** | 85.93 | 82.52 | **+3.71** | **PASS** |
+
+**All five clear, on every seed, with the worst-seed t5 margin at +0.75 —
+against the +0.08 knife edge the incumbent shipped with.** The declared
+asymmetry stands: our preset is val-tuned, the bar's is published; config B is
+a shipping validation, not an equal-footing claim.
+
+#### The predictions, scored
+
+| | t1 | t3 | t5 | ≤3 | 4+ |
+|---|---|---|---|---|---|
+| config A, predicted → measured | 87.54 → **87.68** (+0.14) | 92.01 → **92.18** (+0.17) | 92.90 → **92.82** (−0.08) | 91.60 → **90.80** (−0.80) | 85.46 → **86.08** (+0.62) |
+| config B, predicted → measured | 88.12 → **88.14** (+0.02) | 93.06 → **93.22** (+0.16) | 93.80 → **93.90** (+0.10) | 92.17 → **91.86** (−0.31) | 86.05 → **86.23** (+0.18) |
+
+Using the same-architecture val→test shift fixed the aggregate metrics (config
+B within 0.2 everywhere; config A within 0.2 on t1/t3/t5) but the ≤3 stratum
+again moved oppositely to its prediction (−0.80) — the short-word stratum's
+val→test behaviour remains the unstable one across all three unsealings.
+
+#### Equal footing (config A vs the val-tuned bar 87.12/92.29/92.96/89.94/85.68)
+
+Seed-mean Δ: **+0.56 t1, −0.11 t3, −0.14 t5, +0.86 ≤3, +0.40 4+** — 3 of 5,
+as §7.4 predicted ("expected NOT to clear all five"; the miss set differs:
+4+ came in positive, ≤3's margin halved). Exact paired McNemar on t1 against
+FUTO's per-row val-tuned output: **+17 (p 0.17), +23 (p 0.052), +0 (p 1.00)**
+— level-to-slightly-ahead, resolved on no seed. That is still a real move from
+the incumbent, whose McNemar had one net-*negative* seed and which lost t3/t5/4+
+by 0.14–0.40: `resbn80g` turns three equal-footing losses into two −0.1 ties
+and a +0.40 win. **No equal-footing superiority claim is made**, per §7.2.
+
+#### Per-source
+
+Seed-mean t1 by corpus half: config A **94.80 FUTO / 80.36 HWS** (spread
+14.44), config B **94.55 / 81.54** (13.01). The 14-point internal spread is
+unchanged from every prior read of this split; the app footing narrows it by
+~1.4 pt from the HWS side.

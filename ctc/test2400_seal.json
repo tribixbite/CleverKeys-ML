@@ -2430,6 +2430,16 @@
     "preset": "1.05,1.1,0.2,0.3734,0.9882 (frozen, unchanged from unsealing 1)",
     "published_in": "PHASE_F.md sec 16; RESULTS.md 'The second unsealing'",
     "trie": "config A: AOSP STRIP 146964; config B: app en_enhanced.json STRIP 98081"
+   },
+   {
+    "authorised_by": "the user (benchmark owner), directive of 2026-08-09: 'retrain and reexport and re-run tests on new onnx (resbn80)', gated on the 3-seed val seed-mean clearing all five val bars (gate passed, PHASE_G.md sec 5)",
+    "date": "2026-08-09",
+    "decoded": "phaseG-C80-188k-nokd{,-s4321,-s7777} (resbn80g: 188k steps, coupled affine sampler, NO distillation), 2 configs x 3 seeds = 6 decodes",
+    "n": 3,
+    "note": "pre-registered in PHASE_G.md sec 7, committed at 46aecb1 BEFORE the decode; artifact sha256s frozen in sec 7.3; config B decodes at the newly adopted app preset (tuned on val only)",
+    "preset": "config A: 1.05,1.1,0.2,0.3734,0.9882 (E1); config B: 0.9,4.0,0.25,0.25,0.9882 (app-tuned, PHASE_G.md sec 6)",
+    "published_in": "PHASE_G.md sec 7.5; RESULTS.md 'The third unsealing'",
+    "trie": "config A: AOSP STRIP 146964; config B: app en_enhanced.json STRIP 98081"
    }
   ],
   "words_sha256": "f6053959aab98353337c0b9cbcf65497bdf76a1598c444db70d35bf03318b5d3"
