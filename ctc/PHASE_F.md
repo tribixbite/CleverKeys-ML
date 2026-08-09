@@ -921,3 +921,256 @@ comfortable: t1 +1.75, ≤3 +1.20, 4+ +2.03, and its seed sd on t1 is 0.03, the
 tightest of any arm in the campaign.
 
 ---
+
+## 15. O3 — the shipped-lexicon validation (val-9918, not sealed)
+
+Every Phase-E/F number above was decoded against the AOSP `en_wordlist.combined`
+STRIP trie: **146,964** words, raw frequencies `1..222`, `log_freq ∈ [0.00, 5.40]`.
+The app will not ship that file. `APP_INTEGRATION_PLAN.md` D4/O3 selects the
+bundled `dictionaries/en_enhanced.json` — **98,140** entries whose values are
+already compressed onto a **134..255** byte scale, i.e. `log_freq ∈ [4.898, 5.541]`
+— loaded with `CtcLexiconTrie.loadStrippingNonAlphabet` (**98,081** words after
+a–z stripping) and merged with the user dictionary at runtime.
+
+The residual risk O3 named is the **λ term**: `final = ctc/L^gamma + beta*L +
+lambda*log_freq`, and E1's `lambda = 1.1` was fitted against a `log_freq` whose
+spread is 15× wider. A constant offset is harmless (it cancels across candidates
+of any length), so what matters is the *spread*, and it collapses:
+
+| trie | words | `log_freq` span | sd (all words) | sd (83,113-word overlap) |
+|---|---|---|---|---|
+| AOSP STRIP | 146,964 | 5.403 | 1.354 | 0.514 |
+| `en_enhanced` STRIP | 98,081 | 0.643 | 0.089 | 0.092 |
+
+Rank agreement on the overlap is Spearman **0.844** (Pearson 0.610), and the OLS
+slope of AOSP `log_freq` on app `log_freq` is **3.42** — so a scale-matched λ
+would land somewhere in 3.8–6.2, and a variance-matched one at ~16.6. Measured
+below, the optimum is **2.0–2.5**.
+
+### 15.1 Coverage moves the *other* way — the 98k trie has **fewer** OOV targets
+
+| split | OOV under AOSP 146,964 | OOV under `en_enhanced` 98,081 |
+|---|---|---|
+| val-9918 | 336 rows (**3.39 %**) — ≤3 78 / 4+ 258 | 250 rows (**2.52 %**) — ≤3 20 / 4+ 230 |
+| test-2400 | 86 rows (**3.58 %**) — ≤3 20 / 4+ 66 | 64 rows (**2.67 %**) — ≤3 6 / 4+ 58 |
+
+The app trie is a third smaller and still covers **86 more val rows and 22 more
+test rows** (0.87 / 0.92 pt of reachable top-1), because the 63,851 words it drops
+relative to AOSP are overwhelmingly rare forms nobody in these corpora typed,
+while it adds 14,820 the AOSP list lacks. Only **12 val rows / 2 test rows** are
+in AOSP and *not* in the app trie. Fewer words also means fewer confusables in the
+beam, which is why top-3/top-5 rise more than top-1 does.
+
+DROP vs STRIP is a null here: `en_enhanced.json` contains no apostrophes (it is
+already a–z-aliased), so stripping only turns 207 accented entries into 148
+consonant skeletons, and **every val number below is bit-identical under the two
+policies** (`--vocab-kind json` vs `json-strip`).
+
+### 15.2 The bar, re-measured on the app trie — the comparison is trie-matched
+
+Comparing our app-trie numbers to a bar measured on a *different* trie would be
+worthless (§15.1 shows the app trie is the easier of the two). FUTO's real
+encoder + `magic_macaw` weights are on this box (`FUTO_WEIGHTS_VERIFICATION.md`),
+and their cached `[N,32,27]` ceiling emissions re-score through the committed
+`sweep_scoring.py --eval-only` path, so the bar itself was re-measured against the
+app lexicon at FUTO's own published preset. **No FUTO output entered any training
+loop or any selection decision; this is benchmarking only** (that document's §0).
+
+Validation of the re-scoring path first — at the AOSP trie it reproduces the
+verification document to the digit on both splits (val 85.54/91.52/92.78/89.29/83.60
+and test 84.92/91.38/92.42/89.94/82.33):
+
+| bar (FUTO ceiling, published preset) | t1 | t3 | t5 | ≤3 | 4+ |
+|---|---|---|---|---|---|
+| val, AOSP 146,964 (**the Phase-E/F bar**) | 85.52 | 91.54 | 92.80 | 89.29 | 83.57 |
+| val, AOSP 146,964 (re-measured here) | 85.54 | 91.52 | 92.78 | 89.29 | 83.60 |
+| **val, `en_enhanced` 98,081** | **85.59** | **91.82** | **93.20** | **89.05** | **83.80** |
+| test, DROP 131,544 (**the published test bar**) | 84.83 | 91.04 | 92.08 | 89.57 | 82.40 |
+| test, AOSP 146,964 (re-measured here) | 84.92 | 91.38 | 92.42 | 89.94 | 82.33 |
+| **test, `en_enhanced` 98,081** | **84.92** | **91.54** | **92.96** | **89.57** | **82.52** |
+
+FUTO's λ is 0.0134, so the frequency-scale collapse barely touches it; the app
+trie moves its bar almost entirely through coverage — **t5 +0.42 on val and +0.54
+on test**, ≤3 *down* 0.24 / 0.37. The top-5 bar is the one this campaign has been
+fighting, and it is **higher** on the shipped lexicon.
+
+### 15.3 Result — both candidates clear all five bars on the app trie, unchanged preset
+
+Full val-9918, E1 preset `1.05,1.1,0.2,0.3734,0.9882`, beam 100, top-k 8, through
+`eval_beam.py --vocab-kind json-strip`. The AOSP column is a control and
+reproduces the committed numbers exactly (ch 128 88.02/92.27/93.03/91.12/86.41
+from `PHASE_E`; `resbn:80` 87.41/92.18/92.85/90.38/85.86 from §8).
+
+| model (seed 1234) | trie | t1 | t3 | t5 | ≤3 | 4+ |
+|---|---|---|---|---|---|---|
+| ch 128 | AOSP 146,964 | 88.02 | 92.27 | 93.03 | 91.12 | 86.41 |
+| ch 128 | **`en_enhanced`** | **88.03** | **92.86** | **93.76** | **91.21** | **86.38** |
+| `resbn:80` | AOSP 146,964 | 87.41 | 92.18 | 92.85 | 90.38 | 85.86 |
+| `resbn:80` | **`en_enhanced`** | **86.87** | **92.43** | **93.45** | **90.35** | **85.07** |
+
+Three seeds each on the app trie, against the **trie-matched** bar of §15.2
+(85.59 / 91.82 / 93.20 / 89.05 / 83.80):
+
+| model | metric | s1234 | s4321 | s7777 | seed-mean | Δ vs app-trie bar | worst seed |
+|---|---|---|---|---|---|---|---|
+| ch 128 | t1 | 88.03 | 87.74 | 88.10 | **87.96** | **+2.37** | 87.74 **PASS** |
+| ch 128 | t3 | 92.86 | 92.64 | 92.80 | **92.77** | **+0.95** | 92.64 **PASS** |
+| ch 128 | t5 | 93.76 | 93.62 | 93.62 | **93.67** | **+0.47** | 93.62 **PASS** |
+| ch 128 | ≤3 | 91.21 | 91.65 | 91.62 | **91.49** | **+2.44** | 91.21 **PASS** |
+| ch 128 | 4+ | 86.38 | 85.71 | 86.28 | **86.12** | **+2.32** | 85.71 **PASS** |
+| `resbn:80` | t1 | 86.87 | 86.86 | 87.05 | **86.93** | **+1.34** | 86.86 **PASS** |
+| `resbn:80` | t3 | 92.43 | 92.47 | 92.26 | **92.39** | **+0.57** | 92.26 **PASS** |
+| `resbn:80` | t5 | 93.45 | 93.64 | 93.45 | **93.51** | **+0.31** | 93.45 **PASS** |
+| `resbn:80` | ≤3 | 90.35 | 90.47 | 90.71 | **90.51** | **+1.46** | 90.35 **PASS** |
+| `resbn:80` | 4+ | 85.07 | 84.99 | 85.16 | **85.07** | **+1.27** | 84.99 **PASS** |
+
+**All five bars clear, on the seed mean and on every individual seed, for both
+candidates, at the frozen E1 preset.** The λ scale mismatch O3 flagged is real but
+is not a gate risk: swapping the lexicon costs `resbn:80` 0.54 t1 and buys it
+0.60 t5, and against the trie-matched bar its narrowest margin **improves** from
++0.05 (§8, AOSP) to **+0.31** on top-5. **No preset change is required to ship the
+app lexicon.**
+
+### 15.4 λ-only re-sweep — not required, but worth +0.6 to +1.1 t1 if a divergence is acceptable
+
+Run anyway (val is not sealed and the analytic re-scoring makes it free): λ swept
+alone on val`[0:4959]` with γ/β/γp/βp pinned at E1, confirmed on the untouched
+val`[4959:9918]`, `sweep_scoring.py --lambda-only`.
+
+| λ | ch 128 t1 (sel) | `resbn:80` t1 (sel) |
+|---|---|---|
+| 0.0 | 85.64 | 85.48 |
+| 1.1 (**E1, incumbent**) | 88.18 | 87.34 |
+| 2.0 | **88.79** | 88.20 |
+| 2.5 | — | **88.51** |
+| 3.0 | 88.77 | 88.34 |
+| 4.0 | 88.65 | 88.40 |
+| 6.0 | 88.10 | 87.86 |
+| 10.0 | 85.84 | 85.52 |
+| 30.0 | 71.57 | — |
+
+| model | selection winner | untouched holdout Δ | full-val Δ (t1 / t3 / t5) |
+|---|---|---|---|
+| ch 128 | λ **2.0** | **+0.58** t1 | 88.03 → **88.63** (+0.59) / +0.23 / +0.22 |
+| `resbn:80` | λ **2.5** | **+1.01** t1 | 86.87 → **87.96** (+1.09) / +0.39 / +0.27 |
+
+The gain holds on rows the sweep never saw and on all five metrics, so unlike the
+Phase-E "free win" retraction this is not a selection artifact — but it is also
+**not needed**: §15.3 already clears every bar. Two arguments against taking it:
+the golden fixture, `CtcScoringParams.tunedV2`, and every test-validated number in
+`RESULTS.md` are all quoted at λ = 1.1, and a preset that differs between the
+benchmark and the shipped app is exactly the divergence Phase F's decision list
+refused for +0.12 t1. **Recommendation: ship λ = 1.1.** If a second preset is ever
+accepted, λ = 2.0–2.5 is the measured optimum for the app lexicon and nothing else
+in the preset moves.
+
+### 15.5 What §15 does not cover
+
+* **User words are not simulated.** The app merges the user dictionary into the
+  trie (custom words at freq 1000 → clamped to 255, i.e. top of scale). That can
+  only add coverage, but it also adds top-of-scale competitors, and no eval here
+  has a user dictionary in it.
+* **Single lexicon snapshot.** `en_enhanced.json` as committed at app-repo
+  `79ddfb0f`; a dictionary refresh invalidates §15.2's bar, not just our numbers.
+* **The preset asymmetry is unchanged.** Our preset is tuned on the val family,
+  FUTO's is published; §15.2 re-measures FUTO's bar on the new trie at *its*
+  published preset and makes no attempt to re-tune it, exactly as before.
+
+---
+
+## 16. Pre-registration — the second unsealing of test-2400 (`fast_resbn80`)
+
+**Written and committed before the decode was run.** Everything below is fixed at
+commit time; the results section is added afterwards and may not restate the plan.
+
+### 16.1 Who ordered it, and why this is not iterative tuning
+
+**The user — who owns this benchmark — explicitly ordered test-validation of
+`fast_resbn80`.** That is the entire authority for this decode; nothing in the
+evidence changed and no model was retrained to earn it.
+
+`AUDIT_FINAL.md` §7 declared the seal spent, and §11.1 of this document has said
+throughout that no Phase-F artifact may be quoted as test-validated. The reason
+the seal doctrine exists is to stop a *selection* loop from touching test. The
+facts that make this decode not that loop:
+
+1. **`fast_resbn80` never saw test in any capacity.** Its architecture, channel
+   width, dilation ladder, schedule length, KD teacher, KD weight and temperature,
+   its per-seed checkpoints (selected on beam top-1 over a 5,000-row *val* prefix)
+   and the E1 preset it decodes at were all fixed on val-9918 and frozen in §8
+   before this task existed. The artifacts' sha256 are published in §9 and are
+   unchanged.
+2. **The first unsealing decoded ch 128 and ch 192 only** (`AUDIT_FINAL.md` §1).
+   No `resbn` model has ever been decoded on test-2400. This is a *first* decode
+   for this model, not a re-decode of a tuned variant.
+3. **Nothing is being chosen.** The preset is frozen, the seeds are the three
+   already published, the trie is the one already published, and the outcome
+   cannot feed back into any model or hyper-parameter — Phase F is closed.
+4. **What it costs is stated, not hidden.** A second unsealing weakens the split
+   for any *future* claim; test-2400 has now been read twice. Every number this
+   decode produces is disclosed in `RESULTS.md` under the same caveat set as the
+   first, including the preset asymmetry and the contributor contamination, and
+   the split must be treated as increasingly worn.
+
+### 16.2 The claim being registered
+
+> **Claim as registered:** on the 2,400-row test split, `fast_resbn80`
+> (`phaseF-I-resbn80x4` / `phaseF-FINAL-resbn80x4-s{4321,7777}`, 279,346 params,
+> 0.215 ms), decoded at the frozen val-tuned E1 preset, is compared against FUTO's
+> published encoder+refinement ceiling decoded at FUTO's published preset. A pass
+> moves this model's evidence tier from **val-only** to **test-validated**; it is
+> **not** a claim of superiority on equal footing — the presets are not matched.
+
+### 16.3 The runs — hard cap, one decode each, no iteration
+
+**Maximum 2 configurations × 3 seeds = 6 decodes. Nothing more.** No fourth seed,
+no second preset, no `--limit` warm-up, no re-run on a crash using partial output.
+
+| # | config | trie | why |
+|---|---|---|---|
+| A | E1 preset, `data/futo_en_wordlist.combined` | AOSP STRIP 146,964 | protocol-identical to the Phase-E decode; comparable to the published test bar |
+| B | E1 preset, `en_enhanced.json` `--vocab-kind json-strip` | app 98,081 | the shipping configuration, validated as such in §15; compared against the trie-matched test bar of §15.2 |
+
+Config B is included because §15 establishes `en_enhanced` as the ship lexicon;
+its bar is `84.92 / 91.54 / 92.96 / 89.57 / 82.52` (§15.2), **not** the published
+`84.83 / 91.04 / 92.08 / 89.57 / 82.40`, which belongs to config A.
+
+```bash
+for a in phaseF-I-resbn80x4 phaseF-FINAL-resbn80x4-s4321 phaseF-FINAL-resbn80x4-s7777; do
+  python3 eval_beam.py --onnx ckpt/$a/ctc_swipe_encoder.onnx \
+    --test data/test_hwsfuto.jsonl --preset 1.05,1.1,0.2,0.3734,0.9882 \
+    --beam-width 100 --top-k 8 --unseal-test --out ckpt/$a/test2400_e1.jsonl
+done   # config A; config B adds --vocab-kind json-strip --vocab <en_enhanced.json>
+```
+
+Frozen: preset `1.05,1.1,0.2,0.3734,0.9882`; beam width 100; `top_k` 8; the
+committed `ckpt/<arm>/ctc_swipe_encoder.onnx`, sha256-verified byte-identical to
+`artifacts/fast_resbn80_s{1234,4321,7777}.onnx` (§9); metric = seed-mean over
+1234/4321/7777 of top-1/3/5 and the ≤3 (n=815) / 4+ (n=1,585) strata; **OOV counts
+as a miss**; per-source (futo/hws) split reported from
+`cache/holdout_source_tags.json["test"]` without a second decode.
+
+### 16.4 Pre-stated expectations (so a miss cannot be re-explained afterwards)
+
+Val seed-mean at the AOSP trie (§8): **87.47 / 92.13 / 92.89 / ≤3 90.35 /
+4+ 85.98**. The val→test shifts measured at the first unsealing:
+
+| config | t1 | t3 | t5 | ≤3 | 4+ |
+|---|---|---|---|---|---|
+| ch 192 | +0.30 | +0.33 | +0.42 | +0.51 | +0.19 |
+| ch 128 | +0.04 | +0.10 | +0.04 | +0.10 | +0.03 |
+| mean | +0.17 | +0.22 | +0.23 | +0.31 | +0.11 |
+
+**Predicted config-A test seed-mean: 87.64 / 92.35 / 93.12 / 90.66 / 86.09**,
+i.e. **+2.81 / +1.31 / +1.04 / +1.09 / +3.69** over the published test bar —
+expected outcome is a **pass on all five**, with t3 and t5 the narrowest and ≤3
+the one that historically behaves differently (the test ≤3 bar is *higher* than
+the val one, +0.28). For config B, val seed-mean is 86.93 / 92.39 / 93.51 / 90.51 /
+85.07 (§15.3) against a bar of 84.92 / 91.54 / 92.96 / 89.57 / 82.52, so the
+predicted margins are roughly **+2.2 / +1.0 / +0.8 / +1.2 / +2.7**, with **top-5
+the binding metric** exactly as it was all through Phase F.
+
+**A 4-of-5 result is a failed gate** and will be written as one. All five numbers
+for both configurations are reported regardless of outcome, and the tier claim in
+`RESULTS.md` moves only if config A clears all five on the seed mean *and* on
+every seed — the same rule Phase E was held to.

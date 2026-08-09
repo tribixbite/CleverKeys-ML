@@ -10,9 +10,14 @@ published baselines and is what the Kotlin decoder reproduces on-device.
 Usage:
   python eval_beam.py --ckpt ckpt/base/best.pt --test data/val_hwsfuto.jsonl
   python eval_beam.py --onnx ctc_swipe_encoder.onnx --test data/test_hwsfuto.jsonl
+  # the app's shipped lexicon instead of the AOSP tuning trie (O3):
+  python eval_beam.py --onnx artifacts/ch128_s1234.onnx --vocab-kind json-strip \
+         --vocab /path/to/assets/dictionaries/en_enhanced.json
 
 Audit fixes: #15 (--out per-trace JSONL dump), #16 (--workdir pathing, layout
-defaults to the script's directory).
+defaults to the script's directory). ``--vocab-kind`` (see ``lexicon.py``)
+selects which trie a number is measured against; every committed campaign number
+is ``combined``, the default.
 """
 from __future__ import annotations
 
@@ -27,8 +32,8 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from futo_decoder_eval import (featurize, greedy_ctc, len_stratum,  # noqa: E402
-                               load_combined_vocab, load_layout, load_test,
-                               rank_of, Tally)
+                               load_layout, load_test, rank_of, Tally)
+import lexicon  # noqa: E402
 from futo_decoder_ceiling import (DEC_BETA, DEC_BETA_PRUNE, DEC_GAMMA,  # noqa: E402
                                   DEC_GAMMA_PRUNE, DEC_LAMBDA, ENC_BETA,
                                   ENC_BETA_PRUNE, ENC_GAMMA, ENC_GAMMA_PRUNE,
@@ -130,6 +135,7 @@ def main() -> int:
     ap.add_argument("--ckpt", default="")
     ap.add_argument("--onnx", default="")
     ap.add_argument("--vocab", default="data/futo_en_wordlist.combined")
+    lexicon.add_argument(ap)
     ap.add_argument("--test", default="data/val_hwsfuto.jsonl")
     ap.add_argument("--out", default="", help="per-trace JSONL dump (audit fix #15)")
     ap.add_argument("--refine-ckpt", default="", dest="refine_ckpt",
@@ -156,8 +162,8 @@ def main() -> int:
 
     letters, key_centers = load_layout(args.layout)
     num_letters = len(letters)
-    trie = load_combined_vocab(resolve(args.workdir, args.vocab))
-    print(f"trie: {trie.num_words} words")
+    trie = lexicon.load_vocab(resolve(args.workdir, args.vocab), args.vocab_kind)
+    print(f"trie: {trie.num_words} words  (kind '{args.vocab_kind}', {args.vocab})")
     enc = (TorchEncoder(resolve(args.workdir, args.ckpt), args.device) if args.ckpt
            else OnnxEncoder(resolve(args.workdir, args.onnx)))
     refiner = None

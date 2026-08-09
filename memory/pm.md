@@ -406,3 +406,62 @@ Artifacts: fast_resbn72_s{1234,4321,7777}, fast_resbn80_s{1234,4321,7777},
       training loop, was saved as training data, or influenced model/preset selection.
 - Report: `ctc/FUTO_WEIGHTS_VERIFICATION.md`. Scratch run tree (not committed):
       `~/ctc-train/futo_verify/` (venv, artifacts, verbatim harness copies, per-trace out).
+
+2026-08-08 — O3 APP-LEXICON VALIDATION + RESBN80 TEST-VALIDATION (user-ordered)
+
+Two tasks, both scoped and pre-registered before any decode.
+
+- [ ] T1. O3 lexicon validation (val-9918, NOT sealed). The E1 preset was fitted
+      against the 146,964-word AOSP-frequency STRIP trie; the app ships the 98k
+      `en_enhanced.json` trie (byte frequencies floored at 134..255). Verify the
+      `--vocab-json` loader semantics (frequency scale vs the lambda term), then
+      decode full val-9918 for `ch128_s1234` AND `fast_resbn80_s1234` at the E1
+      preset with the app trie. Compare against the five val bars
+      (85.52 / 91.54 / 92.80, <=3 89.29, 4+ 83.57).
+- [ ] T1b. If any bar fails: re-sweep LAMBDA ONLY (the frequency-scale knob) on
+      val[0:4959], confirm on val[4959:9918], report the adjusted preset as the
+      app-ship preset candidate.
+- [ ] T1c. Quantify the OOV impact of the 98k trie vs the 147k one.
+- [ ] T2. resbn80 test-validation — SECOND UNSEALING OF test-2400, ORDERED BY THE
+      USER (the benchmark owner). fast_resbn80 was frozen on val-only evidence in
+      Phase F; its training/selection never saw test; the first unsealing decoded
+      only ch128/ch192. Decode test-2400 ONCE per seed for
+      `fast_resbn80_s{1234,4321,7777}` at the frozen E1 preset + STRIP-146,964
+      trie, identical protocol to the Phase-E decode (`eval_beam.py --preset
+      1.05,1.1,0.2,0.3734,0.9882 --beam-width 100 --top-k 8 --unseal-test`).
+      Pre-state: val seed-mean 87.47/92.13/92.89/90.35/85.98 and the observed
+      val->test shifts of +0.30 (ch192) / +0.04 (ch128). Bars: 84.83/91.04/92.08,
+      <=3 89.57, 4+ 82.40. Also at the en_enhanced trie IFF T1 makes that the ship
+      configuration. HARD CAP: max 2 configs x 3 seeds, one decode each, no
+      iteration.
+- [ ] T3. Document: RESULTS.md (resbn80 evidence tier val-only -> test-validated,
+      with the second-unsealing disclosure paragraph), PHASE_F.md footnote, seal
+      ledger. Commit.
+
+2026-08-08 — ALT-LAYOUT / CROSS-LANGUAGE EMPIRICAL EVAL (user-ordered)
+
+Independent of the O3/resbn80 block above; touches NO sealed split (test-2400 is
+not read by any step here) and NO file that block owns.
+
+Question: the encoders take layout geometry as an INPUT and were trained with
+slot-permutation + affine-jitter augmentation on en_qwerty ONLY. Layout-agnostic
+by design, validated on nothing. Does it transfer? Answer with real corpora.
+
+- [x] A1. Regenerate the five FUTO `swipe-5` per-layout corpora (dvorak/en,
+      azerty/fr, qwertz/de, german/de, spanish/es) — real single-finger human
+      swipes. Vendored fetcher `ctc/fetch_futo_multilayout.mjs`; official
+      geometries to `ctc/layouts/` (verified byte-identical to the app repo's
+      committed `src/test/resources/layouts/futo_*.json`).
+- [x] A2. Establish the frame mapping. Corpus x,y and the layout key centers are
+      BOTH already normalized over the [0,1] letter area, so the mapping is the
+      identity — proven, not assumed, by an endpoint-key proximity metric plus a
+      wrong-geometry falsification control.
+- [x] A3. Alphabet + lexicon policy: a-z emissions as trained; NFD-fold accents,
+      STRIP `'`/`-`, count untypeable (ss/oe/ae) separately. fr/de/es tries from
+      the app's bundled CKDT-v2 dictionaries; en = the campaign's 146,964 STRIP
+      trie, so dvorak varies GEOMETRY ONLY.
+- [x] A4. Harness sanity control: reproduce ch128_s1234 on en_qwerty val-9918
+      at E1 (published 88.02 / 92.27 / 93.03) BEFORE trusting any alt-layout number.
+- [x] A5. Decode all five layouts, both key-slot arms, vs the geometric-engine
+      anchors. Lexicon-frequency-scale confound bounded by a lambda ablation.
+- [x] A6. Report: `ctc/ALT_LAYOUT_EVAL.md` + `eval_altlayout.py`. Commit.

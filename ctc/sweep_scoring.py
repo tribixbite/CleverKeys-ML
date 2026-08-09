@@ -44,8 +44,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from futo_decoder_ceiling import (ENC_BETA, ENC_BETA_PRUNE, ENC_GAMMA,  # noqa: E402
                                   ENC_GAMMA_PRUNE, ENC_LAMBDA,
                                   futo_viterbi_beam, slice_emissions)
-from futo_decoder_eval import (featurize, len_stratum, load_combined_vocab,  # noqa: E402
+from futo_decoder_eval import (featurize, len_stratum,  # noqa: E402
                                load_layout, load_test)
+import lexicon  # noqa: E402
 from model import MAX_KEYS  # noqa: E402
 from paths import DEFAULT_LAYOUT, DEFAULT_WORKDIR, resolve  # noqa: E402
 import seal  # noqa: E402
@@ -208,6 +209,7 @@ def main() -> int:
     ap.add_argument("--layout", type=Path, default=DEFAULT_LAYOUT)
     ap.add_argument("--onnx", default="ckpt/r2/ctc_swipe_encoder.onnx")
     ap.add_argument("--vocab", default="data/futo_en_wordlist.combined")
+    lexicon.add_argument(ap)
     ap.add_argument("--test", default="data/val_hwsfuto.jsonl")
     ap.add_argument("--cache", default="ckpt/r2/sweep_emissions.npz")
     ap.add_argument("--rebuild-cache", action="store_true", dest="rebuild_cache")
@@ -234,6 +236,14 @@ def main() -> int:
     ap.add_argument("--grid-beta-prune", default="", dest="grid_beta_prune")
     ap.add_argument("--skip-refine", action="store_true", dest="skip_refine",
                     help="coarse pass only (no prune-param refinement)")
+    ap.add_argument("--lambda-only", action="store_true", dest="lambda_only",
+                    help="sweep ONLY lambda over --grid-lambda, holding gamma/beta/"
+                         "gammaPrune/betaPrune at --preset. lambda is the "
+                         "frequency-scale knob, so this is the correct (and only "
+                         "legitimate) re-fit when the lexicon's log_freq scale "
+                         "changes but the emissions do not — see lexicon.py / O3. "
+                         "Selection is on --sweep-rows; --holdout-rows and "
+                         "--full-rows are confirmation only.")
     seal.add_argument(ap)
     args = ap.parse_args()
 
@@ -260,8 +270,8 @@ def main() -> int:
     emissions, letters = build_emissions(resolve(args.workdir, args.onnx), args.layout,
                                          rows, resolve(args.workdir, args.cache),
                                          args.rebuild_cache)
-    trie = load_combined_vocab(resolve(args.workdir, args.vocab))
-    print(f"trie: {trie.num_words} words")
+    trie = lexicon.load_vocab(resolve(args.workdir, args.vocab), args.vocab_kind)
+    print(f"trie: {trie.num_words} words  (kind '{args.vocab_kind}', {args.vocab})")
 
     ctx = mp.get_context("fork")
     pool = ctx.Pool(args.jobs, initializer=_init_worker,
@@ -279,6 +289,59 @@ def main() -> int:
                                     ("FULL val", fu_lo, fu_hi)):
                     tr = collect(pool, trie, targets, lo, hi, p[3], p[4], args.jobs)
                     report(f"{name} / {tag}", tr, p)
+            return 0
+
+        if args.lambda_only:
+            if not args.preset:
+                raise SystemExit("--lambda-only needs --preset "
+                                 "gamma,lambda,beta,gammaPrune,betaPrune")
+            inc = tuple(float(v) for v in args.preset.split(","))
+            if len(inc) != 5:
+                raise SystemExit("--preset needs 5 floats")
+            g, b, gp, bp = inc[0], inc[2], inc[3], inc[4]
+            print(f"[lambda-only] gamma={g} beta={b} gammaPrune={gp} betaPrune={bp} "
+                  f"fixed; sweeping lambda over {list(GRID_LAMBDA)}")
+            # The beam depends on (gammaPrune, betaPrune) only, so ONE beam pass over
+            # the selection rows serves every lambda in the grid (module docstring).
+            t0 = time.time()
+            sw_tr = collect(pool, trie, targets, sw_lo, sw_hi, gp, bp, args.jobs)
+            print(f"[lambda-only] beam over {len(sw_tr)} selection rows in "
+                  f"{time.time() - t0:.1f}s")
+            scored = []
+            for lam in GRID_LAMBDA:
+                t1, t3, t5 = score_grid(sw_tr, g, b, lam)
+                st = strata(sw_tr, g, b, lam)
+                mark = "  <- incumbent" if lam == inc[1] else ""
+                print(f"   lambda {lam:8.4f}   t1 {t1:5.2f}  t3 {t3:5.2f}  t5 {t5:5.2f}"
+                      f"   (<=3 {st['<=3'][1]:5.2f} / 4+ {st['4+'][1]:5.2f}){mark}")
+                scored.append(((t1, t3), lam, (t1, t3, t5)))
+            scored.sort(key=lambda r: r[0], reverse=True)
+            best_lam = scored[0][1]
+            tuned = (g, best_lam, b, gp, bp)
+            print(f"\n[lambda-only] selection winner lambda={best_lam} "
+                  f"(t1 {scored[0][2][0]:.2f} on rows {sw_lo}:{sw_hi})")
+            results["lambda_grid"] = [{"lambda": lam, "t1": m[0], "t3": m[1],
+                                       "t5": m[2]} for _, lam, m in scored]
+            results["incumbent_preset"] = list(inc)
+            results["tuned_preset"] = list(tuned)
+            conf: Dict[str, object] = {}
+            for tag, lo, hi in (("selection rows", sw_lo, sw_hi),
+                                ("CONFIRM holdout", ho_lo, ho_hi),
+                                ("FULL val", fu_lo, fu_hi)):
+                tr = (sw_tr if (lo, hi) == (sw_lo, sw_hi)
+                      else collect(pool, trie, targets, lo, hi, gp, bp, args.jobs))
+                im = report(f"incumbent lambda={inc[1]} / {tag}", tr, inc)
+                tm = report(f"tuned     lambda={best_lam} / {tag}", tr, tuned)
+                st = strata(tr, g, b, best_lam)
+                print(f"  {'delta':<34} {'':>11} t1 {tm[0] - im[0]:+5.2f}  "
+                      f"t3 {tm[1] - im[1]:+5.2f}  t5 {tm[2] - im[2]:+5.2f}")
+                conf[tag] = {"incumbent": im, "tuned": tm,
+                             "tuned_strata": {k: v for k, v in st.items()}}
+            results["confirmation"] = conf
+            out_path = resolve(args.workdir, args.out)
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            out_path.write_text(json.dumps(results, indent=1))
+            print(f"\nwrote {out_path}")
             return 0
 
         # ── pass 1: coarse (gamma, beta, lambda) at the preset prune setting ────
