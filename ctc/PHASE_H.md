@@ -18,7 +18,34 @@ val-9918 only.
 
 ## 0. Verdict
 
-*(filled in §5–§7 after the runs.)*
+**The dvorak gap is closed, with a wide margin to spare, at zero en_qwerty and
+zero latency cost.** `resbn80h` = the Phase-G ship recipe + layout-resampling
+augmentation at p 0.5 (dvorak held out of training):
+
+* **dvorak (held-out transfer probe): t1 90.01 / t3 96.38 / t5 97.46**
+  (3-seed mean, in-dict, AOSP trie) — up from 67.28 (`fast_resbn80`) and 63.04
+  (ch 128). On the app-98k-trie footing the geo anchor was measured on:
+  **89.51 vs 76.8 — +12.7**, where the previous best CTC read lost by 9.5–15.9.
+* **Every alt-layout beats the geometric engine**: +7.4 azerty, +8.2 qwertz,
+  +10.0 german, +12.7 dvorak, +14.5 spanish (t1 seed-means vs the current-basis
+  anchors, still at the en_qwerty-fitted E1 preset — floors, per the §9 tuning
+  asymmetry of `ALT_LAYOUT_EVAL.md`).
+* **en_qwerty val seed-mean 87.69 / 92.22 / 93.00 / 90.79 / 86.08** — within
+  0.06 of `resbn80g` on every metric (gate was ±0.3), all five val bars clear
+  on every individual seed.
+* **Latency unchanged**: the exported graph is node-for-node identical to
+  `resbn80g` (231 nodes, weights differ); idle bench 0.216 ms vs 0.212 ms —
+  measurement noise on the same 0.215 ms class. 279,346 params.
+* The mean-key-displacement routing gate (`ALT_LAYOUT_EVAL.md` §8) is **no
+  longer needed** for these weights: the displacement-0.4313 layout now
+  decodes *better* than azerty/qwertz/german (§7 explains why).
+
+The ship-candidate criterion pre-stated in §4 — dvorak ≥ 76.8 with en_qwerty
+within 0.3 — is met on every seed individually, with ~13 points of headroom.
+Evidence tier: **val + alt-layout corpora only.** test-2400 was not read, so
+`resbn80h` is NOT test-validated; a promotion over `resbn80g` as the ship
+candidate needs the owner's call on a fourth unsealing (not requested here,
+and not pre-authorized).
 
 ## 1. The augmentation — what a sample becomes
 
@@ -221,10 +248,109 @@ the like-for-like app-98k-trie footing (88.20 vs 76.8) — where ch128 lost by
 tuning asymmetry still applies (E1 is en_qwerty-fitted; the anchors are
 self-tuned), so these deltas remain floors.
 
-## 6. The winner at three seeds
+## 6. The winner — `resbn80h` (= Phase-G recipe + layout-alt p 0.5) at three seeds
 
-*(pending)*
+Fresh trainings at seeds 4321 / 7777 (`phaseH-p50-s*`), identical recipe.
+Exported ONNX (sliced-view parity 100/100 argmax on all three), E1 preset.
 
-## 7. Routing recommendation update
+### 6.1 en_qwerty — full val-9918, AOSP trie, all-rows
 
-*(pending — does the mean-key-displacement gate move or disappear?)*
+| metric | s1234 | s4321 | s7777 | **seed-mean** | val bar | worst seed | `resbn80g` seed-mean | **Δ** |
+|---|---|---|---|---|---|---|---|---|
+| t1 | 87.66 | 87.81 | 87.61 | **87.69** | 85.52 | 87.61 PASS | 87.72 | −0.03 |
+| t3 | 92.24 | 92.20 | 92.21 | **92.22** | 91.54 | 92.20 PASS | 92.25 | −0.03 |
+| t5 | 93.05 | 92.93 | 93.01 | **93.00** | 92.80 | 92.93 PASS | 92.97 | +0.03 |
+| ≤3 (n=3,389) | 90.88 | 90.94 | 90.56 | **90.79** | 89.29 | 90.56 PASS | 90.78 | +0.01 |
+| 4+ (n=6,529) | 85.99 | 86.18 | 86.08 | **86.08** | 83.57 | 85.99 PASS | 86.14 | −0.06 |
+
+All five bars clear on the seed mean and on every seed. Against `resbn80g` the
+five deltas are −0.06…+0.03 — statistically indistinguishable (resbn80g's own
+seed sd is 0.15–0.73). **The layout augmentation is free on en_qwerty.**
+Val greedy drops 7 pt (71.4 → 64.4 seed-mean) — the emission head gives up
+QWERTY-specific sharpness the lexicon beam never needed.
+
+### 6.2 Alt-layouts — in-dict az26, E1, all rows of every corpus
+
+t1/t3/t5 per seed and seed-mean; anchors = geometric engine, current basis.
+
+| layout | s1234 | s4321 | s7777 | **seed-mean** | geo anchor | **Δt1** |
+|---|---|---|---|---|---|---|
+| **dvorak** (held out) | 88.85/95.03/96.78 | 90.15/96.95/97.80 | 91.05/97.15/97.80 | **90.01/96.38/97.46** | 76.8/79.9/80.4 | **+13.2** |
+| dvorak, app 98k trie | 88.20/93.33/95.36 | 89.62/94.91/97.03 | 90.72/96.46/97.80 | **89.51/94.90/96.73** | 76.8/79.9/80.4 | **+12.7** |
+| azerty | 83.64/95.26/97.22 | 84.88/95.79/97.51 | 84.31/95.65/97.13 | **84.27/95.57/97.29** | 76.9/89.9/93.7 | **+7.4** |
+| qwertz | 84.16/93.93/96.21 | 84.41/94.44/96.46 | 84.50/94.78/96.38 | **84.36/94.38/96.35** | 76.2/87.4/90.6 | **+8.2** |
+| german | 81.45/92.36/94.72 | 80.95/92.27/94.45 | 80.99/92.45/94.27 | **81.13/92.36/94.48** | 71.1/81.7/84.3 | **+10.0** |
+| spanish | 88.51/95.79/96.81 | 88.51/94.77/96.87 | 88.28/95.22/96.64 | **88.43/95.26/96.78** | 73.9/86.6/89.8 | **+14.5** |
+
+Greedy t1 seed-means (the no-lexicon column `ALT_LAYOUT_EVAL.md` §8 demanded):
+dvorak **42.5** (was 11.6), azerty 33.8 (22.1), qwertz 38.1 (27.2), german
+26.2 (15.1), spanish 42.2 (31.9). The emissions themselves transfer now — the
+beam is no longer doing all of the work on dvorak (42.5 greedy on dvorak ≈
+2/3 of the 64.4 on en_qwerty, vs 1/6 before).
+
+Two honest footnotes:
+
+* dvorak seed-order effect: s7777 > s4321 > s1234 on dvorak while the val
+  ordering is s4321 > s1234 > s7777 — cross-layout accuracy is not simply a
+  function of the en_qwerty selection metric, and checkpoint selection still
+  runs on the en_qwerty val prefix only. A transfer-aware selection metric is
+  an open lever, not needed at these margins.
+* dvorak now *out-decodes* german/azerty/qwertz. Not a paradox: dvorak's
+  corpus is English against the largest, best-calibrated lexicon (146,964
+  AOSP / 98k app), the German/French corpora carry the compressed-λ CKDT
+  confound (`ALT_LAYOUT_EVAL.md` §3) and untypeable `ß` rows. Geometry
+  stopped being the axis that orders the table — which is the point.
+
+### 6.3 Artifacts, parity, latency
+
+Same contract as every campaign artifact (opset 17, fp32, static shapes, zero
+normalization nodes, 231-node graph **identical** to `resbn80g` — weights are
+the only difference). Sliced-view parity at export: 100/100 argmax agreement,
+max |Δ| ≤ 7.6e-05 on all three. Idle latency (`bench_latency.py`, paired):
+`resbn80h_s1234` 0.216 ms mean / 0.229 p90 vs `resbn80g_s1234` 0.212 / 0.222
+— same 0.215 ms class, as the identical graph dictates. 1,142,727 bytes.
+
+```
+3e215438f3c8fae1f249b91be3986bc30c027920f158371acaea0d159dbeff00  resbn80h_s1234.onnx
+b3f30bcd33cd1137300b039ae166ccd9bdd7ea9117502c35f9d0d80d9a277331  resbn80h_s4321.onnx
+1a1edac6f10f0fd88b427ce41b4808e46bef1e4209b4611dc7c9e81b5e5e94dd  resbn80h_s7777.onnx
+```
+
+Run logs and per-run JSON: `~/ctc-train/ckpt/phaseH-*` and
+`~/ctc-train/altlayout/phaseH-*` (not committed).
+
+## 7. Routing recommendation update — the displacement gate disappears
+
+`ALT_LAYOUT_EVAL.md` §8 recommended routing by **mean a-z key displacement
+from the training layout**: ≤ 0.11 → CTC, 0.43 (dvorak) → geometric engine.
+On `resbn80h` weights that gate is obsolete:
+
+* The displacement-0.4313 layout (dvorak) now decodes at 90.01 — *above*
+  every 0.06–0.11-displacement layout and 13 pt above the geometric engine.
+* The failure mode the gate guarded against (key re-arrangement) is exactly
+  what the augmentation trains, including arrangements no human layout uses
+  (random permutations), so Colemak / Neo2 / arbitrary user XML sit *inside*
+  the training family rather than beyond a measured frontier. Colemak-class
+  layouts still have no real corpus here — that eval gap remains open — but
+  there is no longer a measured regime where the geometric engine wins.
+* **Recommended routing on these weights: CTC everywhere a layout provides
+  a-z key centers.** The two-line displacement check can be kept as a cheap
+  telemetry signal, but nothing should route on it.
+
+Residual caveats that travel with this: non-Latin scripts remain untested
+(unchanged); `ß` remains untypeable on the a-z head (unchanged); per-layout
+preset sweeps would likely add several points on the fr/de/es corpora (the λ
+confound is untouched); and `resbn80h` is val-validated only — the en_qwerty
+test-2400 tier stays with `resbn80g` unless a fourth unsealing is authorized.
+
+## 8. What Phase H did NOT do
+
+* No test-2400 read, no golden-fixture change, no app-preset re-sweep (the
+  §6 app-trie dvorak numbers reuse Phase G's E1; the adopted app preset
+  `0.9/4.0/0.25/0.25/0.9882` was fitted for `resbn80g` and would need a
+  re-check before shipping `resbn80h`).
+* No KD, no schedule change, no architecture change — the augmentation is the
+  only delta vs `resbn80g`, which is what makes the attribution clean.
+* No dvorak (or qwerty) geometry in the training pool, and no real corpus of
+  any kind in training — the alt-layout corpora were spent exclusively on
+  evaluation.

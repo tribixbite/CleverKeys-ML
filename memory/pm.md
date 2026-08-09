@@ -594,8 +594,8 @@ HELD OUT of training-geometry sampling (true transfer probe). NO test-2400.
 - [x] H3 eval per candidate (all six layouts beat geo anchors at p50, single seed): eval_altlayout.py all six real corpora at E1 (az26)
       + dvorak app-trie arm + full val-9918 eval_beam (AOSP/E1). Gate: dvorak t1
       >= 76.8 with en_qwerty val within 0.3 of 87.72 seed-mean; else map pareto.
-- [ ] H4 winner 3 seeds, export + parity + latency, artifacts/ + sha256.
-- [ ] H5 PHASE_H.md (design rationale, warp validation, p ablation, per-layout
+- [x] H4 winner 3 seeds (resbn80h): val seed-mean 87.69/92.22/93.00/90.79/86.08 (all bars, every seed; -0.03 t1 vs resbn80g); dvorak held-out 90.01 aosp / 89.51 app vs geo 76.8; all six layouts beat geo; latency 0.216ms (same graph); artifacts resbn80h_s* + sha256.
+- [x] H5 PHASE_H.md complete (design, warp validation, p ablation, 3-seed tables, routing update: displacement gate obsolete); RESULTS.md phase-h section at top. NOT test-validated (no unsealing requested).
       tables, routing/gate update); RESULTS.md Phase-H section appended at top.
 
 2026-08-09 — MODEL_COMPARISON.md (cross-phase reference, standalone)

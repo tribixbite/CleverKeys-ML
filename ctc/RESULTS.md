@@ -1,5 +1,51 @@
 # CTC Swipe Encoder — Training Results
 
+# Phase H (2026-08-09): layout-resampling augmentation — the dvorak gap closed, `resbn80h`
+
+**The one decisive cross-layout loss is gone.** `ALT_LAYOUT_EVAL.md` measured
+dvorak t1 63.04 (ch128) / 67.28 (resbn80) against the geometric engine's 76.8
+and traced the cause to untrained **key re-arrangement**. Phase H built the
+augmentation the recipe had named and skipped: per sample, with p 0.5, the
+cached QWERTY path is warped onto an alternative geometry (residual
+re-anchoring on the word's ideal polyline — `ctc/layout_aug.py`) — synthetic
+random letter arrangements (2/3) + real azerty/qwertz/german/spanish (1/3),
+**dvorak held out of training as a true transfer probe**. Recipe otherwise
+identical to `resbn80g` (188 k, coupled sampler, no KD). Full record:
+`ctc/PHASE_H.md`.
+
+`resbn80h`, 3 seeds (1234/4321/7777), E1 preset, exported ONNX:
+
+| footing | seed-mean | anchor / bar | Δ |
+|---|---|---|---|
+| **dvorak** real corpus, in-dict, AOSP trie | **90.01 / 96.38 / 97.46** | geo engine 76.8/79.9/80.4 | **+13.2 t1** |
+| **dvorak**, app 98k trie (the anchor's own footing) | **89.51 / 94.90 / 96.73** | 76.8/79.9/80.4 | **+12.7 t1** |
+| azerty / qwertz / german / spanish t1 | **84.27 / 84.36 / 81.13 / 88.43** | geo 76.9 / 76.2 / 71.1 / 73.9 | +7.4 / +8.2 / +10.0 / +14.5 |
+| en_qwerty full val-9918, AOSP, E1 | **87.69 / 92.22 / 93.00 / 90.79 / 86.08** | val bars 85.52/91.54/92.80/89.29/83.57 | all five clear, **every seed**; vs `resbn80g` seed-mean −0.03/−0.03/+0.03/+0.01/−0.06 |
+
+**The CTC model now beats the geometric engine on all six layouts measured**,
+at the en_qwerty-fitted preset (floors, per the tuning asymmetry), with the
+en_qwerty val indistinguishable from `resbn80g` and latency identical by
+construction (same 231-node graph; idle bench 0.216 vs 0.212 ms). Dvorak
+greedy (no lexicon) went 11.6 → 42.5. The `ALT_LAYOUT_EVAL.md` §8
+mean-key-displacement routing gate is **obsolete on these weights**: route CTC
+everywhere a layout provides a-z key centers (non-Latin scripts remain
+untested; `ß` remains untypeable).
+
+Artifacts (opset 17, fp32, parity 100/100, 0.215 ms class, 279,346 params):
+
+| file | arm | sha256 |
+|---|---|---|
+| `resbn80h_s1234.onnx` | `phaseH-p50` | `3e215438f3c8fae1f249b91be3986bc30c027920f158371acaea0d159dbeff00` |
+| `resbn80h_s4321.onnx` | `phaseH-p50-s4321` | `b3f30bcd33cd1137300b039ae166ccd9bdd7ea9117502c35f9d0d80d9a277331` |
+| `resbn80h_s7777.onnx` | `phaseH-p50-s7777` | `1a1edac6f10f0fd88b427ce41b4808e46bef1e4209b4611dc7c9e81b5e5e94dd` |
+
+Evidence tier: **val + alt-layout real corpora. test-2400 was NOT read** —
+`resbn80h` is not test-validated, and `resbn80g` keeps the test-validated
+ship-candidate tier. Promoting `resbn80h` (the strictly better cross-layout
+model at equal en_qwerty val) needs an owner-authorized fourth unsealing, and
+its app-trie preset (`0.9/4.0/…` was fitted for `resbn80g`) needs a re-check
+first.
+
 # Phase G (2026-08-09): the upgraded 0.215 ms candidate — `resbn80g` — test-validated, third unsealing
 
 **`resbn80g` supersedes `fast_resbn80` as the speed-class ship candidate.**
