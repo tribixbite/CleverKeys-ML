@@ -214,6 +214,29 @@ giving back 0.23.
   table moves t5 by the ~0.2 pt that class is short; §8's ch 64 probe tests
   the 0.162 ms class instead.
 
+---
+
+## 8. The latency push — the upgraded recipe below 0.215 ms
+
+### 8.1 `resbn:72:1,2,4,8` at the Phase-G recipe (`phaseG-F72-188k-nokd`) — seed 1234
+
+229,642 params, 944,487 bytes, 0.186 ms class. Full val-9918, E1, AOSP:
+
+| | t1 | t3 | t5 | ≤3 | 4+ | bars |
+|---|---|---|---|---|---|---|
+| `phaseF-N72-188k` (KD, legacy sampler) s1234 | 87.25 | 92.24 | 92.96 | 90.44 | 85.59 | 5/5 |
+| **`phaseG-F72-188k-nokd` s1234** | **87.53** | **92.33** | **93.01** | **90.62** | **85.92** | **5/5** |
+| Δ (recipe upgrade at ch 72) | +0.28 | +0.09 | +0.05 | +0.18 | +0.33 | |
+| incumbent `resbn80`@94k **seed-mean** (the §5 margin target) | 87.47 | 92.13 | 92.89 | 90.35 | 85.98 | |
+
+At one seed the 0.186 ms class now **matches the incumbent 0.215 ms model's
+seed-mean** (ahead on four of five, −0.06 on 4+). Promoted to three seeds —
+*(seeds 4321/7777 pending; val-only either way — no further test decode, the
+third unsealing is spent).*
+
+*(pending: §8.2 ch 64 probe — does the no-KD recipe move the 0.162 ms class's
+t5, which sat at 92.76–92.78 across every Phase-F attempt against a 92.80 bar?)*
+
 ### 3.1 Why Phase F adopted KD in the first place — and why this is not a contradiction
 
 Phase F never ran a no-KD control (`PHASE_F.md` §7.1/§11.3 said so explicitly);
@@ -385,6 +408,17 @@ at the second unsealing (`PHASE_F.md` §16.5: config A −0.18/−0.24/−0.07/+
 written as one. All five numbers for both configurations are reported
 regardless of outcome; the tier moves only if config A clears all five on the
 seed mean *and* on every seed — the same rule as both prior unsealings.
+
+### 7.α Workdir note — reboots
+
+The host rebooted twice during this phase. The first cost nothing (no run in
+flight was lost); the second killed `phaseG-F72-188k-nokd-s4321`/`-s7777` at
+step 39,000 and `phaseG-H64-188k-nokd` at its start. The F72 seeds were resumed
+from `last.pt` with identical run names and arguments (`--total-steps` keys the
+cosine schedule to the restored global step, so the resumed halves follow the
+identical LR trajectory — the Phase-E §7 protocol); H64 was restarted from
+scratch. All six §7.3 decodes had already completed and been committed before
+the second reboot; nothing in §7.5 is affected.
 
 ### 7.5 Result — `resbn80g` clears all five test bars on both footings, on every seed
 
