@@ -20,8 +20,8 @@ more. Scattering the keys into random slots of the 64 changes the gathered
 emissions by **≤ 3.8e-6** — float32 noise, i.e. the model is *perfectly*
 slot-invariant on every layout tested. But slot invariance is not layout
 invariance, and the affine jitter that was supposed to supply the rest spans only
-an axis-aligned scale/translate/mirror. Accuracy therefore decays monotonically with how far a
-layout's key positions sit from QWERTY:
+an axis-aligned scale/translate/mirror. Accuracy therefore decays monotonically
+with how far a layout's key positions sit from QWERTY:
 
 | layout | lang | mean key displacement vs qwerty | **t1** | greedy t1 |
 |---|---|---|---|---|
@@ -44,6 +44,11 @@ the 146,964-word English trie are doing essentially all of the work.
 Against the shipped geometric engine the model wins or ties on four of five
 layouts — often by a wide margin on top-3/top-5 — and **loses decisively on
 dvorak**, the only layout whose geometry is genuinely novel.
+
+And the ceiling is augmentation, not capacity: the 2.5×-smaller, 2.2×-faster
+`fast_resbn80` is 0.47 pt *behind* on en_qwerty and 0.7–4.2 pt *ahead* on every
+alt-layout, with its biggest margins on the hardest ones (§6). Extra parameters
+bought QWERTY-specific memorization that actively hurts transfer.
 
 ## 1. What was actually run
 
@@ -299,6 +304,40 @@ slots, so it knows a key exists where the finger actually went, moves nothing:
 
 All five deltas are inside noise. The `az26` arm is used for every headline number.
 
+### The smaller, faster model transfers *better* — capacity is not the bottleneck
+
+`fast_resbn80_s1234` (279,346 params, 0.215 ms — **2.5× smaller and 2.2× faster**
+than the ch 128 ship artifact) was put through the identical pipeline, same preset,
+same lexicons, same row sets:
+
+| layout | n | ch128 t1 / t3 / t5 | **resbn80** t1 / t3 / t5 | Δt1 |
+|---|---|---|---|---|
+| qwerty (val[0:2000]) | 1,928 | 91.55 / 95.80 / 96.68 | 91.08 / 96.01 / 96.63 | **−0.47** |
+| spanish | 1,758 | 81.34 / 93.91 / 95.68 | 82.37 / 94.82 / 96.25 | **+1.03** |
+| qwertz | 1,187 | 76.66 / 90.06 / 92.67 | 78.77 / 91.74 / 94.44 | **+2.11** |
+| azerty | 2,090 | 75.31 / 90.67 / 93.30 | 76.03 / 91.72 / 94.50 | **+0.72** |
+| german | 2,199 | 72.08 / 86.45 / 90.40 | 76.17 / 88.77 / 92.00 | **+4.09** |
+| dvorak | 2,457 | 63.04 / 73.71 / 75.17 | 67.28 / 77.70 / 79.08 | **+4.24** |
+
+The 2.5×-smaller model is **behind on en_qwerty and ahead on every single
+alt-layout**, and its margin grows monotonically with how hard the layout is
+(+1.03 on the easiest, +4.24 on the hardest). This inverts the en_qwerty ordering:
+Phase F measured resbn80 at −0.61 t1 against ch 128 on val-9918, and that ranking
+reverses the moment the keyboard changes.
+
+The reading that fits this and §7 together: **ch 128's extra capacity went into
+QWERTY-specific structure that does not transfer.** It is a memorization effect, not
+a better representation — and it is direct evidence that the cross-layout ceiling
+here is set by *augmentation*, not by parameters. Scaling the model up would make
+transfer worse, not better.
+
+(`fast_resbn80` carries val-only evidence on en_qwerty — `PHASE_F.md` §11.1 — so it
+is not proposed as a ship swap here. The point is diagnostic.)
+
+Even so, resbn80 on dvorak (67.28) still loses to the geometric engine's 76.8 by
+9.5 pt. A better-transferring architecture narrows the dvorak gap; it does not close
+it.
+
 ## 7. Why it fails — two diagnostic probes
 
 ### 7.1 Slot-permutation invariance is *perfect*, and irrelevant
@@ -444,6 +483,10 @@ longer optional. Concretely, three changes, in cost order:
    loss needs no change at all.
 3. **Retrain and re-measure.** This harness is the evaluation.
 
+The resbn80-vs-ch128 inversion (§6) says this is the *right* lever: capacity is
+already past the point of diminishing — indeed negative — returns for transfer, so
+the gain has to come from what the model is shown, not from how big it is.
+
 **Cost.** Measured from the checkpoint metrics of the artifact under test
 (`phaseE-E3b-hws3x`, RTX 5080 Laptop): **94,000 steps in 29.1 min wall**, of which
 241 s is beam-validation. Three seeds is **~1.5 h of GPU**. The larger
@@ -520,6 +563,10 @@ python3 ctc/eval_altlayout.py --preset "1.05,0.0,0.2,0.3734,0.9882" \
     --qwerty-control data/val_hwsfuto.jsonl          # lambda = 0
 python3 ctc/eval_altlayout.py --layouts "" --qwerty-control data/val_hwsfuto.jsonl \
     --limit 1000 --affine "0.7,1.0,0.0,0.0"          # affine envelope
+python3 ctc/eval_altlayout.py --perm-seed 42                     # slot-permutation probe
+
+# 6. the second model
+python3 ctc/eval_altlayout.py --onnx artifacts/fast_resbn80_s1234.onnx --arm az26
 ```
 
 Raw run logs and per-run JSON: `~/ctc-train/altlayout/` (not committed).
