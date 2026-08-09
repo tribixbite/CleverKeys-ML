@@ -2,9 +2,11 @@
 """Freeze model-backed golden cases for the Kotlin parity test.
 
 Synthetic paths -> features -> ONNX emissions -> harness greedy + beam. The
-output matches the ``ctc_golden.json`` ``"beam"`` case schema that CleverKeys'
-``CtcParityTest`` reads, plus the raw ``points -> features -> emissions`` pairs a
-future ONNX-backed ``CtcEmissionModel`` parity test needs.
+output matches the ``ctc_golden.json`` schema that CleverKeys' ``CtcParityTest``
+reads — both its ``"featurize"`` cases (pure resampler branch probes, asserted
+bit-identical) and its ``"beam"`` cases — plus the raw
+``points -> features -> emissions`` pairs an ONNX-backed ``CtcEmissionModel``
+parity test needs.
 
 Emissions are stored as the sliced ``[32,27]`` contract view (blank relocated
 from full-head column 64 to column 26), which is exactly what
@@ -37,6 +39,26 @@ LEXICON = [("cat", 150.0), ("car", 180.0), ("cart", 120.0), ("care", 140.0),
 WORDS = ["cat", "the", "hello", "keyboard"]
 BEAM_WIDTH = 32
 TOP_K = 4
+
+#: Pure-featurizer parity cases (no model involved): each exercises a distinct
+#: resampler branch of ``featurize`` so the Kotlin ``CtcFeaturizer`` port can be
+#: asserted bit-identical. ``CtcParityTest.featurizer_matchesPythonPort_bitIdentical``
+#: requires at least one ``"kind": "featurize"`` case in the fixture, which the
+#: model-backed beam cases alone do not provide.
+FEATURIZE_CASES = [
+    # n == 1: both resample stages take their single-point degenerate branch.
+    ("feat_single_point", [0.42], [0.31], [0.0]),
+    # duration <= EPS: stage 1 returns the first/last point pair unchanged.
+    ("feat_zero_duration", [0.1, 0.2, 0.3], [0.5, 0.5, 0.5], [10.0, 10.0, 10.0]),
+    # Two points over 2 s: stage 1 emits ~121 samples (round-half-even path).
+    ("feat_two_point_long", [0.05, 0.95], [0.9, 0.1], [0.0, 2000.0]),
+    # Irregular timestamps: lower-bound segment lerp with unequal segment lengths.
+    ("feat_nonuniform_t",
+     [0.1, 0.3, 0.35, 0.8], [0.2, 0.6, 0.61, 0.4], [0.0, 12.0, 13.5, 200.0]),
+    # Out-of-frame inputs: stage 2's [0,1] clamp is the only clamp in the chain.
+    ("feat_clamp_out_of_range",
+     [-0.2, 0.5, 1.3], [1.2, 0.5, -0.1], [0.0, 40.0, 90.0]),
+]
 
 
 def ideal_path(by_letter, word: str, pts_per_seg: int = 12
@@ -99,6 +121,19 @@ def main() -> int:
     mask[:num_letters] = True
 
     cases = []
+    # Featurizer-only cases first: the fixed synthetic branch probes, plus one
+    # realistic multi-segment word path built from the layout's own key centers.
+    feat_cases = list(FEATURIZE_CASES)
+    fx, fy, ft = ideal_path(by_letter, "cat")
+    feat_cases.append(("feat_word_path_cat", fx, fy, ft))
+    for name, xs, ys, ts in feat_cases:
+        feats = featurize(xs, ys, ts)                                 # [2,64]
+        cases.append({
+            "kind": "featurize", "name": name,
+            "points": {"x": [float(v) for v in xs], "y": [float(v) for v in ys],
+                       "t": [float(v) for v in ts]},
+            "features": [float(v) for v in feats.reshape(-1)],        # [128]
+        })
     for word in WORDS:
         xs, ys, ts = ideal_path(by_letter, word)
         feats = featurize(xs, ys, ts)                                 # [2,64]
@@ -130,6 +165,12 @@ def main() -> int:
         {"source_onnx": str(resolve(args.workdir, args.onnx)),
          "source_onnx_sha256": sha256_file(resolve(args.workdir, args.onnx)),
          "preset": [gamma, lam, beta, gamma_prune, beta_prune],
+         # The exact layout tensors the emissions were generated against, so an
+         # app-side model-backed parity test can rebuild layout_keys/layout_mask
+         # (CtcLayout.of + buildPaddedLayout) without carrying en_qwerty.json.
+         "layout": {"letters": "".join(letters),
+                    "cx": [float(c[0]) for c in centers],
+                    "cy": [float(c[1]) for c in centers]},
          "cases": cases}, indent=1))
     print(f"wrote {out_path} ({len(cases)} cases)")
     return 0

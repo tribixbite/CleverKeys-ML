@@ -176,7 +176,7 @@ the audited decode ran on (verified by sha256 against `ckpt/<arm>/`).
 | `ch192_s1234.onnx` | `phaseE-FINAL-s1234` | 1,525,378 | 6,144,249 | `d5b5f10ea16f08743d0742b3c60aa37a469ada11c418a7f459d5ae4cff20c666` |
 | `ch192_s4321.onnx` | `phaseE-FINAL-s4321` | 1,525,378 | 6,144,249 | `b020b841abfb011779e2584e418cc651bfcac988a06bfcff2aeea5862bfabab3` |
 | `ch192_s7777.onnx` | `phaseE-FINAL-s7777` | 1,525,378 | 6,144,249 | `a182191152ad77b233a73bc79750b0dda51bdbcf7fcb76ddaaad6d17016eee79` |
-| `ctc_model_golden.json` | golden fixture, from `ch128_s1234` **at the E1 preset** | — | 118,964 | `365405469c8ed6884ba3e6e89902a6093c29d6fcb710ed25f1e0b34a1f2030fd` |
+| `ctc_model_golden.json` | golden fixture, from `ch128_s1234` **at the E1 preset** | — | 140,204 | `a18ea58cd662b0e18b6daadaf417361f93fd0b146ce6478d4d6a62e7e185fa8a` |
 | `ctc_swipe_encoder.onnx` | ⚠ **superseded** pre-campaign `r2` | 394,114 | 1,619,140 | `fcf1633167b10f5c28e7c4dc16a9bba178bacc9e2b76efb06d792162dc99d0b7` |
 
 Phase-F additions — **val-validated only**, never decoded on the sealed test split.
@@ -197,6 +197,11 @@ export). Full table, parity checks and the frontier in `PHASE_F.md` §6/§8/§9.
 `ctc_model_golden.json` records its own `source_onnx_sha256` and `preset`, and was
 regenerated at `1.05,1.1,0.2,0.3734,0.9882` — the fixture must match the preset the
 app actually ships, or the parity test asserts against a configuration nothing runs.
+For G3 it was regenerated once more (same model, same preset — the 4 beam cases are
+byte-identical) to add the 6 `"featurize"`-kind cases `CtcParityTest` requires and a
+top-level `layout` block (the exact en_qwerty letters/centers the emissions were
+generated against) for the app-side ONNX-backed `CtcEmissionModel` parity test. See
+`APP_INTEGRATION_PLAN.md`.
 Note `model_cat` decodes to `car`: these are synthetic straight-line paths, and the
 fixture is a **parity** artifact (Kotlin must reproduce Python bit-for-bit), not an
 accuracy artifact.
