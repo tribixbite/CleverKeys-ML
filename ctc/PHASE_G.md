@@ -229,13 +229,72 @@ giving back 0.23.
 | Δ (recipe upgrade at ch 72) | +0.28 | +0.09 | +0.05 | +0.18 | +0.33 | |
 | incumbent `resbn80`@94k **seed-mean** (the §5 margin target) | 87.47 | 92.13 | 92.89 | 90.35 | 85.98 | |
 
-At one seed the 0.186 ms class now **matches the incumbent 0.215 ms model's
-seed-mean** (ahead on four of five, −0.06 on 4+). Promoted to three seeds —
-*(seeds 4321/7777 pending; val-only either way — no further test decode, the
-third unsealing is spent).*
+At one seed the 0.186 ms class matched the incumbent 0.215 ms model's
+seed-mean, so it was promoted to three seeds.
 
-*(pending: §8.2 ch 64 probe — does the no-KD recipe move the 0.162 ms class's
-t5, which sat at 92.76–92.78 across every Phase-F attempt against a 92.80 bar?)*
+### 8.2 `resbn72g` at three seeds — all five bars, every seed, at 0.184 ms
+
+Seeds 4321/7777 were killed by a host reboot at step 39,000 and resumed from
+`last.pt` per §7.α. Full val-9918, E1, AOSP; **val-only** (no further test
+decode — the third unsealing is spent):
+
+| metric | s1234 | s4321 | s7777 | **seed-mean** | the bar | **Δ** | worst seed | incumbent `resbn80`@94k seed-mean | **Δ vs incumbent** |
+|---|---|---|---|---|---|---|---|---|---|
+| t1 | 87.53 | 87.46 | 87.88 | **87.62** | 85.52 | **+2.10** | 87.46 PASS | 87.47 | **+0.15** |
+| t3 | 92.33 | 92.11 | 92.22 | **92.22** | 91.54 | **+0.68** | 92.11 PASS | 92.13 | **+0.09** |
+| t5 | 93.01 | 93.06 | 92.98 | **93.02** | 92.80 | **+0.22** | 92.98 PASS | 92.89 | **+0.13** |
+| ≤3 | 90.62 | 90.26 | 90.56 | **90.48** | 89.29 | **+1.19** | 90.26 PASS | 90.35 | **+0.13** |
+| 4+ | 85.92 | 86.00 | 86.49 | **86.14** | 83.57 | **+2.57** | 85.92 PASS | 85.98 | **+0.16** |
+
+**The headline of the latency push: at 0.184 ms, `resbn72g` clears all five
+val bars on every seed AND exceeds the incumbent 0.215 ms `fast_resbn80`'s
+seed-mean on all five metrics.** Its worst-seed t5 margin is **+0.18** — the
+Phase-F `resbn72`'s was +0.01 (one row), and even `resbn80`'s was +0.05. The
+t5 knife edge this family has ridden since Phase E is, at this width, simply
+gone. Against the old-recipe `phaseF-N72-188k` seed-mean
+(87.27/92.09/92.87/90.49/85.60) the upgrade is +0.35/+0.13/+0.15/−0.01/+0.54.
+
+Against `resbn80g` (§4) it is −0.10 t1 / −0.03 t3 / **+0.05 t5** / −0.30 ≤3 /
+0.00 4+ — statistically level everywhere but ≤3. Evidence tiers differ:
+`resbn80g` is **test-validated**, `resbn72g` is **val-only** and may not be
+decoded on test.
+
+One export note, disclosed: `resbn72g_s4321`'s sliced-view parity sits at the
+tolerance boundary — across ~500 random draws its max |onnx−torch| ranged
+6.7e-05 to **2.14e-04** (two draws above the 1e-4 assert), argmax unchanged
+**500/500**, and the exported bytes are deterministic (identical sha across
+re-exports). The graph is fine; the fp32 margin on this seed is just thinner
+than the other five Phase-G exports (all ≤ 9.7e-05).
+
+### 8.3 The ch 64 probe — the ≤0.162 ms answer does NOT change
+
+`phaseG-H64-188k-nokd` (185,058 params, **0.161 ms**), seed 1234, same recipe:
+
+| | t1 | t3 | t5 | ≤3 | 4+ | bars |
+|---|---|---|---|---|---|---|
+| `phaseF-L64-188k` (KD, legacy) s1234 | 87.19 | 92.09 | 92.76 | 90.29 | 85.59 | 4/5 |
+| **`phaseG-H64-188k-nokd` s1234** | 87.17 | 91.83 | **92.70** | 90.12 | 85.65 | **4/5 (t5 −0.10)** |
+
+**The no-KD gain does not transfer to ch 64** (−0.02 t1, −0.26 t3, −0.06 t5
+against its KD twin, single seed) — KD's harm is capacity-dependent: negative
+at ch 80 (−0.5 t1), ~null-to-positive at ch 64. Consistent with the standard
+distillation picture: a teacher helps where the student lacks capacity to fit
+the data and hurts where it doesn't. Consequently **Phase F's ≤0.15 ms verdict
+stands unchanged under the upgraded recipe**: t5 remains the binding miss below
+~0.18 ms, and the bar-clearing frontier moves only from 0.186 to **0.184 ms**
+(the same graph, re-measured; the recipe change is what upgraded its margins).
+
+### 8.4 The measured Phase-G frontier (idle, §0-of-Phase-F protocol)
+
+| ms | model | params | bytes | t1 | t5 | bars | seeds | tier |
+|---|---|---|---|---|---|---|---|---|
+| 0.161 | `resbn64g` | 185,058 | 766,727 | 87.17 | 92.70 | 4/5 | 1 | val-only |
+| **0.184** | **`resbn72g`** | 229,642 | 944,487 | **87.62*** | **93.02*** | **5/5, every seed** | 3 | val-only |
+| 0.213 | **`resbn80g`** ← ship | 279,346 | 1,142,727 | **87.72*** | **92.97*** | **5/5, every seed** | 3 | **test-validated, both footings** |
+| 0.455† | ch 128 (Phase E) | 689,282 | 2,799,865 | 87.88* | 92.96* | 5/5 | 3 | test-validated |
+
+`*` seed-mean. † Phase-E harness figure. The 0.215 ms class now sits 0.16 t1
+under the 0.455 ms ch 128 (was 0.41 under), and the 0.184 ms class 0.26 under.
 
 ### 3.1 Why Phase F adopted KD in the first place — and why this is not a contradiction
 

@@ -560,19 +560,22 @@ unsealing of test-2400 ("retrain and reexport and re-run tests on new onnx
       C no-KD (KD ablation vs B — never measured in F),
       D 3-seed ch192 ensemble teacher (teacher lever vs B).
 - [x] G2 winner (coupled+noKD+188k, resbn80g) 3 seeds: val seed-mean 87.72/92.25/92.97/90.78/86.14 -- all five bars, every seed, margins >= incumbent on all five. Equal-footing val bar NOT cleared on seed mean (t3 -0.06, t5 -0.06, 4+ -0.15).
-- [ ] G3 latency push: resbn72 (and optionally 64) at the winner recipe;
-      promote to 3 seeds only if s1234 clears all five.
+- [x] G3 latency push: resbn72g 3 seeds val 87.62/92.22/93.02/90.48/86.14 --
+      all five bars every seed at 0.184ms, exceeds fast_resbn80's seed-mean on
+      all five (val-only tier). resbn64g (0.161ms) stays 4/5 (t5 92.70): no-KD
+      does not transfer to ch64 -> phase F <=0.15ms verdict unchanged.
 - [x] G4 preset sweep: AOSP converges to E1 exactly (keep); app trie interior winner 0.9/4.0/0.25/0.25/0.9882 (+1.39 t1 holdout-confirmed) -- ADOPTED as app preset; golden fixture regenerated from resbn80g_s1234 at that preset (sha ce3b5456...).
-- [ ] G5 export 3 seeds, sliced-view parity 100/100, bench_latency idle,
-      artifacts/ + sha256.
+- [x] G5 exports: resbn80g x3 + resbn72g x3 in artifacts/ with sha256; parity
+      argmax 100/100 all; idle latency 0.213/0.184/0.161 ms; resbn72g_s4321
+      parity margin thin (2.1e-4 worst draw, argmax clean) -- disclosed.
 - [x] G6 third unsealing: pre-registered (commit 46aecb1) then decoded 6 runs.
       Config A (AOSP/E1) test seed-mean 87.68/92.18/92.82/90.80/86.08 -- ALL FIVE
       published bars, every seed -> resbn80g TEST-VALIDATED. Config B (app trie,
       app preset) 88.14/93.22/93.90/91.86/86.23 -- all five, every seed, worst-seed
       t5 margin +0.75. Equal-footing: 3 of 5, McNemar unresolved every seed (+17
       p.17/+23 p.052/+0 p1.0) -- level, no claim. Ledger appended (unsealings[2]).
-- [ ] G7 PHASE_G.md (lever table, affine before/after, preset decision),
-      RESULTS.md update with evidence tiers, pm.md close-out.
+- [x] G7 PHASE_G.md complete (levers, factorial, preset, unsealing, frontier);
+      RESULTS.md phase-g section + frontier addendum; pm.md closed. Phase G DONE.
 
 2026-08-09 — Phase H (layout-resampling augmentation: close the dvorak gap)
 

@@ -108,6 +108,32 @@ config A 94.80/80.36, config B 94.55/81.54). test-2400 has now been read
 **three** times; it is a worn split and a fourth read needs a better reason
 than any of the first three had.
 
+**Addendum — the Phase-G latency frontier (val-only below 0.213 ms).**
+`resbn72g` (`phaseG-F72-188k-nokd*`, 229,642 params, **0.184 ms**, 944,487
+bytes) — the same upgraded recipe at ch 72 — clears **all five val bars on the
+seed mean and on every individual seed** (87.62 / 92.22 / 93.02 / 90.48 /
+86.14; worst-seed t5 margin **+0.18** against the Phase-F `resbn72`'s +0.01)
+and **exceeds the old 0.215 ms `fast_resbn80`'s seed-mean on all five
+metrics while being 14 % faster**. It is **val-only** — the third unsealing is
+spent and it may not be decoded on test. The ch 64 probe (0.161 ms) stays 4/5
+(t5 92.70): the no-KD gain does not transfer to ch 64, KD's harm is
+capacity-dependent, and Phase F's "≤0.15 ms is not reachable with the bar
+intact" verdict is unchanged under the upgraded recipe. Full tables:
+`PHASE_G.md` §8.
+
+| file | arm | ms | sha256 |
+|---|---|---|---|
+| `resbn72g_s1234.onnx` — fastest all-bars, val-only | `phaseG-F72-188k-nokd` | 0.184 | `30b5f3de7831d8137d2e0a9403f3d93ec5b22524db0fba1d76729ab9b09d8043` |
+| `resbn72g_s4321.onnx` | `phaseG-F72-188k-nokd-s4321` | 0.184 | `b5ad0911db7ee47c0c6da7c668c62a69eb76b30ab3477053029f9a54c473b987` |
+| `resbn72g_s7777.onnx` | `phaseG-F72-188k-nokd-s7777` | 0.184 | `b232a158c620b70e59a2f6d30746f9305231d33af7f0196d48f88879dc1248a2` |
+
+(Idle re-measurement of the Phase-G graphs: `resbn80g` 0.213 ms, `resbn72g`
+0.184 ms, `resbn64g` 0.161 ms — the Phase-F class figures within the ±0.002 ms
+harness spread. `resbn72g_s4321`'s export parity margin is thinner than the
+other five Phase-G exports — occasional random draws reach 2.1e-04 on the
+sliced view against the 1e-4 assert, argmax 500/500 unchanged, deterministic
+bytes; disclosed in `PHASE_G.md` §8.2.)
+
 The sections below are the Campaign-2 record. Where they name `fast_resbn80`
 as the speed candidate or λ = 1.1 as the app preset, **Phase G supersedes
 them**; the numbers themselves remain the audited record of that campaign.
