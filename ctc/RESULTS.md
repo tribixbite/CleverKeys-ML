@@ -208,17 +208,24 @@ trie, both engines tuned on the same val rows):
 | FUTO ceiling, val-tuned (the equal-footing bar) | 87.12 | 92.29 | 92.96 | 89.94 | 85.68 |
 | ch 192 Δ | **+1.24** | **+0.36** | **+0.54** | **+1.43** | **+1.14** |
 | ch 128 Δ | **+0.79** | **+0.04** | **+0.04** | **+1.15** | **+0.61** |
+| `fast_resbn80` Δ (config A) | +0.17 | **−0.40** | **−0.14** | +1.23 | **−0.38** |
 
-All five point estimates still favour us for both configurations, but the margins
-shrink by roughly two thirds, and ch 128's t3/t5 leads (+0.04 = one trace) are ties.
-Exact paired McNemar on top-1 — now possible, since FUTO's per-row output exists —
-**resolves ch 192 on two of three seeds and ch 128 on none.**
+ch 192 and ch 128 still favour us on all five point estimates, but the margins shrink
+by roughly two thirds and ch 128's t3/t5 leads (+0.04 = one trace) are ties.
+**`fast_resbn80` fails three of five against the tuned bar** — its five-of-five pass
+in "The second unsealing" above holds only against the *published* preset. Exact
+paired McNemar on top-1 — now possible, since FUTO's per-row output exists —
+**resolves ch 192 on two of three seeds, ch 128 on none, and `fast_resbn80` on none
+(one seed net negative).**
 
 The prohibition on writing *that this model beats FUTO's decoder on equal footing*
-is lifted **for ch 192, qualified**; it **still stands for ch 128**, the shipping
-candidate, whose lead is not statistically resolvable at n = 2,400. See
-`FAIR_REMATCH.md` §5 for the verdict table and §7 for the caveats (chief among them:
-FUTO's context LM is still not in the bar).
+is lifted **for ch 192, qualified**; it **still stands for ch 128**, whose lead is
+not statistically resolvable at n = 2,400, and **`fast_resbn80` must not be
+described as beating FUTO at all** — on equal footing it is level on t1 and behind
+on t3, t5 and 4+. This bears directly on the shipping choice: the 0.215 ms variant's
+accuracy case rests entirely on the untuned comparison. See `FAIR_REMATCH.md` §5 for
+the verdict table and §7 for the caveats (chief among them: FUTO's context LM is
+still not in the bar, so it remains a floor on FUTO's full stack).
 
 ## ⚠ Retraction — the old "+0.21 pt maximum headroom" scoring claim
 

@@ -206,16 +206,32 @@ OOV-as-miss rule. Our numbers are re-read from the frozen dumps.
 | ours ch 192, worst seed | 87.88 | 92.54 | 93.46 | 90.92 | 86.31 |
 | ours ch 128 (ship candidate), seed-mean | 87.92 | 92.33 | 93.00 | 91.08 | 86.29 |
 | ours ch 128, worst seed | 87.83 | 92.08 | 92.92 | 90.55 | 86.06 |
+| ours `fast_resbn80`, seed-mean (config A) | 87.29 | 91.89 | 92.82 | 91.17 | 85.30 |
+| ours `fast_resbn80`, worst seed | 86.75 | 91.42 | 92.62 | 90.80 | 84.67 |
+
+`fast_resbn80` was test-validated by a separate session on 2026-08-08 (`RESULTS.md`
+§"The second unsealing") at its config A — the AOSP STRIP 146,964 trie, the same
+footing as everything else in this table. Its dumps were re-read, not re-decoded.
+Its config B (app 98,081-word lexicon) is compared against a differently-measured
+bar and is **not** covered here.
 
 ### Per-metric outcome, and how the margin moved
 
-| metric | ch192 Δ vs **published** bar | ch192 Δ vs **val-tuned** bar | ch128 Δ vs published | ch128 Δ vs **val-tuned** |
-|---|---|---|---|---|
-| t1 | +3.53 | **+1.24 win** | +3.09 | **+0.79 win** |
-| t3 | +1.61 | **+0.36 win** | +1.29 | **+0.04 tie** |
-| t5 | +1.42 | **+0.54 win** | +0.92 | **+0.04 tie** |
-| ≤3 | +1.80 | **+1.43 win** | +1.51 | **+1.15 win** |
-| 4+ | +4.41 | **+1.14 win** | +3.89 | **+0.61 win** |
+| metric | ch192 Δ vs **published** bar | ch192 Δ vs **val-tuned** bar | ch128 Δ vs published | ch128 Δ vs **val-tuned** | resbn80 Δ vs published | resbn80 Δ vs **val-tuned** |
+|---|---|---|---|---|---|---|
+| t1 | +3.53 | **+1.24 win** | +3.09 | **+0.79 win** | +2.46 | **+0.17 win** |
+| t3 | +1.61 | **+0.36 win** | +1.29 | **+0.04 tie** | +0.85 | **−0.40 LOSS** |
+| t5 | +1.42 | **+0.54 win** | +0.92 | **+0.04 tie** | +0.74 | **−0.14 LOSS** |
+| ≤3 | +1.80 | **+1.43 win** | +1.51 | **+1.15 win** | +1.60 | **+1.23 win** |
+| 4+ | +4.41 | **+1.14 win** | +3.89 | **+0.61 win** | +2.90 | **−0.38 LOSS** |
+
+**`fast_resbn80` does not survive the rematch.** It clears all five bars against the
+published preset and **fails three of five against the val-tuned one** — t3 −0.40,
+t5 −0.14, 4+ −0.38 — keeping only t1 (+0.17, well inside noise) and ≤3 (+1.23). Its
+paired McNemar against the val-tuned bar is unresolved on every seed and one seed is
+**net negative** (s1234: 74 ours-only vs 83 FUTO-only, p = 0.52; s4321 +7, p = 0.62;
+s7777 +14, p = 0.27). The 0.215 ms speed variant is, on equal footing, level with
+FUTO's engine rather than ahead of it, and behind it on the deeper-list metrics.
 
 Against the control (FUTO at our exact E1 preset) the picture is the same:
 ch192 +1.15 / +0.40 / +0.79 / +1.43 / +1.01, ch128 +0.71 / +0.08 / +0.29 / +1.15 / +0.48.
@@ -256,11 +272,13 @@ rediscovered and mistaken for the result.)*
 > metrics, by +0.36 to +1.43 pt, and the top-1 lead is statistically resolved on
 > two of three seeds. ch 128, the shipping candidate, leads on all five point
 > estimates but by +0.04 pt on t3 and t5, and its lead is not statistically
-> resolvable on any metric or any seed.**
+> resolvable on any metric or any seed. `fast_resbn80` loses three of five.**
 >
-> The previously published margins (ch192 +3.53 t1, ch128 +3.09 t1) were inflated
-> roughly threefold by the preset asymmetry. The *ranking* survives the rematch;
-> the *size* of the lead does not.
+> The previously published margins (ch192 +3.53 t1, ch128 +3.09 t1, resbn80 +2.46)
+> were inflated roughly threefold by the preset asymmetry. For ch 192 and ch 128
+> the *ranking* survives the rematch and only the *size* of the lead does not. For
+> `fast_resbn80` the ranking does not survive: its five-of-five pass was an artifact
+> of the untuned bar.
 
 The most durable result is the one the asymmetry never explained: **the ≤3-char
 stratum**, where we lead by +1.43 / +1.15 and FUTO's preset lever is worth only

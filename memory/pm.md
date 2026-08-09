@@ -531,3 +531,12 @@ ledger in test2400_seal.json["test-2400"]["unsealings"].
       remains a floor on FUTO's full published stack. FUTO floor sweep may not be
       fully exhausted (was still creeping when it went interior).
 - Report: `ctc/FAIR_REMATCH.md`; RESULTS.md asymmetry section marked SUPERSEDED.
+- [x] ADDENDUM: fast_resbn80 (test-validated by a concurrent session same day) added
+      to the equal-footing table at its config A (AOSP 146,964, matched footing).
+      It FAILS 3 of 5 against the val-tuned bar: t1 +0.17, t3 -0.40, t5 -0.14,
+      <=3 +1.23, 4+ -0.38. McNemar unresolved on all three seeds, one net NEGATIVE.
+      Its five-of-five pass holds only against the published preset. This bears on
+      the shipping choice -- the 0.215 ms variant's accuracy case rests entirely on
+      the untuned comparison.
+- [ ] NOT verified by me: the resbn80 config-B bar (app 98,081 trie) from PHASE_F
+      15.2. Out of scope here; only config A was re-checked.
