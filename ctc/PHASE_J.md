@@ -160,11 +160,83 @@ Reads (selection metric only; ~1 pt noise floor applies, and this metric is a
   live question for it (§5.1); the §2 blank-axis refutation had already
   lowered the prior on its mechanism (iii).
 
-### 5.1 Round-1 full battery *(running 2026-08-10 16:13, results pending)*
+### 5.1 Round-1 full battery
 
-`phaseJ_eval.sh` on all four: exported ONNX → full val-9918 (E1/AOSP) → 7 alt-
-layout corpora (dvorak/azerty/qwertz/german/spanish + clearflow/kasroz) →
-dvorak app-98k trie.
+Exported ONNX → full val-9918 (E1/AOSP) → 7 alt-layout corpora → dvorak app-98k
+trie. Single seed (1234) throughout, so the ~1 pt floor applies to every Δ;
+paired references are the same-seed runs, not the 3-seed bars.
+
+| model | val t1/t3/t5/≤3/4+ | greedy | dvorak | azerty | qwertz | german | spanish | clearflow | kasroz | dvorak-app |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| `resbn192i` s1234 (base) | 88.32/92.70/93.25/91.21/86.83 | 72.8 | 90.60 | 84.59 | 82.73 | 79.76 | 88.85 | 91.08* | 90.19* | 89.17 |
+| `phaseI-ch256` s1234 (p 0.5) | 88.64/92.56/93.23/91.15/87.33 | 75.8 | 87.95 | 81.87 | 79.95 | 78.81 | 88.51 | — | — | 87.83 |
+| **`phaseJ-ch256-p65`** | **88.69/92.75/93.37/91.21/87.38** | 75.0 | 89.66 | 82.44 | 79.61 | 78.72 | 87.66 | 91.50 | 90.32 | 88.89 |
+| `phaseJ-ch192-p80` | 88.10/92.51/93.33/90.88/86.66 | 70.3 | 90.72 | 83.83 | 83.07 | 80.67 | 88.23 | 92.46 | 92.61 | 90.15 |
+| `phaseH-p50` ch 80 (CR base) | 87.66/92.24/93.05/90.88/85.99 | 63.3 | 88.85 | 83.64 | 84.16 | 81.45 | 88.51 | — | — | 88.20 |
+| `phaseJ-cr80` (CR-CTC α 0.2) | 87.46/92.15/92.89/90.85/85.69 | 65.5 | **91.98** | 84.59 | 83.74 | 80.95 | 88.40 | 93.05 | 90.05 | **91.94** |
+
+\* §3.3 zero-shot floors, measured on the same checkpoint before this round.
+
+**(a) ch 256 + p 0.65 dominates ch 256 + p 0.5 on all five val metrics**
+(+0.05/+0.19/+0.14/+0.06/+0.05) and recovers 1.7 pt of dvorak (87.95 → 89.66,
+app-trie 87.83 → 88.89). The PHASE_I §5 dose-scaling law holds at the top rung.
+Against the campaign bars it is the **first model to beat the val bar on t1,
+t3, t5 and 4+ simultaneously** (+0.39/+0.15/+0.11/+0.61) — ≤3 is −0.06, i.e. a
+tie. But **it loses the euro-layout axis**: azerty −1.16, qwertz −2.89, german
+−0.92, spanish −0.62 vs the 3-seed bars (and vs `resbn192i`'s own s1234, so it
+is not a seed artifact). Capacity buys English accuracy and dvorak; it does not
+buy the CKDT-λ-confounded euro corpora. **Not promotable as-is.**
+
+**(b) p 0.8 is past the optimum at ch 192**: val −0.22/−0.19/+0.08/−0.33/−0.17
+against the same seed, i.e. four of five down. It does buy transfer (dvorak-app
++0.98, qwertz +0.34, german +0.91, clearflow +1.38, kasroz +2.42; azerty −0.76,
+spanish −0.62). With p 0.65 → 0.8 costing val at ch 192 and doing nothing at
+ch 256 (§5), **p 0.65 is confirmed as a plateau optimum, and the dose axis is
+closed.**
+
+**(c) CR-CTC is a transfer lever, not an accuracy lever — the strongest one
+measured so far.** At ch 80, α 0.2 costs a small but sign-consistent amount on
+every val metric (−0.20/−0.09/−0.16/−0.03/−0.30) and buys **dvorak +3.13 and
+dvorak-app +3.74**, azerty +0.95, clearflow ≈ +2 (vs the ch192 floor), against
+qwertz −0.42, german −0.50, spanish −0.11. Its end-of-schedule train CTC loss
+is 0.696 vs 0.599 — the consistency term is a strong regularizer, which is why
+it costs in-distribution accuracy and pays out-of-distribution. This is the
+same shape as the PHASE_I §6.1 T′ = 64 result (small val, large transfer) but
+without the contract break. **The refuted blank axis (§2) was mechanism (iii);
+the self-distillation mechanisms are the ones that carry the effect.**
+
+**Round-2 consequence:** the campaign's binding constraint is now the euro
+alt-layout axis at capacity, and CR-CTC is the only measured lever that pushes
+transfer up by pts rather than tenths. Round 3 is `cr192` (α 0.2 at the ship
+width, paired vs `resbn192i`) and `cr256` (α 0.2 on the `ch256-p65` frontier)
+before any stacking.
+
+### 5.2 Export parity, corrected (affects the PHASE_I §7.3 record)
+
+`phaseJ-ch256-p65` failed the export gate at 9.2e-3 — and the failure turned out
+to be the gate's fault. `export_onnx.py` fed `torch.rand` for **both** features
+and `layout_keys`; a white-noise trajectory on 64 random key positions is not
+the operating distribution. Re-probing on real val traces at the real layout
+centers (commit `1f05ea1`):
+
+| model | real-trace sliced max abs | white-noise probe | argmax |
+|---|---|---|---|
+| `phaseJ-cr80` (ch 80) | 8.0e-5 | 4.2e-5 | 100/100 both |
+| `resbn192i` (ch 192) | 1.49e-4 | 1.34e-4 | 100/100 both |
+| `phaseJ-ch192-p80` (ch 192) | 1.60e-4 | 3.4e-5 | 100/100 both |
+| `phaseJ-ch256-p65` (ch 256) | 1.47e-4 | 5.0e-3…9.7e-3 (run-varying) | 100/100 both |
+
+**On the operating distribution the residue is essentially width-flat
+(0.8–1.6e-4), and PHASE_I §7.3's "the residue grows with width" was a property
+of the retired probe, not of the exports.** The white-noise probe is not
+conservative in either direction (it under-reported ch 192 by 5×). The script
+now asserts magnitude on real traces (`--parity-features`, default
+`cache/val.npz`), keeps the noise probe as a printed diagnostic, asserts argmax
+100/100 on **both**, defaults `--parity-tol` to 5e-4, and measures BN-fold drift
+on the sliced contract view (the raw 65-wide max had been reporting the 9.77e-4
+float32 ULP of the −1e4 pad columns as "drift"). No accuracy number anywhere in
+the campaign moves: argmax parity was and is 100/100, and every published
+number was decoded through the exported graph.
 
 ## 6. Arms in flight (round 2, launched 2026-08-10 16:09, seed 1234, ch 192 /
 ## p 0.65 base unless noted)
