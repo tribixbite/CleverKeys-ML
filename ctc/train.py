@@ -128,7 +128,12 @@ class SwipeDataset(Dataset):
                  permute: bool = True, path_offset_sigma: float = 0.0,
                  path_scale_sigma: float = 0.0,
                  affine_sampler: str = "coupled",
-                 layout_aug: "Optional[LayoutAugmenter]" = None) -> None:
+                 layout_aug: "Optional[LayoutAugmenter]" = None,
+                 source_centers: "Optional[List[Optional[np.ndarray]]]" = None,
+                 cr_views: bool = False,
+                 aug_shear: float = 0.0, aug_rot_deg: float = 0.0,
+                 aug_timerev: float = 0.0, aug_maskhold: float = 0.0,
+                 mask_frac: float = 0.25, mask_spans: int = 3) -> None:
         paths = [npz_path] if isinstance(npz_path, (str, Path)) else list(npz_path)
         feats, tgts, tlens = [], [], []
         for p in paths:
@@ -136,12 +141,22 @@ class SwipeDataset(Dataset):
                 feats.append(np.array(d["features"]))   # [N,2,64]
                 tgts.append(np.array(d["targets"]))
                 tlens.append(np.array(d["target_lengths"]))
+        # Phase J: per-source geometry. Entry i of *source_centers* (or the
+        # canonical *centers* when None) is the geometry rows of npz i live on —
+        # what admits real alt-layout pools and non-Latin scripts into one run.
+        # Row -> source is recovered by searchsorted over the cumulative counts.
+        per_src = source_centers or [None] * len(paths)
+        if len(per_src) != len(paths):
+            raise ValueError("source_centers must match npz_path list length")
+        self._src_end = np.cumsum([len(t) for t in tlens])
+        self.src_centers = [centers if c is None else c for c in per_src]
+        self._src_bounds = [affine_axis_bounds(c) for c in self.src_centers]
         self.features = feats[0] if len(feats) == 1 else np.concatenate(feats)
         self.tgt_flat = tgts[0] if len(tgts) == 1 else np.concatenate(tgts)
         self.tgt_len = tlens[0] if len(tlens) == 1 else np.concatenate(tlens)
         self.sources = paths
         self.tgt_off = np.concatenate([[0], np.cumsum(self.tgt_len)])
-        self.centers = centers                          # [K,2]
+        self.centers = centers                          # [K,2] canonical
         self.augment = augment
         self.permute = permute
         self.path_offset_sigma = path_offset_sigma
@@ -155,6 +170,17 @@ class SwipeDataset(Dataset):
         # canonical bounds are precomputed; alternative geometries get theirs
         # computed per draw (26x2 min/max — negligible).
         self.layout_aug = layout_aug
+        # Phase J levers (all default-off => the pre-J RNG stream is untouched):
+        # CR-CTC dual views (shared layout draw + slot permutation, independent
+        # affine/noise/masking per view — RESEARCH_SCAN.md Spec A) and the
+        # FUTO-parity augmentations (Spec B).
+        self.cr_views = cr_views
+        self.aug_shear = aug_shear
+        self.aug_rot_deg = aug_rot_deg
+        self.aug_timerev = aug_timerev
+        self.aug_maskhold = aug_maskhold
+        self.mask_frac = mask_frac
+        self.mask_spans = mask_spans
         # Phase G: per-axis feasible scale ceiling for the coupled sampler; see
         # affine_axis_bounds. For en_qwerty x (cx 0.05..0.95) the span bound
         # binds at s = 1/0.90 = 1.111 — the nominal SCALE_HI = 1.15 is
@@ -210,69 +236,174 @@ class SwipeDataset(Dataset):
                 return float(sx), float(sy), float(tx), float(ty), bool(np.random.rand() < MIRROR_P)
         return 1.0, 1.0, 0.0, 0.0, bool(np.random.rand() < MIRROR_P)
 
+    def _augment_view(self, feats: np.ndarray, base_centers: np.ndarray,
+                      axis_bounds) -> Tuple[np.ndarray, np.ndarray]:
+        """One independently-augmented view of a sample -> ``(feats, centers)``.
+
+        Draw order for the default flag set is IDENTICAL to the pre-J code
+        (affine -> C1 jitter -> path noise -> center noise); the Phase-J levers
+        (shear / rotation / frame-hold masking) consume RNG only when enabled.
+        """
+        feats = feats.copy()
+        centers = base_centers.copy()
+        sx, sy, tx, ty, mirror = self._sample_affine(base_centers, axis_bounds)
+        for arr_x, arr_y in ((feats[0], feats[1]),
+                             (centers[:, 0], centers[:, 1])):
+            arr_x[:] = (arr_x - 0.5) * sx + 0.5 + tx
+            arr_y[:] = (arr_y - 0.5) * sy + 0.5 + ty
+            if mirror:
+                arr_x[:] = 1.0 - arr_x
+        if self.aug_shear > 0.0:
+            # Shared-frame shear x += k*(y-0.5) (RESEARCH_SCAN Spec B1). The
+            # feasible k range keeping every center in [0,1] is exact:
+            # per key, 0 <= cx + k*(cy-0.5) <= 1 bounds k on each side of
+            # cy = 0.5; intersect with the nominal ±aug_shear window.
+            k_lo, k_hi = -self.aug_shear, self.aug_shear
+            cx, cy = centers[:, 0], centers[:, 1]
+            dy = cy - 0.5
+            for j in np.nonzero(np.abs(dy) > 1e-9)[0]:
+                a = (0.0 - cx[j]) / dy[j]
+                b = (1.0 - cx[j]) / dy[j]
+                k_lo = max(k_lo, min(a, b))
+                k_hi = min(k_hi, max(a, b))
+            k = float(np.random.uniform(k_lo, k_hi)) if k_hi > k_lo else 0.0
+            feats[0] += k * (feats[1] - 0.5)
+            centers[:, 0] += k * dy
+        if self.aug_rot_deg > 0.0:
+            # In-bounds rotation about (0.5, 0.5) (Spec B2): rejection-sampled
+            # with an identity fallback, mirroring the legacy affine discipline.
+            for _ in range(AFFINE_TRIES):
+                th = np.deg2rad(np.random.uniform(-self.aug_rot_deg,
+                                                  self.aug_rot_deg))
+                c, s = np.cos(th), np.sin(th)
+                rx = (centers[:, 0] - 0.5) * c - (centers[:, 1] - 0.5) * s + 0.5
+                ry = (centers[:, 0] - 0.5) * s + (centers[:, 1] - 0.5) * c + 0.5
+                if rx.min() >= 0 and rx.max() <= 1 and ry.min() >= 0 and ry.max() <= 1:
+                    fx = (feats[0] - 0.5) * c - (feats[1] - 0.5) * s + 0.5
+                    fy = (feats[0] - 0.5) * s + (feats[1] - 0.5) * c + 0.5
+                    feats[0], feats[1] = fx, fy
+                    centers[:, 0], centers[:, 1] = rx, ry
+                    break
+        if self.path_offset_sigma > 0.0 or self.path_scale_sigma > 0.0:
+            # Independent path-vs-layout misalignment (Phase C1). The shared
+            # affine above moves the path AND the key centers together, so the
+            # model never sees the two frames disagree — yet in the wild they
+            # do: the HWS half sits ~0.064 off the FUTO half in y against the
+            # same layout. Perturbing the path alone, with the keys untouched,
+            # is the only augmentation that trains that tolerance.
+            jx = 1.0 + np.random.normal(0.0, self.path_scale_sigma)
+            jy = 1.0 + np.random.normal(0.0, self.path_scale_sigma)
+            ox = np.random.normal(0.0, self.path_offset_sigma)
+            oy = np.random.normal(0.0, self.path_offset_sigma)
+            feats[0] = (feats[0] - 0.5) * jx + 0.5 + ox
+            feats[1] = (feats[1] - 0.5) * jy + 0.5 + oy
+        feats += np.random.normal(0.0, PATH_NOISE, feats.shape).astype(np.float32)
+        centers += np.random.normal(0.0, CENTER_NOISE, centers.shape).astype(np.float32)
+        np.clip(feats, 0.0, 1.0, out=feats)     # path only; centers stay exact
+        if self.aug_maskhold > 0.0 and np.random.rand() < self.aug_maskhold:
+            feats = self._mask_hold(feats)
+        return feats, centers
+
+    def _mask_hold(self, feats: np.ndarray) -> np.ndarray:
+        """Frame-hold temporal masking (Spec A): 1..mask_spans random spans,
+        total <= mask_frac of the input frames, each span frozen at the last
+        coordinate before it (a hold reads as a stall; a zero would be a legal
+        position in the corner)."""
+        t = feats.shape[1]
+        budget = int(self.mask_frac * t)
+        n_spans = int(np.random.randint(1, self.mask_spans + 1))
+        for _ in range(n_spans):
+            if budget <= 1:
+                break
+            span = int(np.random.randint(1, budget + 1))
+            a = int(np.random.randint(0, t - span + 1))
+            hold = feats[:, a - 1] if a > 0 else feats[:, min(a + span, t - 1)]
+            feats[:, a:a + span] = hold[:, None]
+            budget -= span
+        return feats
+
     def __getitem__(self, i: int):
         feats = self.features[i].astype(np.float32).copy()          # [2,64]
         target = self.tgt_flat[self.tgt_off[i]:self.tgt_off[i + 1]].copy()
-        axis_bounds = self._axis_bounds
+        si = int(np.searchsorted(self._src_end, i, side="right"))
+        base_centers = self.src_centers[si]
+        axis_bounds = self._src_bounds[si]
+        k = base_centers.shape[0]
+
+        if self.augment and self.aug_timerev > 0.0 and \
+                np.random.rand() < self.aug_timerev:
+            # Time reversal WITH reversed target (Spec B3) — applied before the
+            # layout warp, whose polyline correspondence is direction-agnostic.
+            feats = feats[:, ::-1].copy()
+            target = target[::-1].copy()
 
         # Phase H: with probability p, re-target the sample onto an alternative
         # geometry — warp the cached path onto the same word's key centers there
         # and swap the key centers the model is shown. Runs BEFORE the shared
         # affine, so the affine/noise/permutation stack applies identically to
-        # canonical and resampled geometries.
-        base_centers = self.centers
-        if self.augment and self.layout_aug is not None:
+        # canonical and resampled geometries. Sources whose alphabet is not the
+        # 26-key a-z contract (ru, toki pona) skip the resampler — its synth and
+        # real pools are a-z geometries.
+        if self.augment and self.layout_aug is not None and k == 26:
             alt = self.layout_aug.sample_geometry()
             if alt is not None:
-                feats = warp_path(feats, target, self.centers, alt)
+                feats = warp_path(feats, target, base_centers, alt)
                 base_centers = alt
                 axis_bounds = affine_axis_bounds(alt)
-        centers = base_centers.copy()                               # [K,2]
 
-        if self.augment:
-            sx, sy, tx, ty, mirror = self._sample_affine(base_centers, axis_bounds)
-            for arr_x, arr_y in ((feats[0], feats[1]),
-                                 (centers[:, 0], centers[:, 1])):
-                arr_x[:] = (arr_x - 0.5) * sx + 0.5 + tx
-                arr_y[:] = (arr_y - 0.5) * sy + 0.5 + ty
-                if mirror:
-                    arr_x[:] = 1.0 - arr_x
-            if self.path_offset_sigma > 0.0 or self.path_scale_sigma > 0.0:
-                # Independent path-vs-layout misalignment (Phase C1). The shared
-                # affine above moves the path AND the key centers together, so the
-                # model never sees the two frames disagree — yet in the wild they
-                # do: the HWS half sits ~0.064 off the FUTO half in y against the
-                # same layout. Perturbing the path alone, with the keys untouched,
-                # is the only augmentation that trains that tolerance.
-                jx = 1.0 + np.random.normal(0.0, self.path_scale_sigma)
-                jy = 1.0 + np.random.normal(0.0, self.path_scale_sigma)
-                ox = np.random.normal(0.0, self.path_offset_sigma)
-                oy = np.random.normal(0.0, self.path_offset_sigma)
-                feats[0] = (feats[0] - 0.5) * jx + 0.5 + ox
-                feats[1] = (feats[1] - 0.5) * jy + 0.5 + oy
-            feats += np.random.normal(0.0, PATH_NOISE, feats.shape).astype(np.float32)
-            centers += np.random.normal(0.0, CENTER_NOISE, centers.shape).astype(np.float32)
-            np.clip(feats, 0.0, 1.0, out=feats)     # path only; centers stay exact
+        if not self.augment:
+            centers = base_centers.copy()
+            keys = np.zeros((MAX_KEYS, 2), np.float32)
+            mask = np.zeros((MAX_KEYS,), bool)
+            slots = np.arange(k)
+            keys[slots] = centers
+            mask[slots] = True
+            target_slots = slots[target]
+            return (torch.from_numpy(feats), torch.from_numpy(keys),
+                    torch.from_numpy(mask),
+                    torch.from_numpy(target_slots.astype(np.int64)))
+
+        # CR-CTC (Spec A): the layout draw above and the slot permutation below
+        # are SHARED by both views — emission columns must mean the same key in
+        # both — while affine/noise/masking are drawn independently per view.
+        views = [self._augment_view(feats, base_centers, axis_bounds)]
+        if self.cr_views:
+            views.append(self._augment_view(feats, base_centers, axis_bounds))
 
         # Slot assignment: identity (the inference-time layout) or a random
         # permutation into the 64 slots, which forces the model to read key
         # geometry rather than slot index.
-        keys = np.zeros((MAX_KEYS, 2), np.float32)
         mask = np.zeros((MAX_KEYS,), bool)
-        if self.augment and self.permute and np.random.rand() < PERMUTE_P:
-            slots = np.random.permutation(MAX_KEYS)[: self.k]
+        if self.permute and np.random.rand() < PERMUTE_P:
+            slots = np.random.permutation(MAX_KEYS)[:k]
         else:
-            slots = np.arange(self.k)
-        keys[slots] = centers
+            slots = np.arange(k)
         mask[slots] = True
         target_slots = slots[target]                    # letters -> slot indices
 
-        return (torch.from_numpy(feats), torch.from_numpy(keys),
-                torch.from_numpy(mask), torch.from_numpy(target_slots.astype(np.int64)))
+        packed = []
+        for f, c in views:
+            keys = np.zeros((MAX_KEYS, 2), np.float32)
+            keys[slots] = c
+            packed.append((f, keys))
+        if not self.cr_views:
+            f, keys = packed[0]
+            return (torch.from_numpy(f), torch.from_numpy(keys),
+                    torch.from_numpy(mask),
+                    torch.from_numpy(target_slots.astype(np.int64)))
+        return (torch.from_numpy(np.stack([p[0] for p in packed])),   # [2,2,64]
+                torch.from_numpy(np.stack([p[1] for p in packed])),   # [2,64,2]
+                torch.from_numpy(mask),
+                torch.from_numpy(target_slots.astype(np.int64)))
 
 
 def collate(batch):
-    """Stack fixed-size tensors and flatten the ragged CTC targets."""
+    """Stack fixed-size tensors and flatten the ragged CTC targets.
+
+    Handles both the single-view items (``feats [2,64]``) and the CR-CTC
+    dual-view items (``feats [2,2,64]``, ``keys [2,64,2]``) — the loop branches
+    on the stacked tensor's rank.
+    """
     feats = torch.stack([b[0] for b in batch])
     keys = torch.stack([b[1] for b in batch])
     mask = torch.stack([b[2] for b in batch])
@@ -771,6 +902,42 @@ def main() -> int:
                          "dvorak is EXCLUDED by default — it is the held-out "
                          "transfer probe (ALT_LAYOUT_EVAL.md) — and qwerty is "
                          "the canonical geometry. Empty = synthetic only")
+    ap.add_argument("--train-layouts", default="", dest="train_layouts",
+                    help="Phase J: comma-separated per---train-npz layout files "
+                         "(same count/order; empty entry = the canonical "
+                         "--layout). A pool's rows are trained on its own "
+                         "geometry — real alt-layout data and non-Latin scripts "
+                         "join one run this way. Files may be letters-ordered "
+                         "(en_qwerty.json style) or FUTO cx/cy layouts (a-z "
+                         "extracted)")
+    ap.add_argument("--cr-alpha", type=float, default=0.0, dest="cr_alpha",
+                    help="CR-CTC consistency weight (RESEARCH_SCAN Spec A; "
+                         "paper optimum 0.2). >0 trains two independently "
+                         "augmented views per sample (shared layout draw + slot "
+                         "permutation) with a symmetric stop-grad frame KL; "
+                         "~2x GPU/step. 0 = off")
+    ap.add_argument("--cr-mask-frac", type=float, default=0.25, dest="cr_mask_frac",
+                    help="temporal frame-hold masking budget (fraction of the 64 "
+                         "input frames) applied per CR view / by --aug-maskhold")
+    ap.add_argument("--cr-mask-spans", type=int, default=3, dest="cr_mask_spans",
+                    help="max random spans the masking budget is split across")
+    ap.add_argument("--aug-shear", type=float, default=0.0, dest="aug_shear",
+                    help="FUTO-parity shear (Spec B1): x += k*(y-0.5), k uniform "
+                         "over ±this ∩ the exact center-containment range. 0=off")
+    ap.add_argument("--aug-rot", type=float, default=0.0, dest="aug_rot",
+                    help="FUTO-parity rotation (Spec B2): degrees, uniform ±this "
+                         "about (0.5,0.5), containment-rejection-sampled. 0=off")
+    ap.add_argument("--aug-timerev", type=float, default=0.0, dest="aug_timerev",
+                    help="FUTO-parity time reversal (Spec B3): probability of "
+                         "reversing frames AND target. 0=off")
+    ap.add_argument("--aug-maskhold", type=float, default=0.0, dest="aug_maskhold",
+                    help="standalone frame-hold masking probability (isolates "
+                         "Spec A's masking from CR). In CR mode masking is "
+                         "applied per view at this probability too")
+    ap.add_argument("--snapshot-every", type=int, default=0, dest="snapshot_every",
+                    help="Phase J: keep a numbered checkpoint every N "
+                         "validations (snap_<step>.pt) — the supply for the "
+                         "beam-selected checkpoint soup. 0 = off")
     ap.add_argument("--ema-decay", type=float, default=0.0, dest="ema_decay",
                     help="C2: EMA decay for the evaluated/exported weights (0 = off)")
     ap.add_argument("--beam-val-rows", type=int, default=2000, dest="beam_val_rows",
@@ -883,11 +1050,36 @@ def main() -> int:
                                      reals)
         print(f"layout-alt: p={args.layout_alt_p} synth_frac="
               f"{args.layout_synth_frac:.3f} real pool={real_names or 'none'}")
+    source_centers: "Optional[List[Optional[np.ndarray]]]" = None
+    if args.train_layouts:
+        specs = [s.strip() for s in args.train_layouts.split(",")]
+        if len(specs) != len(train_npz):
+            raise SystemExit(f"--train-layouts has {len(specs)} entries for "
+                             f"{len(train_npz)} --train-npz pools")
+        source_centers = []
+        for s in specs:
+            if not s or s == "canonical":
+                source_centers.append(None)
+                continue
+            p = resolve(args.workdir, s)
+            try:
+                c = load_layout_centers(p)
+            except (KeyError, SystemExit):
+                c = load_az_centers(p)
+            source_centers.append(c)
+            print(f"train-layout: {p.name} -> {c.shape[0]} keys")
     train_ds = SwipeDataset(train_npz, centers, augment=True,
                             path_offset_sigma=args.path_offset_sigma,
                             path_scale_sigma=args.path_scale_sigma,
                             affine_sampler=args.affine_sampler,
-                            layout_aug=layout_aug)
+                            layout_aug=layout_aug,
+                            source_centers=source_centers,
+                            cr_views=args.cr_alpha > 0.0,
+                            aug_shear=args.aug_shear, aug_rot_deg=args.aug_rot,
+                            aug_timerev=args.aug_timerev,
+                            aug_maskhold=args.aug_maskhold,
+                            mask_frac=args.cr_mask_frac,
+                            mask_spans=args.cr_mask_spans)
     val_ds = SwipeDataset(cache_dir / "val.npz", centers, augment=False)
     train_dl = DataLoader(train_ds, args.batch, shuffle=True, collate_fn=collate,
                           num_workers=args.workers, pin_memory=True, drop_last=True,
@@ -950,6 +1142,9 @@ def main() -> int:
                   f"(target = log mean prob)")
     elif args.kd_teacher or args.kd_weight > 0:
         raise SystemExit("--kd-teacher and --kd-weight must be given together")
+    if args.cr_alpha > 0 and teachers:
+        raise SystemExit("--cr-alpha and --kd-teacher are mutually exclusive "
+                         "(the CR branch runs two student forwards)")
 
     def kd_loss(student_log_e: torch.Tensor,
                 teacher_log_e: torch.Tensor) -> torch.Tensor:
@@ -1043,23 +1238,44 @@ def main() -> int:
             feats = feats.to(device, non_blocking=True)
             keys = keys.to(device, non_blocking=True)
             mask = mask.to(device, non_blocking=True)
-            log_e, _, _ = model(feats, keys, mask)              # [B,32,65] fp32
             kd = None
-            if teachers:
-                with torch.no_grad():
-                    t_logs = [t(feats, keys, mask)[0] for t in teachers]
-                    t_log_e = t_logs[0] if len(t_logs) == 1 else \
-                        torch.logsumexp(torch.stack(t_logs), 0) - math.log(len(t_logs))
-                kd = kd_loss(log_e, t_log_e)
-            log_e = log_e.permute(1, 0, 2)                      # [T',B,65] for CTCLoss
-            in_lens = torch.full((log_e.shape[1],), args.t_out, dtype=torch.long)
-            loss = ctc(log_e, targets, in_lens, tlens)
-            # `running` stays the CTC term alone, so the logged `ctc_loss` remains
-            # comparable across every arm in the campaign whether KD is on or off.
-            ctc_val = float(loss.detach())
-            if kd is not None:
-                running_kd += float(kd.detach())
-                loss = loss + args.kd_weight * kd
+            if feats.dim() == 4:
+                # CR-CTC (Spec A): two grad-carrying forwards on the two views,
+                # loss = ½(CTC_a + CTC_b) + α·½Σ[KL(sg(b)‖a) + KL(sg(a)‖b)]
+                # per-frame over all 65 columns (pad columns contribute exactly
+                # 0 — both views hold them at MASK_NEG, same argument as KD).
+                log_a, _, _ = model(feats[:, 0], keys[:, 0], mask)
+                log_b, _, _ = model(feats[:, 1], keys[:, 1], mask)
+                in_lens = torch.full((log_a.shape[0],), args.t_out,
+                                     dtype=torch.long)
+                la = ctc(log_a.permute(1, 0, 2), targets, in_lens, tlens)
+                lb = ctc(log_b.permute(1, 0, 2), targets, in_lens, tlens)
+                loss = 0.5 * (la + lb)
+                ctc_val = float(loss.detach())
+                nf = log_a.shape[0] * log_a.shape[1]
+                cr = 0.5 * (F.kl_div(log_a, log_b.detach(), reduction="sum",
+                                     log_target=True)
+                            + F.kl_div(log_b, log_a.detach(), reduction="sum",
+                                       log_target=True)) / nf
+                running_kd += float(cr.detach())
+                loss = loss + args.cr_alpha * cr
+            else:
+                log_e, _, _ = model(feats, keys, mask)          # [B,32,65] fp32
+                if teachers:
+                    with torch.no_grad():
+                        t_logs = [t(feats, keys, mask)[0] for t in teachers]
+                        t_log_e = t_logs[0] if len(t_logs) == 1 else \
+                            torch.logsumexp(torch.stack(t_logs), 0) - math.log(len(t_logs))
+                    kd = kd_loss(log_e, t_log_e)
+                log_e = log_e.permute(1, 0, 2)                  # [T',B,65] for CTCLoss
+                in_lens = torch.full((log_e.shape[1],), args.t_out, dtype=torch.long)
+                loss = ctc(log_e, targets, in_lens, tlens)
+                # `running` stays the CTC term alone, so the logged `ctc_loss`
+                # remains comparable across every arm whether KD/CR is on or off.
+                ctc_val = float(loss.detach())
+                if kd is not None:
+                    running_kd += float(kd.detach())
+                    loss = loss + args.kd_weight * kd
             opt.zero_grad(set_to_none=True)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
@@ -1094,7 +1310,8 @@ def main() -> int:
                              + " ".join(f"{k} {v:5.2f}"
                                         for k, v in beam_val.probe_t1.items())
                              + f"  mix {beam_val.score:5.2f}")
-                kdstr = f"  kd {mean_kd:.4f}" if teachers else ""
+                kdstr = (f"  kd {mean_kd:.4f}" if teachers else
+                         f"  cr {mean_kd:.4f}" if args.cr_alpha > 0 else "")
                 print(f"epoch {epoch:3d} step {step:6d}  ctc_loss {mean_loss:.4f}"
                       f"{kdstr}  val_greedy {acc * 100:.2f}%{bstr}  "
                       f"lr {lr_now:.2e}  {secs:.1f}s", flush=True)
@@ -1104,6 +1321,8 @@ def main() -> int:
                            "seconds": round(secs, 3)}
                     if teachers:
                         rec["kd_loss"] = mean_kd
+                    elif args.cr_alpha > 0:
+                        rec["cr_loss"] = mean_kd
                     if bm:
                         rec.update({"val_beam_t1": bm[0], "val_beam_t3": bm[1],
                                     "val_beam_t5": bm[2],
@@ -1118,6 +1337,10 @@ def main() -> int:
                                         best_epoch, args, acc, ema, bm,
                                         select_metric)
                 atomic_save(ckpt, run_dir / "last.pt")
+                if args.snapshot_every > 0 and evals % args.snapshot_every == 0:
+                    # Soup supply (Phase J): numbered, never pruned; the soup
+                    # script selects on the logged val_beam_t1 of each.
+                    atomic_save(ckpt, run_dir / f"snap_{step}.pt")
                 if best_eval == evals:
                     atomic_save(ckpt, run_dir / "best.pt")
                 elif evals - best_eval >= args.patience:
