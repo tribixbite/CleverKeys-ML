@@ -22,9 +22,17 @@ folded it); ъ occurs in ~0.06 % of words; ``-`` in ~0.3 %.
 
 The mapping — same policy as the alt-layout eval (ALT_LAYOUT_EVAL.md §2–3)
 --------------------------------------------------------------------------
-* Coordinates: ``x/width``, ``y/height``, ``t − t[0]`` — path and key centers
-  land in the same ``[0,1]²`` frame, which is all the geometry-input contract
-  requires (any shared affine of both is tolerated, PHASE_H/§7.2).
+* Coordinates: the **letter-area frame**, the same convention the canonical
+  en corpus uses (DATA_TIERS.md §1): x over the full grid width (the letter
+  rows tile it), y over the letter-key block's vertical extent, so the three
+  ЙЦУКЕН rows land at cy 0.167/0.5/0.833 — exactly the (2r+1)/2R family every
+  trained geometry (canonical and layout-alt synthetic) lives in.  A plain
+  ``y/height`` would leave the letter block squashed into cy 0.138–0.60
+  (the grid's 667 px include the action row), an sy≈0.46 compression that
+  sits outside the measured affine-tolerance envelope
+  (ALT_LAYOUT_EVAL.md §7.2).  ``t − t[0]``; path y clipped to [0,1] (swipes
+  drifting onto the action row are pinned to the block edge, matching the
+  training loop's post-noise clip).
 * Alphabet: the 31 default-grid letters, **alphabetical** slot order
   (``абвгдежзийклмнопрстуфхцчшщыьэюя``).  Projection for targets AND lexicon:
   lowercase, strip ``-``/``'``, fold ё→е and ъ→ь (the keys a default-grid swipe
@@ -94,9 +102,27 @@ def project_ru(word: str) -> Optional[str]:
     return s
 
 
+def letter_block(grid: dict, letters: str) -> Tuple[float, float]:
+    """(y_top, y_bottom) of the letter-key block in grid pixels."""
+    tops, bots = [], []
+    for k in grid["keys"]:
+        lab = k.get("label")
+        if lab is not None and lab in letters:
+            hb = k["hitbox"]
+            tops.append(hb["y"])
+            bots.append(hb["y"] + hb["h"])
+    return float(min(tops)), float(max(bots))
+
+
 def grid_layout(grid: dict, letters: str) -> dict:
-    """One embedded corpus grid -> en_qwerty.json-schema layout dict."""
-    w, h = float(grid["width"]), float(grid["height"])
+    """One embedded corpus grid -> en_qwerty.json-schema layout dict.
+
+    Letter-area frame: x over the full grid width, y over the letter block, so
+    the geometry lands in the canonical-corpus convention (see module docs).
+    """
+    w = float(grid["width"])
+    y0, y1 = letter_block(grid, letters)
+    bh = y1 - y0
     by_label = {}
     for k in grid["keys"]:
         lab = k.get("label")
@@ -105,15 +131,16 @@ def grid_layout(grid: dict, letters: str) -> dict:
             by_label[lab] = {
                 "letter": lab,
                 "cx": (hb["x"] + hb["w"] / 2.0) / w,
-                "cy": (hb["y"] + hb["h"] / 2.0) / h,
+                "cy": (hb["y"] + hb["h"] / 2.0 - y0) / bh,
                 "rx": hb["w"] / 2.0 / w,
-                "ry": hb["h"] / 2.0 / h,
+                "ry": hb["h"] / 2.0 / bh,
             }
     missing = [c for c in letters if c not in by_label]
     if missing:
         raise SystemExit(f"grid {grid['grid_name']}: letters missing keys: {missing}")
     return {"name": f"ru_jcuken_{grid['grid_name']}",
             "letters": letters,
+            "letter_block_px": [y0, y1],
             "keys": [by_label[c] for c in letters]}
 
 
@@ -132,18 +159,25 @@ def iter_corpus(path: Path, ref: Optional[Path] = None
                                     List[float], dict]]:
     """Yield ``(raw_word, grid_name, xs, ys, ts, grid)`` with normalized coords."""
     refs = ref.read_text(encoding="utf-8").split() if ref else None
+    blocks: Dict[str, Tuple[float, float]] = {}
     with open(path, encoding="utf-8") as f:
         for i, line in enumerate(f):
             o = json.loads(line)
             c = o["curve"]
             g = c["grid"]
-            w, h = float(g["width"]), float(g["height"])
+            gname = g["grid_name"]
+            if gname not in blocks:
+                letters = RU_LETTERS_31 if gname == "default" else RU_LETTERS_33
+                blocks[gname] = letter_block(g, letters)
+            y0, y1 = blocks[gname]
+            bh = y1 - y0
+            w = float(g["width"])
             xs = [x / w for x in c["x"]]
-            ys = [y / h for y in c["y"]]
+            ys = [min(1.0, max(0.0, (y - y0) / bh)) for y in c["y"]]
             t0 = c["t"][0] if c["t"] else 0.0
             ts = [float(t - t0) for t in c["t"]]
             word = refs[i] if refs is not None else o.get("word")
-            yield word, g["grid_name"], xs, ys, ts, g
+            yield word, gname, xs, ys, ts, g
 
 
 def keep_reason(word: Optional[str], xs: List[float], ts: List[float]
