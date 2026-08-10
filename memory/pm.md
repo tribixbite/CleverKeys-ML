@@ -649,29 +649,47 @@ frozen Phase-G/H recipe (resbn80-class, layout-alt p=0.5, no KD, 188k) with only
 the training-npz composition varying; control (d) = phaseH-p50 s1234 already
 trained + evaled.
 
-- [ ] B1 HWS filtering arms (the never-applied native/quality filtering):
+- [x] B1 HWS filtering arms (the never-applied native/quality filtering):
       build_hws_arms.py — per-uid englishLevel from hws_full .json sidecars;
       arms: (a) native+advanced, (b) native only, (c) all levels + HWS-derived
       duration/speed/point-count gates (thresholds from measured HWS
       distributions, NOT the FUTO cascade that measured negative), (d) control.
       Rebuild T3-FUTO-only npz + per-arm HWS npz; verify control reproduces
       t3hws 78,155.
-- [ ] B2 train arms a/b/c at the frozen recipe, seed 1234 (share GPU politely);
+- [x] B2 train arms a/b/c at the frozen recipe, seed 1234 (share GPU politely);
       judge on val-9918 per-source (esp. HWS half) + per-englishLevel val
       breakdown + contributor-overlap disclosure (T3 is contributor-dirty; level
       filters change the leak asymmetrically) + all-six alt-layout suite.
       Winner -> feed I-A capacity runs.
-- [ ] B3 Cyrillic feasibility (a): Yandex Cup 2023 corpus — LIVE at
+- [x] B3 Cyrillic feasibility (a): Yandex Cup 2023 corpus — LIVE at
       disk.yandex.ru/d/IYiSpLob-zAxqg (data.zip 1.63GB, sha256 2e65d7a2…,
       downloading to ~/ctc-train/data/yandex_cup). Inventory + license check +
       format/geometry mapping.
-- [ ] B4 Cyrillic (b): cyrillic_synth.py — residual-transplant generator
+- [x] B4 Cyrillic (b): cyrillic_synth.py — residual-transplant generator
       (layout_aug warp machinery) English residuals -> Russian ideal polylines
       on ЙЦУКЕН (33 letters, 64-slot contract); ru lexicon from app langpacks;
       PHASE_H-style endpoint validation + real-data probe from a held-out
       Yandex slice if B3 lands.
-- [ ] B5 Cyrillic (c): if train+eval data usable — multi-script prototype (ru
+- [x] B5 Cyrillic (c): if train+eval data usable — multi-script prototype (ru
       alphabet in the data pipeline + ru trie; model unchanged), honest first
       Cyrillic decode measurement.
-- [ ] B6 PHASE_I_DATA.md: HWS arm table (per-source val + alt-layout), Cyrillic
+- [x] B6 PHASE_I_DATA.md: HWS arm table (per-source val + alt-layout), Cyrillic
       verdict + measured numbers, data-asset inventory + licenses, commits.
+
+2026-08-09 — Phase I-B COMPLETE (ctc/PHASE_I_DATA.md)
+
+- HWS arms (frozen H recipe, seed 1234, val-9918 + alt-layout suite):
+  control 87.66 t1 (hws-half 81.09) | quality 87.71 (80.89) | nativeadv
+  87.30 (80.25) | native 87.33 (80.14). englishLevel filtering NEGATIVE on
+  every slice including the leak-matched native rows (81.97 -> 81.43/81.34);
+  hws-derived motion gates a statistical tie (mild + point estimate).
+  -> I-A: keep T3+3xHWS as-is; hws_quality.npz acceptable drop-in; NO level
+  filter. (fourth exclusion-curation negative in the campaign.)
+- Cyrillic: Yandex Cup 2023 corpus LIVE + verified (6.0M jcuken swipes,
+  license unstated - research-use caution, no ship without owner call).
+  ru-real prototype (94k, committed train.py, greedy sel): valid-10k in-dict
+  t1 89.64 / 95.82 / 96.97 app-ru trie, greedy 75.2 — English-class.
+  ru-synth (residual transplant, ZERO real rows): 76.21 in-dict t1 —
+  geometric-engine class from synthesis alone. Next rung (not run): synth
+  pretrain + small real finetune; joint multi-script needs per-row layout
+  batching in train.py (I-A's file).
