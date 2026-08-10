@@ -759,3 +759,18 @@ ctc/YANDEX_LICENSE_RESEARCH.md). Verdict: **CONFIRMED** (eval-only stands).
       attribute the corpus in any published RU numbers (ст.1335.1 last sent.).
 - [ ] Unrelated hygiene spotted: our neural-swipe-typing fork is public with
       NO LICENSE, inherited from an unlicensed upstream. Decide + add one.
+
+2026-08-10 — research scan + on-device personalization design study (ctc/RESEARCH_SCAN.md)
+
+- [ ] Part 1: web scan (arXiv/ICASSP/Interspeech/ICLR 2024-26) for higher CTC accuracy
+      at our scale: CR-CTC (never run), InterCTC/self-conditioned, Bayes-risk/MWER
+      sequence training vs the beam metric, Zipformer-tiny, SAM/ASAM, stochastic depth,
+      label priors / peakiness (FUTO emission-count regularizer), blank-penalty decode,
+      augmentation theory. Rank + top 2-3 concrete experiment specs. Do NOT re-recommend
+      refuted levers (KD, EMA, >188k schedule, int8, dwsep, refinement head, curation).
+- [ ] Part 2: LOCAL-ONLY on-device personal fine-tuning design: (a) ORT on-device
+      training / ExecuTorch status, (b) parameter-efficient variants (BitFit/LoRA/
+      adapter/per-user input calibration), (c) non-gradient (lexicon freq adaptation,
+      emission recalibration, residual-bank synth + head retrain). Rank, v1 + v2
+      proposal, cite app-side hooks (MLDataCollector, personalization/, swipe_ml prefs).
+- [ ] Deliver ctc/RESEARCH_SCAN.md, lowercase conventional commit, no push.
