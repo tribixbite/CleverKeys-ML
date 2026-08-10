@@ -305,8 +305,11 @@ this file alone.
   + app-ru-50k, the footing the 76.21 bar was set on.
 * `jsum.py <run>…` in the workdir prints the one-line val + alt-layout summary
   used in the tables above.
-* `phaseJ_queue4.sh` — same pattern for round 4 (`phaseJ-joint` = en+ru single
-  model, `phaseJ-ru192` = ru-only ch 192 rung; `phaseJ_round4.sh`).
+* `phaseJ_queue4.sh` — round 4, scheduled **per slot** rather than per round
+  (the non-CR arm finishes hours before the 2×-cost CR arms, and a freed slot
+  should not idle): `futoaug` → `phaseJ-joint` (en+ru single model), `cr192` →
+  `phaseJ-ru192` (ru-only ch 192 rung), `cr256` → `phaseJ-cr256-p80` (the
+  §5.1b bundle: CR-CTC on the only dose that clears the euro bars).
 * Battery chains run themselves as arms land: `phaseJ_eval_round2.sh` and
   `phaseJ_eval_round34.sh` (the latter routes `phaseJ-ru192` to the ru battery
   and gives `phaseJ-joint` both). So the whole of rounds 2–4 — train **and**
