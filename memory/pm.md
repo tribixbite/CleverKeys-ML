@@ -640,3 +640,38 @@ This agent (I-A) owns train.py.
       trie), holdout-confirmed; 3 seeds for the final pick.
 - [ ] I6 PHASE_I.md: findings ranked, capacity/size/transfer table, <=5MB ship
       recommendation, artifacts + sha256 + parity.
+
+2026-08-09 — Phase I-B (data quality + language versatility; owns data-prep /
+corpus tooling in NEW files; NO test-2400 anywhere; app repo read-only)
+
+Concurrent with Phase I-A (owns train.py + capacity runs). I-B arms use the
+frozen Phase-G/H recipe (resbn80-class, layout-alt p=0.5, no KD, 188k) with only
+the training-npz composition varying; control (d) = phaseH-p50 s1234 already
+trained + evaled.
+
+- [ ] B1 HWS filtering arms (the never-applied native/quality filtering):
+      build_hws_arms.py — per-uid englishLevel from hws_full .json sidecars;
+      arms: (a) native+advanced, (b) native only, (c) all levels + HWS-derived
+      duration/speed/point-count gates (thresholds from measured HWS
+      distributions, NOT the FUTO cascade that measured negative), (d) control.
+      Rebuild T3-FUTO-only npz + per-arm HWS npz; verify control reproduces
+      t3hws 78,155.
+- [ ] B2 train arms a/b/c at the frozen recipe, seed 1234 (share GPU politely);
+      judge on val-9918 per-source (esp. HWS half) + per-englishLevel val
+      breakdown + contributor-overlap disclosure (T3 is contributor-dirty; level
+      filters change the leak asymmetrically) + all-six alt-layout suite.
+      Winner -> feed I-A capacity runs.
+- [ ] B3 Cyrillic feasibility (a): Yandex Cup 2023 corpus — LIVE at
+      disk.yandex.ru/d/IYiSpLob-zAxqg (data.zip 1.63GB, sha256 2e65d7a2…,
+      downloading to ~/ctc-train/data/yandex_cup). Inventory + license check +
+      format/geometry mapping.
+- [ ] B4 Cyrillic (b): cyrillic_synth.py — residual-transplant generator
+      (layout_aug warp machinery) English residuals -> Russian ideal polylines
+      on ЙЦУКЕН (33 letters, 64-slot contract); ru lexicon from app langpacks;
+      PHASE_H-style endpoint validation + real-data probe from a held-out
+      Yandex slice if B3 lands.
+- [ ] B5 Cyrillic (c): if train+eval data usable — multi-script prototype (ru
+      alphabet in the data pipeline + ru trie; model unchanged), honest first
+      Cyrillic decode measurement.
+- [ ] B6 PHASE_I_DATA.md: HWS arm table (per-source val + alt-layout), Cyrillic
+      verdict + measured numbers, data-asset inventory + licenses, commits.
