@@ -142,6 +142,24 @@ Alphabet = the 31 default-grid letters, alphabetical slot order. Geometries
 vendored as `layouts/ru_jcuken_default.json` / `_extra.json` (generated from
 the corpus' own embedded grids; loads through the campaign `load_layout`).
 
+### Frame mapping — established, not assumed (the ALT_LAYOUT §2 discipline)
+
+Endpoint-proximity on 2,000 converted valid rows against the vendored jcuken
+geometry, with a deliberately wrong geometry (qwerty centers, `ru letter i →
+qwerty key i mod 26`) as the falsification control:
+
+| geometry | start-hit | end-hit | start-d | end-d |
+|---|---|---|---|---|
+| **jcuken (claimed frame)** | **0.917** | 0.647 | 0.0491 | 0.1069 |
+| wrong-geo control | 0.008 | 0.004 | 0.5095 | 0.4215 |
+| en_qwerty val reference (ALT_LAYOUT §2) | 0.895 | 0.769 | 0.0686 | 0.0784 |
+
+Start-hit sits at the top of the real-corpus band (0.79–0.91 across six
+corpora) and the control collapses to below-chance — the frame is right. The
+lower end-hit (0.65, end-d 0.107) is a property of this corpus (late finger
+lift), not of the mapping; dvorak showed the mirror-image skew (0.79 start /
+0.97 end).
+
 The model needs **no change**: emission column `c` is whatever key sits in
 slot `c`, so a 31-letter layout uses 31 of the 64 slots. The committed
 `train.py` runs Cyrillic untouched (`--layout` + `--cache cache_ru`
