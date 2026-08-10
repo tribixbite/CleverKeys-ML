@@ -236,6 +236,16 @@ def main() -> int:
     ap.add_argument("--grid-beta-prune", default="", dest="grid_beta_prune")
     ap.add_argument("--skip-refine", action="store_true", dest="skip_refine",
                     help="coarse pass only (no prune-param refinement)")
+    ap.add_argument("--blank-grid", default="", dest="blank_grid",
+                    help="Phase J: comma-separated constant offsets added to the "
+                         "blank column of the sliced log-emissions BEFORE the "
+                         "beam runs (RESEARCH_SCAN.md §1.1 #5 — the zero-cost "
+                         "test of the CTC-peakiness hypothesis). Unlike "
+                         "(gamma,beta,lambda), a blank shift changes the beam's "
+                         "path scores and pruning, so each offset runs its own "
+                         "beam pass over --sweep-rows and --holdout-rows at the "
+                         "--preset prune setting; scoring uses --preset. 0 must "
+                         "be in the grid — it is the exact incumbent")
     ap.add_argument("--lambda-only", action="store_true", dest="lambda_only",
                     help="sweep ONLY lambda over --grid-lambda, holding gamma/beta/"
                          "gammaPrune/betaPrune at --preset. lambda is the "
@@ -274,6 +284,45 @@ def main() -> int:
     print(f"trie: {trie.num_words} words  (kind '{args.vocab_kind}', {args.vocab})")
 
     ctx = mp.get_context("fork")
+
+    if args.blank_grid:
+        # Each offset needs its own worker pool: the shift enters the beam DP
+        # itself (transition scores AND per-frame pruning), so the analytic
+        # re-scoring shortcut does not apply along this axis.
+        if not args.preset:
+            raise SystemExit("--blank-grid needs --preset "
+                             "gamma,lambda,beta,gammaPrune,betaPrune")
+        p = tuple(float(v) for v in args.preset.split(","))
+        if len(p) != 5:
+            raise SystemExit("--preset needs 5 floats")
+        offsets = [float(v) for v in args.blank_grid.split(",")]
+        blank_col = len(letters)            # sliced view: blank at column K
+        results = {"preset": list(p), "blank_grid": []}
+        print(f"[blank-grid] offsets {offsets} at preset {p}")
+        for off in offsets:
+            em = emissions if off == 0.0 else emissions.copy()
+            if off != 0.0:
+                em[..., blank_col] += np.float32(off)
+            pool = ctx.Pool(args.jobs, initializer=_init_worker,
+                            initargs=(trie, letters, em, args.beam_width))
+            try:
+                rec = {"offset": off}
+                for tag, lo, hi in (("sweep half", sw_lo, sw_hi),
+                                    ("holdout half", ho_lo, ho_hi)):
+                    tr = collect(pool, trie, targets, lo, hi, p[3], p[4], args.jobs)
+                    rec[tag] = report(f"blank {off:+.2f} / {tag}", tr, p)
+                    st = strata(tr, p[0], p[2], p[1])
+                    rec[tag + " strata"] = {k: v[1] for k, v in st.items()}
+                results["blank_grid"].append(rec)
+            finally:
+                pool.close()
+                pool.join()
+        out_path = resolve(args.workdir, args.out)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(json.dumps(results, indent=1))
+        print(f"\nwrote {out_path}")
+        return 0
+
     pool = ctx.Pool(args.jobs, initializer=_init_worker,
                     initargs=(trie, letters, emissions, args.beam_width))
     results: Dict[str, object] = {"baseline_preset": list(base)}
