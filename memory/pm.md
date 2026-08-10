@@ -834,3 +834,60 @@ ctc/YANDEX_LICENSE_RESEARCH.md). Verdict: **CONFIRMED** (eval-only stands).
       +2.5-2.8 transfer, 2x beam); NOT test-validated (no unsealing). Phase J
       handoff in PHASE_I.md §9 (ch256+p-scaled dose, T64 bundle, per-row layout
       batching for ru, CR-CTC/aug/blank-penalty levers on the resbn192i base).
+
+2026-08-10 — Phase J (FINAL convergence campaign; orchestrator directive of
+2026-08-09/10: unlimited compute; end only at high-confidence SOTA on existing
+usable data/research — ≤5MB, <50ms, beat resbn192i on ALL spreads + all six
+alt-layouts + shippable-Cyrillic bar; test-2400 unsealing only after ALL bars
+beaten on val, pre-registered)
+
+Bars to beat (seed-mean, 3 seeds): en val-9918 E1/AOSP 88.30/92.60/93.26/
+91.27/86.77 (resbn192i); dvorak-heldout 89.13 / dvorak-app 88.20 / azerty
+83.60 / qwertz 82.50 / german 79.64 / spanish 88.28; ru real-val probe
+in-dict t1 > 76.21 with NO Yandex training rows. Size ≤5MB (fp16w free;
+int8-trunk free at ch256), latency <50ms (trivially met).
+
+- [ ] J1 GPU round 1 — dose×capacity (PHASE_I §9 highest-value follow-ups),
+      one variable at a time, seed 1234, 188k, resbn192i recipe otherwise:
+      phaseJ-ch256-p65 | phaseJ-ch256-p80 (coarse dose sweep at ch256) |
+      phaseJ-ch192-p80 (is 0.65 already optimal at ch192?).
+- [ ] J2 free lever (0 GPU): blankOffset {0,±0.5,±1,−2} 6th axis in
+      sweep_scoring.py on existing resbn192i s1234 val emissions — informs
+      CR-CTC peakiness prior before GPU is spent.
+- [ ] J3 data: fetch FUTO swipe-2/3/4 + swipe-5 (~0.6GB, MIT); verify
+      session-disjointness + holdout-trace overlap MYSELF (bit-exact);
+      build swipe2345q additions (distance-gated, dual_finger=0, swipe-5
+      qwerty only — NEVER eval-set layouts); realalt npz (clearflow/kasroz/
+      toki_pona, fresh 20% session-disjoint holdout); HWS Y-frame-correction
+      arm (swipetest-geometry derivation, DATASET_SCOUT §4.1).
+- [ ] J4 train.py levers (RESEARCH_SCAN specs): CR-CTC (dual views SHARE
+      layout draw + slot permutation, independent affine/noise/temporal
+      frame-hold masking; α=0.2, stop-grad KL both ways); FUTO-parity aug
+      (shear k~U(±0.1), rotation ±8°, time-reversal p0.25 w/ reversed
+      targets, frame-hold masking); per-row layout batching for joint
+      multi-script (PHASE_I §9 contained change).
+- [ ] J5 GPU round 2 — lever probes at ch80 paired vs phaseH-p50 (cheap,
+      2-3h): CR-CTC | shear+rot | time-reversal | frame-hold; data arms:
+      swipe2345q @ ch192-p65 paired vs phaseI-ch192-p65; HWS-Y @ ch80;
+      realalt @ ch80 (+ its own holdout eval).
+- [ ] J6 checkpoint soup (beam-t1-selected greedy soup + BN re-estimation
+      before export fold) on the best completed run — offline script.
+- [ ] J7 multi-script: joint en+ru-synth arm (per-row layout batching);
+      eval en full suite + ru real-val (EVAL-ONLY per YANDEX_LICENSE). If
+      joint costs en >0.3pt → ship separate ru model, say so. Also ru-only
+      upgrade rung: ch192/188k/beam-sel synth-only vs the 76.21 bar.
+- [ ] J8 convergence: stack sign-consistent winners → frontier candidate
+      (ch256-class, int8-trunk ≤5MB) + efficient candidate (ch192-class,
+      fp16w ≤3.1MB); 3 seeds each; full battery (val-9918 + per-source
+      halves, six alt-layouts, ru); preset sweeps both footings + app trie;
+      export parity; latency.
+- [ ] J9 IFF all bars beaten: pre-register (commit BEFORE decode: models,
+      seeds, presets, footings, numeric expectations, quote user directive
+      2026-08-09/10 authorizing final verification) → decode test-2400 once
+      per registered config via --unseal-test → seal ledger append.
+- [ ] J10 docs: PHASE_J.md full record; RESULTS.md top section;
+      MODEL_COMPARISON.md; APP_INTEGRATION_PLAN.md (new model/preset/
+      fixture + RESEARCH_SCAN v1 user-dictionary fix + drop layout-routing
+      gate + multi-script notes); regenerate golden fixture at ship preset;
+      artifacts + sha256s. Adversarial audit commissioned by orchestrator
+      AFTER report — not run here.
