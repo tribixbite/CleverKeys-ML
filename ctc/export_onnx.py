@@ -50,6 +50,13 @@ def main() -> int:
     ap.add_argument("--no-fold-bn", dest="fold_bn", action="store_false",
                     help="export BatchNorm as its own node instead of folding "
                          "it into the preceding conv (dwsep trunks only)")
+    ap.add_argument("--parity-tol", type=float, default=PARITY_TOL,
+                    dest="parity_tol",
+                    help="max sliced |onnx - torch| accepted (default 1e-4, "
+                         "calibrated at ch<=128). The fp32 accumulation-order "
+                         "residue grows with width — ch 256 measures ~5e-4 with "
+                         "argmax 100/100 — so wide exports pass 1e-3 explicitly; "
+                         "argmax agreement must be 100/100 regardless")
     args = ap.parse_args()
 
     ckpt_path = resolve(args.workdir, args.ckpt)
@@ -123,7 +130,8 @@ def main() -> int:
     print(f"(raw 65-wide head max abs = {worst_full:.2e}; the pad columns sit at "
           f"~{-1e4:.0e} where the float32 ULP is ~9.8e-4, so they are excluded "
           f"by design — see audit fix #1)")
-    assert worst_sliced < PARITY_TOL and agree == PARITY_TRIALS, "export parity FAILED"
+    assert worst_sliced < args.parity_tol and agree == PARITY_TRIALS, \
+        "export parity FAILED"
     print(f"exported {out_path} ({out_path.stat().st_size} bytes)")
     return 0
 
