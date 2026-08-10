@@ -781,3 +781,48 @@ ctc/YANDEX_LICENSE_RESEARCH.md). Verdict: **CONFIRMED** (eval-only stands).
       personal lexicon/rerank + gradient-free input calibration; v2 = Kotlin
       head-only CTC fine-tune (ORT on-device training is deprecated @1.19.2,
       ExecuTorch training experimental — no framework dependency taken).
+
+2026-08-10 — dataset scout: every additional swipe corpus we could train on (ctc/DATASET_SCOUT.md)
+
+- [x] "leon" dataset identified + measured: it is HF `leonweber/swipe` = futo-org
+      swipe-1 with every row duplicated EXACTLY 10x (9,395,500/542,690/499,700 vs
+      939,550/54,269/49,970). Local 1,734,660 rows collapse to 173,463 unique traces
+      (multiplicity {10: 173,460; 20: 3}); 95.53% are bit-exact members of our own
+      FUTO pools; the 7,746 residual are rare-word rows our MIN_WORD_FREQ gate
+      dropped. **1,352 of our 12,299 holdout traces (11.0%) are inside it.**
+      REJECTED - not even as a measured arm.
+- [x] Two corrections to DATA_TIERS.md §5: the file is NOT 30-point standardised
+      (min 8 / median 57 / max 470, real irregular device timestamps - the 30-point
+      column is `trajectory_sampled`, which we never used), and the licence is not
+      unknown in substance (unlicensed redistribution of MIT FUTO data).
+- [x] FUTO remainders: swipe-1 UNCHANGED at 939,550 (LFS oids identical to the
+      2025-03-11 upload). swipe-2/3/4/5 added 2026-06-15 = 28,095 + 38,228 + 50,300
+      + 59,247 = 175,870 new MIT rows, same schema/frame, session-disjoint from
+      swipe-1 (68 sampled sessions, 0 hits vs the raw 5.1 GB train.jsonl).
+      swipe-4 = confusable words; swipe-3 = max unique words + deliberate
+      misspellings; swipe-2 = informal; swipe-5 = 11 layouts / 8 languages incl.
+      11,805 clearflow + 1,058 kasroz on layouts no arm has trained on.
+      HAZARD: swipe-5 dvorak/azerty/qwertz/german/spanish IS our alt-layout eval set.
+- [x] WordGesture-GAN local pull (49,228 rows) assessed + REJECTED: GAN outputs
+      scraped from a now-dead demo endpoint (no licence, model-output rule), exactly
+      1 trace/word, fixed 128 points, frame needs a fitted affine (x s=1.086
+      o=-0.045, y s=1.221 o=+0.008) after which endpoints are still 0.512/0.520 vs
+      the 0.79-0.91 real-corpus band. Our residual-transplant synth dominates it.
+- [x] Systematic sweep (HF 50+ hits, Kaggle, Zenodo, figshare, Dryad, Dataverse,
+      IEEE DataPort, OSF, GitHub, arXiv/ACM): the complete list of real human
+      corpora is FUTO + How-We-Swipe + Yandex + a 3,129-trace CC0 TU Delft VR set.
+      NO cleanly-licensed real non-Latin swipe corpus exists anywhere. SHARK2/
+      Kristensson-Zhai lineage never deposited a corpus; How-We-Type is tap-only;
+      WordGesture-GAN / Gesture2Text / AdaptiKeyboard data never released.
+      FUTO is the ONLY OSS keyboard that collects and publishes traces, and the
+      collection is still live and accepting new languages/layouts.
+- [x] Deliver ctc/DATASET_SCOUT.md, lowercase conventional commit, no push.
+- [ ] NEXT (ranked trial arms, none run): #1 `swipe2345q` = T3 + swipe-2/3/4 +
+      swipe-5 qwerty (~128k new rows, one fetch ~0.6 GB, no eval put at risk);
+      #2 HWS frame correction (~0.064 Y offset, zero data cost - the swipetest
+      geometry in §4.1 gives an independent re-derivation); #3 `realalt` =
+      swipe-5 clearflow/kasroz/toki_pona with a fresh 20% holdout, testing real
+      alt-layout data vs synthetic layout_aug.
+- [ ] Highest-leverage non-engineering item: seeding a Cyrillic/other-script
+      collection run at swipe.futo.org is the ONLY route to clean non-Latin real
+      data (they shipped Shavian on request).
