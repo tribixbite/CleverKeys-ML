@@ -275,7 +275,19 @@ this file alone.
   + app-ru-50k, the footing the 76.21 bar was set on.
 * `jsum.py <run>…` in the workdir prints the one-line val + alt-layout summary
   used in the tables above.
-* Still unstarted: round 4 (joint en+ru single model, ru-only ch 192 rung —
-  both scripted in `phaseJ_round3.sh`'s predecessor and re-derivable from §6),
-  the checkpoint soup (supply is accumulating in `ckpt/phaseJ-ch256-280k/`),
-  the winner stack + 3 seeds, preset sweeps, the pre-registered unsealing, docs.
+* `phaseJ_queue4.sh` — same pattern for round 4 (`phaseJ-joint` = en+ru single
+  model, `phaseJ-ru192` = ru-only ch 192 rung; `phaseJ_round4.sh`).
+* Battery chains run themselves as arms land: `phaseJ_eval_round2.sh` and
+  `phaseJ_eval_round34.sh` (the latter routes `phaseJ-ru192` to the ru battery
+  and gives `phaseJ-joint` both). So the whole of rounds 2–4 — train **and**
+  eval — completes with no orchestrator attached; a successor's first act
+  should be `jsum.py` over the finished runs plus `tail` of the `*.launch.log`s.
+* Still unstarted and needing a decision-maker: the checkpoint soup (supply is
+  accumulating in `ckpt/phaseJ-ch256-280k/`, `soup_checkpoints.py --run`), the
+  winner stack + 3 seeds, preset sweeps, the pre-registered unsealing, docs.
+
+**Early mid-schedule signal on round 2** (selection beam at ~66 k of 188 k,
+noisy, recorded so a successor knows what to expect): `sw234` 84.64 and
+`realalt` 85.18 vs the base's 84.30 at the same step; `yfix` 82.90, i.e. clearly
+down — consistent with the §3.2 pre-registered caveat that the val HWS half
+keeps the uncorrected frame.

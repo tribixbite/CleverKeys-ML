@@ -873,9 +873,13 @@ int8-trunk free at ch256), latency <50ms (trivially met).
       (shear k~U(±0.1), rotation ±8°, time-reversal p0.25 w/ reversed
       targets, frame-hold masking); per-row layout batching for joint
       multi-script (PHASE_I §9 contained change).
-- [~] J5 GPU round 2 (IN FLIGHT 2026-08-10 16:09: phaseJ-sw234 / phaseJ-yfix /
-      phaseJ-realalt / phaseJ-ch256-280k, detached; round 3 scripted:
-      futoaug / joint en+ru / ru192)
+- [~] J5 GPU rounds 2-4, all detached and self-queuing (no orchestrator needed):
+      r2 phaseJ-sw234 / phaseJ-yfix / phaseJ-realalt / phaseJ-ch256-280k;
+      r3 (auto) phaseJ-cr192 / phaseJ-cr256 / phaseJ-futoaug;
+      r4 (auto) phaseJ-joint / phaseJ-ru192. Batteries auto-run per arm via
+      phaseJ_eval_round2.sh + phaseJ_eval_round34.sh. Round-1 verdicts in
+      PHASE_J.md 5.1: p0.65 plateau-optimal (dose axis closed), ch256-p65 wins
+      val but loses the euro layouts, CR-CTC is the big transfer lever.
       spec: GPU round 2 — lever probes at ch80 paired vs phaseH-p50 (cheap,
       2-3h): CR-CTC | shear+rot | time-reversal | frame-hold; data arms:
       swipe2345q @ ch192-p65 paired vs phaseI-ch192-p65; HWS-Y @ ch80;
