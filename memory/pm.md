@@ -719,3 +719,43 @@ trained + evaled.
       our own RU data — HWS has zero Russian rows (en 815 / es 40 / ar 9 …),
       so the options are RU prompts into swipe.futo.org, our own donation
       flow, or more synth-generator work.
+
+2026-08-10 — Yandex licence RE-REVIEW: the proshian precedent (§10 of
+ctc/YANDEX_LICENSE_RESEARCH.md). Verdict: **CONFIRMED** (eval-only stands).
+
+- [x] Read proshian's full trail: local fork, upstream README/report/thesis,
+      GitHub API (licences, releases, issues), Google Drive re-hosts, HF,
+      kbrodt + 7 other solution repos, Kaggle uploader identity.
+- Findings: he goes FURTHER than this memo allows — re-hosts the preprocessed
+      corpus on two personal Drive folders + a DVC gdrive remote, publishes
+      competition weights, runs a live demo, and ships an MIT-licensed Android
+      library whose tree contains a byte-identical copy of the Yandex voc.txt
+      (sha256 b85623d0…, 503,598 lines) plus .pte weights, released as an APK.
+      Three in-tree copies of voc.txt across his repos. kbrodt (1st) publishes
+      weights, no data, no licence. Everyone else is code-only.
+- Not a permission: nemo dat (his MIT cannot license Yandex's database), no
+      Yandex counterparty ever spoke anywhere, and conduct ≠ construction.
+      Visibility is tiny (6-18 stars, 5 model downloads) so non-enforcement
+      proves ~nothing.
+- [x] NEW primary sources §§2-3 missed, both cutting AGAINST us: (i) Яндекс.
+      Контест ToU yandex.ru/legal/contest_termsofuse cl.2.4/4.1 — explicit ban
+      on распространение + любое использование в коммерческих целях, service
+      granted for личное некоммерческое использование; (ii) yandex.ru/cup/ml
+      2023 snapshot — «Все задачи построены на основе реальных обезличенных
+      данных Яндекса» (ownership assertion, not a release).
+- [x] Enforcement: github/dmca has ~2 dozen Yandex notices incl. takedowns of
+      participants' own Yandex.Lyceum solutions (2022-03-30, 2024-03-11).
+      None touch NeuroSwipe, but Yandex IS an active DMCA enforcer in the
+      competition/educational space — worse, not better, than assumed.
+- [x] Thesis checked (ITMO MSc, 11.06.2024, sup. Nikolenko, 61pp): one sentence
+      of provenance, zero hits for лиценз/соглашени/этик/персональн/авторск/
+      правообладат/GDPR. No arXiv/DOI version. He never wrote about the
+      question at all.
+- Ops deltas added to the memo: never pull data/weights/voc.txt from proshian
+      (false licence + unauditable provenance); never lift voc.txt as a
+      wordlist (it arrives disguised as trie.ser / an app asset / MIT file);
+      keep github.com/tribixbite/neural-swipe-typing clean (public, currently
+      only .dvc POINTERS for the Yandex splits — verified, no Yandex bytes);
+      attribute the corpus in any published RU numbers (ст.1335.1 last sent.).
+- [ ] Unrelated hygiene spotted: our neural-swipe-typing fork is public with
+      NO LICENSE, inherited from an unlicensed upstream. Decide + add one.
