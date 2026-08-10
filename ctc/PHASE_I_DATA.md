@@ -219,10 +219,24 @@ no-corpus counterfactual intact.
 
 ## 6. Cyrillic decode — first measurements
 
-*(pending: `phaseIB-ru-real` and `phaseIB-ru-synth`, frozen recipe minus
-layout-alt (single geometry, p=0), greedy selection, 188k steps; eval on the
-untouched valid-10k (9,416 default-grid rows) via `eval_cyrillic.py`, app-ru
-50k trie and voc-503k trie footings, E1 preset + λ=0 control)*
+Two arms, both `resbn:80:1,2,4,8` embed_hid 96 at **94,000 steps** (the
+Phase-G measurement that 188 k buys +0.05 at this width licenses the half
+schedule for a first measurement), no layout-alt (single geometry), coupled
+affine + slot permutation + noise unchanged, greedy checkpoint selection
+(`--beam-val-rows 0` — the in-train beam validator is en-only), committed
+`train.py` untouched at `d7faa75`:
+
+* `phaseIB-ru-real` — 1,000,000 real default-grid rows, selection on the
+  5,000 train-derived real rows;
+* `phaseIB-ru-synth` — 1,000,000 synthetic rows, selection on 5,000
+  synthetic rows (seed 999): **no real Cyrillic sample enters this arm
+  before its final eval.**
+
+Final eval, both arms: the untouched valid-10k (9,416 default-grid rows),
+`eval_cyrillic.py`, app-ru-50k CKDT trie and voc-503k flat trie footings, E1
+preset + λ=0 control, in-dict and all-rows protocols.
+
+*(results pending)*
 
 ## 7. Data-asset inventory (this phase)
 
