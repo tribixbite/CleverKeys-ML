@@ -236,7 +236,35 @@ Final eval, both arms: the untouched valid-10k (9,416 default-grid rows),
 `eval_cyrillic.py`, app-ru-50k CKDT trie and voc-503k flat trie footings, E1
 preset + λ=0 control, in-dict and all-rows protocols.
 
-*(results pending)*
+### `phaseIB-ru-real` — real-data Cyrillic, valid-10k (9,416 rows), first read
+
+Training: 94 k steps, best greedy 70.04 % (selection val) @ epoch 21. ONNX
+`cb8ece6b…` (1,142,727 B — byte-size-identical graph to every resbn80
+artifact; the alphabet is data, not architecture).
+
+| lexicon | λ | OOV | greedy | in-dict t1/t3/t5 | all-rows t1 | ≤3 t1 (n) | 4+ t1 |
+|---|---|---|---|---|---|---|---|
+| app-ru 50k (CKDT) | 1.1 (E1) | 945 (10.0 %) | **75.23** | **89.64 / 95.82 / 96.97** | 80.64 | 94.12 (3,281) | 86.80 |
+| app-ru 50k | 0 | 945 | 75.23 | 88.76 / 95.11 / 96.38 | 79.85 | 93.51 | 85.76 |
+| voc 503k (flat) | 1.1 | **0** | 71.54 | **84.11 / 92.11 / 93.91** | 84.11 | 91.36 (3,356) | 80.10 |
+| voc 503k | 0 | 0 | 71.54 | 84.11 / 92.11 / 93.91 | 84.11 | 91.36 | 80.10 |
+
+Reads:
+
+* **Cyrillic decodes at English-class accuracy.** In-dict 89.64 on the 50k
+  app trie vs the en_qwerty in-dict control's 91.11 (147k trie, ch128 at a
+  swept preset) — at half the schedule, greedy checkpoint selection, no
+  layout-alt, and an unswept preset. Greedy 75.2 beats the en control's 72.8:
+  the emissions themselves are excellent on ЙЦУКЕН.
+* The voc footing (every target reachable, zero OOV) reads 84.11 all-rows t1
+  against a 10× larger, frequency-free lexicon — the flat-frequency rows are
+  bit-identical at λ=1.1 and λ=0, confirming the λ term is inert there
+  (uniform log-freq cancels in ranking).
+* E1 transfers: λ is worth +0.88 in-dict t1 on the CKDT trie. No per-language
+  preset sweep was run (tuning-asymmetry rules as in ALT_LAYOUT §9 — these
+  are floors).
+
+*(synth arm + HWS arm results pending)*
 
 ## 7. Data-asset inventory (this phase)
 
