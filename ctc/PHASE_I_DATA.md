@@ -195,7 +195,27 @@ measurement (§6). What CANNOT: per-script motor idiosyncrasies (Cyrillic
 swipers may deviate differently); transfer of this validation to scripts
 whose geometry departs further than ЙЦУКЕН's.
 
-*(validation + numbers pending)*
+### Generation + endpoint validation (1,000,000 rows, seed 1234)
+
+1,141 rows/s single-core; zero no-donor rejections. Endpoint proximity
+(PHASE_H §2.3 frame metric), 2,000 rows each, jcuken geometry:
+
+| paths | start-hit | end-hit | start-d | end-d |
+|---|---|---|---|---|
+| **synthetic** (en residuals → ru words) | 0.710 | 0.656 | 0.0557 | 0.0783 |
+| **real** (Yandex valid-10k) | 0.917 | 0.647 | 0.0491 | 0.1069 |
+| en source band (ALT_LAYOUT §2, reference) | 0.895 | 0.769 | 0.0686 | 0.0774 |
+
+Distances transfer at English magnitudes (0.056/0.078 vs the en source's
+0.069/0.077) — the transplant adds no positional error, same as Phase H. The
+synthetic **end** side matches the real corpus almost exactly (hit 0.656 vs
+0.647). The **start** side is markedly sloppier than real Russian swipes
+(0.710 vs 0.917): real Yandex starts are very precise (d 0.049), English
+start residuals are not. As in Phase H, the mismatch errs toward *harder*
+training samples, not easier ones. Training-time selection for the synth arm
+runs on a 5,000-row synth val (seed 999, its own cache dir) — no real
+Cyrillic row touches the synth arm before its final eval, keeping the
+no-corpus counterfactual intact.
 
 ## 6. Cyrillic decode — first measurements
 
