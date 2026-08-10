@@ -107,12 +107,18 @@ def node_names(onnx_path: Path) -> List[str]:
 WEIGHT_MIN_ELEMS = 64
 
 
-def shrink_weights(src: Path, dst: Path, mode: str) -> None:
+def shrink_weights(src: Path, dst: Path, mode: str,
+                   int8_scope: str = "all") -> None:
     """Store large fp32 initializers as fp16 (``fp16w``) or per-channel int8
     (``int8w``), restored to fp32 in-graph so all compute stays float32.
 
     ORT constant-folds the restore ops at session load (verified by the caller's
     latency path being unchanged), so this is a pure disk-bytes lever.
+
+    :param int8_scope: ``int8w`` only. ``all`` quantizes every large tensor;
+        ``trunk`` quantizes only the trunk convolutions (initializer names
+        ``blocks.*`` / ``stem.*`` — ~92 % of the parameters at ch 192+) and
+        stores the numerically sensitive rest (key-embed MLP, heads) as fp16.
     """
     import onnx
     from onnx import TensorProto, helper, numpy_helper
@@ -130,7 +136,11 @@ def shrink_weights(src: Path, dst: Path, mode: str) -> None:
             continue
         n_shrunk += 1
         elems += arr.size
-        if mode == "fp16w":
+        as_fp16 = mode == "fp16w" or (
+            mode == "int8w" and int8_scope == "trunk"
+            and not (init.name.startswith("blocks.")
+                     or init.name.startswith("stem.")))
+        if as_fp16:
             half = numpy_helper.from_array(arr.astype(np.float16),
                                            init.name + "_fp16")
             new_inits.append(half)
@@ -212,6 +222,10 @@ def main() -> int:
     ap.add_argument("--out", required=True)
     ap.add_argument("--mode", default="static",
                     choices=("dynamic", "static", "fp16w", "int8w"))
+    ap.add_argument("--int8-scope", default="all", choices=("all", "trunk"),
+                    dest="int8_scope",
+                    help="int8w only: 'trunk' = int8 for stem+blocks convs, "
+                         "fp16 for the sensitive tail (key-embed, heads)")
     ap.add_argument("--calib-npz", default="cache/train_t3.npz", dest="calib_npz")
     ap.add_argument("--calib-rows", type=int, default=1024, dest="calib_rows")
     ap.add_argument("--calib-seed", type=int, default=20260808, dest="calib_seed")
@@ -233,7 +247,7 @@ def main() -> int:
     dst.parent.mkdir(parents=True, exist_ok=True)
 
     if args.mode in ("fp16w", "int8w"):
-        shrink_weights(src, dst, args.mode)
+        shrink_weights(src, dst, args.mode, args.int8_scope)
         parity_vs_source(src, dst, args.layout)
         print(f"wrote {dst} ({dst.stat().st_size} bytes; source "
               f"{src.stat().st_size} bytes, "
