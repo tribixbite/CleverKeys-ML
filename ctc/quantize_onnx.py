@@ -1,7 +1,27 @@
 #!/usr/bin/env python3
-"""Post-training int8 quantization of an exported CTC swipe encoder (Phase F, F1).
+"""Post-training quantization / weight-storage compression of an exported CTC
+swipe encoder (Phase F F1: activation quantization; Phase I I2: weight-only
+storage).
 
-Two arms, both leaving the ONNX **I/O contract untouched** — the graph still takes
+Phase I adds two **storage-only** modes that keep every activation and every
+matmul/conv in float32 — sidestepping the activation-quantization failure Phase F
+measured (the ``MASK_NEG`` −1e4 pad columns and the softplus gate are exactly the
+tensors an 8-bit affine scale handles worst; int8 activations lost t5 at every
+size):
+
+* ``--mode fp16w`` — every large float32 initializer is stored as float16 and a
+  ``Cast`` node restores float32 at load. ORT's constant folding runs the Cast
+  once at session-init, so steady-state compute AND memory are identical to the
+  fp32 graph; only the file (and the fp16 rounding of the weights, rel ~5e-4)
+  changes. Halves the artifact.
+* ``--mode int8w`` — per-output-channel symmetric int8 weight storage restored
+  by ``DequantizeLinear`` (opset-13 axis form), same constant-folding argument.
+  Quarters the artifact; weight rounding is the only numeric change.
+
+Both modes print a parity check against the source graph (random draws, sliced
+[T',27] contract view, max|Δ| + argmax agreement — the export_onnx.py protocol).
+
+Phase F's two activation arms, both leaving the ONNX **I/O contract untouched** — the graph still takes
 ``features [1,2,64] float32 / layout_keys [1,64,2] float32 / layout_mask [1,64] bool``
 and still returns ``log_emissions [1,32,65] / coefficients [1,32,64] / lambda [1,32,1]``
 in float32, because quantization is inserted strictly between the boundary
@@ -82,6 +102,101 @@ def node_names(onnx_path: Path) -> List[str]:
     return [n.name for n in onnx.load(str(onnx_path)).graph.node]
 
 
+#: Initializers smaller than this stay fp32 in the weight-only modes — shape
+#: constants and per-op scalars are not worth a Cast node each.
+WEIGHT_MIN_ELEMS = 64
+
+
+def shrink_weights(src: Path, dst: Path, mode: str) -> None:
+    """Store large fp32 initializers as fp16 (``fp16w``) or per-channel int8
+    (``int8w``), restored to fp32 in-graph so all compute stays float32.
+
+    ORT constant-folds the restore ops at session load (verified by the caller's
+    latency path being unchanged), so this is a pure disk-bytes lever.
+    """
+    import onnx
+    from onnx import TensorProto, helper, numpy_helper
+
+    m = onnx.load(str(src))
+    g = m.graph
+    graph_inputs = {i.name for i in g.input}
+    new_inits, new_nodes = [], []
+    n_shrunk = elems = 0
+    for init in g.initializer:
+        arr = numpy_helper.to_array(init)
+        if (init.data_type != TensorProto.FLOAT or arr.size < WEIGHT_MIN_ELEMS
+                or init.name in graph_inputs):
+            new_inits.append(init)
+            continue
+        n_shrunk += 1
+        elems += arr.size
+        if mode == "fp16w":
+            half = numpy_helper.from_array(arr.astype(np.float16),
+                                           init.name + "_fp16")
+            new_inits.append(half)
+            new_nodes.append(helper.make_node(
+                "Cast", [half.name], [init.name], name=init.name + "_upcast",
+                to=TensorProto.FLOAT))
+        else:                                   # int8w — symmetric weight storage
+            if arr.ndim > 1:                    # per-output-channel, axis 0
+                amax = np.abs(arr.reshape(arr.shape[0], -1)).max(axis=1)
+                scale = np.where(amax > 0, amax / 127.0, 1.0).astype(np.float32)
+                shp = (-1,) + (1,) * (arr.ndim - 1)
+                q = np.clip(np.rint(arr / scale.reshape(shp)), -127, 127) \
+                    .astype(np.int8)
+                dq_kwargs = {"axis": 0}
+            else:                               # 1-D (bias etc): per-tensor
+                amax = float(np.abs(arr).max())
+                scale = np.float32(amax / 127.0 if amax > 0 else 1.0)
+                q = np.clip(np.rint(arr / scale), -127, 127).astype(np.int8)
+                scale = np.array(scale, np.float32)      # scalar tensor
+                dq_kwargs = {}
+            new_inits.append(numpy_helper.from_array(q, init.name + "_q8"))
+            new_inits.append(numpy_helper.from_array(scale, init.name + "_q8s"))
+            new_nodes.append(helper.make_node(
+                "DequantizeLinear", [init.name + "_q8", init.name + "_q8s"],
+                [init.name], name=init.name + "_dq", **dq_kwargs))
+    del g.initializer[:]
+    g.initializer.extend(new_inits)
+    # Restore ops depend only on initializers, so prepending keeps the graph
+    # topologically sorted.
+    old_nodes = list(g.node)
+    del g.node[:]
+    g.node.extend(new_nodes + old_nodes)
+    onnx.checker.check_model(m)
+    onnx.save(m, str(dst))
+    print(f"{mode}: {n_shrunk} initializers ({elems:,} elems) stored "
+          f"{'fp16' if mode == 'fp16w' else 'int8+scale'}")
+
+
+def parity_vs_source(src: Path, dst: Path, layout: Path, trials: int = 100
+                     ) -> None:
+    """export_onnx.py's sliced-view parity, shrunk graph vs its fp32 source."""
+    import onnxruntime as ort
+    from futo_decoder_eval import load_layout
+
+    letters, _ = load_layout(layout)
+    k = len(letters)
+    a = ort.InferenceSession(str(src), providers=["CPUExecutionProvider"])
+    b = ort.InferenceSession(str(dst), providers=["CPUExecutionProvider"])
+    rng = np.random.default_rng(7)
+    mask = np.zeros((1, 64), bool)
+    mask[:, :k] = True
+    worst, agree = 0.0, 0
+    for _ in range(trials):
+        feed = {"features": rng.random((1, 2, 64), dtype=np.float32),
+                "layout_keys": rng.random((1, 64, 2), dtype=np.float32),
+                "layout_mask": mask}
+        ea = a.run(["log_emissions"], feed)[0][0]
+        eb = b.run(["log_emissions"], feed)[0][0]
+        sa = np.concatenate([ea[:, :k], ea[:, 64:65]], axis=1)
+        sb = np.concatenate([eb[:, :k], eb[:, 64:65]], axis=1)
+        worst = max(worst, float(np.abs(sa - sb).max()))
+        agree += int((sa.argmax(-1) == sb.argmax(-1)).all())
+    print(f"parity vs source: sliced max|Δ| {worst:.2e}  argmax agreement "
+          f"{agree}/{trials}")
+
+
 def tail_nodes(onnx_path: Path, patterns: Sequence[str] = TAIL_PATTERNS) -> List[str]:
     """Node names matching any tail pattern — the float32 exclusion list."""
     return [n for n in node_names(onnx_path)
@@ -95,7 +210,8 @@ def main() -> int:
     ap.add_argument("--layout", type=Path, default=DEFAULT_LAYOUT)
     ap.add_argument("--onnx", required=True)
     ap.add_argument("--out", required=True)
-    ap.add_argument("--mode", default="static", choices=("dynamic", "static"))
+    ap.add_argument("--mode", default="static",
+                    choices=("dynamic", "static", "fp16w", "int8w"))
     ap.add_argument("--calib-npz", default="cache/train_t3.npz", dest="calib_npz")
     ap.add_argument("--calib-rows", type=int, default=1024, dest="calib_rows")
     ap.add_argument("--calib-seed", type=int, default=20260808, dest="calib_seed")
@@ -112,13 +228,22 @@ def main() -> int:
                          "this ORT build has no runnable ConvInteger kernel)")
     args = ap.parse_args()
 
+    src = resolve(args.workdir, args.onnx)
+    dst = resolve(args.workdir, args.out)
+    dst.parent.mkdir(parents=True, exist_ok=True)
+
+    if args.mode in ("fp16w", "int8w"):
+        shrink_weights(src, dst, args.mode)
+        parity_vs_source(src, dst, args.layout)
+        print(f"wrote {dst} ({dst.stat().st_size} bytes; source "
+              f"{src.stat().st_size} bytes, "
+              f"{dst.stat().st_size / src.stat().st_size * 100:.1f}%)")
+        return 0
+
     from onnxruntime.quantization import (CalibrationMethod, QuantFormat, QuantType,
                                           quantize_dynamic, quantize_static)
     from onnxruntime.quantization.shape_inference import quant_pre_process
 
-    src = resolve(args.workdir, args.onnx)
-    dst = resolve(args.workdir, args.out)
-    dst.parent.mkdir(parents=True, exist_ok=True)
     pre = dst.with_suffix(".pre.onnx")
     quant_pre_process(str(src), str(pre), skip_symbolic_shape=False)
 
