@@ -847,26 +847,36 @@ Bars to beat (seed-mean, 3 seeds): en val-9918 E1/AOSP 88.30/92.60/93.26/
 in-dict t1 > 76.21 with NO Yandex training rows. Size ≤5MB (fp16w free;
 int8-trunk free at ch256), latency <50ms (trivially met).
 
-- [ ] J1 GPU round 1 — dose×capacity (PHASE_I §9 highest-value follow-ups),
+- [x] J1 GPU round 1 (DONE 2026-08-10: all four 188k arms finished; sel-beam
+      p0.65 plateau-optimal at ch192 AND ch256, CR-CTC a0.2 negative at ch80;
+      full battery running — PHASE_J.md §5)
+      spec: GPU round 1 — dose×capacity (PHASE_I §9 highest-value follow-ups),
       one variable at a time, seed 1234, 188k, resbn192i recipe otherwise:
       phaseJ-ch256-p65 | phaseJ-ch256-p80 (coarse dose sweep at ch256) |
       phaseJ-ch192-p80 (is 0.65 already optimal at ch192?).
-- [ ] J2 free lever (0 GPU): blankOffset {0,±0.5,±1,−2} 6th axis in
+- [x] J2 free lever (DONE: REFUTED, PHASE_J.md §2 — 0 is a sharp optimum)
+      spec: free lever (0 GPU): blankOffset {0,±0.5,±1,−2} 6th axis in
       sweep_scoring.py on existing resbn192i s1234 val emissions — informs
       CR-CTC peakiness prior before GPU is spent.
-- [ ] J3 data: fetch FUTO swipe-2/3/4 + swipe-5 (~0.6GB, MIT); verify
+- [x] J3 data (DONE: PHASE_J.md §3 — pools built + verified disjoint)
+      spec: data: fetch FUTO swipe-2/3/4 + swipe-5 (~0.6GB, MIT); verify
       session-disjointness + holdout-trace overlap MYSELF (bit-exact);
       build swipe2345q additions (distance-gated, dual_finger=0, swipe-5
       qwerty only — NEVER eval-set layouts); realalt npz (clearflow/kasroz/
       toki_pona, fresh 20% session-disjoint holdout); HWS Y-frame-correction
       arm (swipetest-geometry derivation, DATASET_SCOUT §4.1).
-- [ ] J4 train.py levers (RESEARCH_SCAN specs): CR-CTC (dual views SHARE
+- [x] J4 train.py levers (DONE: committed d29d648, bit-identical regression
+      guard; per-source layouts smoke-verified on en+ru 2026-08-10)
+      spec: train.py levers (RESEARCH_SCAN specs): CR-CTC (dual views SHARE
       layout draw + slot permutation, independent affine/noise/temporal
       frame-hold masking; α=0.2, stop-grad KL both ways); FUTO-parity aug
       (shear k~U(±0.1), rotation ±8°, time-reversal p0.25 w/ reversed
       targets, frame-hold masking); per-row layout batching for joint
       multi-script (PHASE_I §9 contained change).
-- [ ] J5 GPU round 2 — lever probes at ch80 paired vs phaseH-p50 (cheap,
+- [~] J5 GPU round 2 (IN FLIGHT 2026-08-10 16:09: phaseJ-sw234 / phaseJ-yfix /
+      phaseJ-realalt / phaseJ-ch256-280k, detached; round 3 scripted:
+      futoaug / joint en+ru / ru192)
+      spec: GPU round 2 — lever probes at ch80 paired vs phaseH-p50 (cheap,
       2-3h): CR-CTC | shear+rot | time-reversal | frame-hold; data arms:
       swipe2345q @ ch192-p65 paired vs phaseI-ch192-p65; HWS-Y @ ch80;
       realalt @ ch80 (+ its own holdout eval).
