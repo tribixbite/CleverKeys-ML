@@ -693,3 +693,29 @@ trained + evaled.
   geometric-engine class from synthesis alone. Next rung (not run): synth
   pretrain + small real finetune; joint multi-script needs per-row layout
   batching in train.py (I-A's file).
+
+2026-08-10 — Yandex corpus licence question CLOSED (ctc/YANDEX_LICENSE_RESEARCH.md)
+
+- [x] Web research: contest task, Yandex Cup 2023 Положение + Правила (2023
+      archive snapshots), Общие условия конкурса, Yandex services user
+      agreement, Yandex Disk ToU, ГК РФ ст.1333-1335.1, Kaggle mirror, both
+      solution repos, HF, arXiv. Verdict: NO licence grant anywhere; the
+      "open unless stated otherwise" assumption is refuted.
+- Binding constraints found: Yandex ToS authorises only *personal
+  non-commercial* use of content reached via Yandex services (rules cl.
+  6.2 / 2.8.1); corpus is a protected database under ГК РФ ст.1334 (6 M rows
+  vs the 10 k presumption; term to ~2039); ст.1335.1 permits research /
+  education / insubstantial parts, not a shipped product. Every available
+  permission theory is non-commercial → structurally incompatible with
+  GPL-3.0 freedom 0.
+- DECISION (pending owner confirmation): Yandex data = held-out RU eval set
+  only (the FUTO pattern, arXiv 2606.25247 §4.1 — they trained EN-only on
+  MIT swipe.futo.org and used Yandex purely for RU validation). Anything
+  that ships is synth-only, accepting the measured 89.64 -> 76.21 in-dict t1
+  cost. Never fetch the accepted/suggestion_accepted archive (real Yandex
+  Keyboard user input) or the Kaggle mirror that bundles it.
+- [ ] Owner call: ask Yandex for written GPL-compatible permission? (no
+      contact made; needs explicit per-instance approval). Durable fix is
+      our own RU data — HWS has zero Russian rows (en 815 / es 40 / ar 9 …),
+      so the options are RU prompts into swipe.futo.org, our own donation
+      flow, or more synth-generator work.

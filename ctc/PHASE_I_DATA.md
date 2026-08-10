@@ -196,7 +196,7 @@ Both were probed on 2026-08-09:
 | contents | `train.jsonl` 6,000,000 rows (17.6 GB) · `valid.jsonl` 10,000 rows + `valid.ref` targets · `test.jsonl` (no targets) · `voc.txt` 503,598 words |
 | grids | `default` (31 letter keys, no ё/ъ; **93.8 %** of train) and `extra` (33; 6.2 %), both 1080×667 px with per-key hitboxes, constant across rows |
 | targets | а-я minus ё (organizers folded ё); ъ ~0.06 %; `-` ~0.3 % |
-| license | **none stated.** Competition data, publicly distributed by the organizer via the solution repos' documented link. Treat as research-use-only; nothing trained on it ships without an explicit owner decision. |
+| license | **none stated — and researched in full: `YANDEX_LICENSE_RESEARCH.md`.** No grant exists anywhere (contest, Cup regulations, Disk link, solution repos, Kaggle mirror = "License: Unknown"). Background terms are restrictive, not permissive: Yandex's services agreement authorises only *personal non-commercial* use of content reached via its services, and the corpus is a protected database under ГК РФ ст. 1334 (6 M rows ≫ the 10 k presumption; term to ~2039) whose ст. 1335.1 carve-outs cover research/education but not a shipped product. **Verdict: research + held-out-eval only; synth-only for anything that ships.** |
 | local | `~/ctc-train/data/yandex_cup/` (not committed) |
 | secondary mirror | the solution repo's Google-Drive "preprocessed" folder (`download_dataset_preprocessed.py`) — same data post `separate_grid.py`; not needed once the primary verified |
 
