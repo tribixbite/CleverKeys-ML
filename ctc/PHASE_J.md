@@ -171,6 +171,7 @@ paired references are the same-seed runs, not the 3-seed bars.
 | `resbn192i` s1234 (base) | 88.32/92.70/93.25/91.21/86.83 | 72.8 | 90.60 | 84.59 | 82.73 | 79.76 | 88.85 | 91.08* | 90.19* | 89.17 |
 | `phaseI-ch256` s1234 (p 0.5) | 88.64/92.56/93.23/91.15/87.33 | 75.8 | 87.95 | 81.87 | 79.95 | 78.81 | 88.51 | — | — | 87.83 |
 | **`phaseJ-ch256-p65`** | **88.69/92.75/93.37/91.21/87.38** | 75.0 | 89.66 | 82.44 | 79.61 | 78.72 | 87.66 | 91.50 | 90.32 | 88.89 |
+| `phaseJ-ch256-p80` | 88.31/92.61/93.38/90.94/86.95 | 70.1 | 88.12 | **83.92** | **82.90** | **79.99** | **89.02** | 88.68 | 90.99 | 86.45 |
 | `phaseJ-ch192-p80` | 88.10/92.51/93.33/90.88/86.66 | 70.3 | 90.72 | 83.83 | 83.07 | 80.67 | 88.23 | 92.46 | 92.61 | 90.15 |
 | `phaseH-p50` ch 80 (CR base) | 87.66/92.24/93.05/90.88/85.99 | 63.3 | 88.85 | 83.64 | 84.16 | 81.45 | 88.51 | — | — | 88.20 |
 | `phaseJ-cr80` (CR-CTC α 0.2) | 87.46/92.15/92.89/90.85/85.69 | 65.5 | **91.98** | 84.59 | 83.74 | 80.95 | 88.40 | 93.05 | 90.05 | **91.94** |
@@ -187,12 +188,36 @@ tie. But **it loses the euro-layout axis**: azerty −1.16, qwertz −2.89, germ
 is not a seed artifact). Capacity buys English accuracy and dvorak; it does not
 buy the CKDT-λ-confounded euro corpora. **Not promotable as-is.**
 
-**(b) p 0.8 is past the optimum at ch 192**: val −0.22/−0.19/+0.08/−0.33/−0.17
-against the same seed, i.e. four of five down. It does buy transfer (dvorak-app
-+0.98, qwertz +0.34, german +0.91, clearflow +1.38, kasroz +2.42; azerty −0.76,
-spanish −0.62). With p 0.65 → 0.8 costing val at ch 192 and doing nothing at
-ch 256 (§5), **p 0.65 is confirmed as a plateau optimum, and the dose axis is
-closed.**
+**(b) p 0.8 is past the optimum for val — but the dose axis is NOT closed on
+transfer, and the selection metric hid that.** At ch 192, p 0.8 costs val
+(−0.22/−0.19/+0.08/−0.33/−0.17 vs the same seed, four of five down) and buys a
+little transfer (dvorak-app +0.98, qwertz +0.34, german +0.91, clearflow +1.38,
+kasroz +2.42; azerty −0.76, spanish −0.62). At ch 256 the same step is far more
+consequential than the 5 k-row selector suggested (it read p 80 ≈ p 50):
+
+| ch 256 dose | val t1 / 4+ | dvorak / app | azerty | qwertz | german | spanish |
+|---|---|---|---|---|---|---|
+| p 0.50 | 88.64 / 87.33 | 87.95 / 87.83 | 81.87 | 79.95 | 78.81 | 88.51 |
+| p 0.65 | **88.69 / 87.38** | **89.66 / 88.89** | 82.44 | 79.61 | 78.72 | 87.66 |
+| p 0.80 | 88.31 / 86.95 | 88.12 / 86.45 | **83.92** | **82.90** | **79.99** | **89.02** |
+
+**p 0.8 is the only ch-256 point that beats all four euro bars** (83.60 / 82.50
+/ 79.64 / 88.28 → +0.32 / +0.40 / +0.35 / +0.74), and it clears the val t1/t3/t5
+and 4+ bars too (+0.01/+0.01/+0.12/+0.18) — it misses only ≤3 (90.94 vs 91.27)
+and the two dvorak columns (−1.01 / −1.75). p 0.65 is the mirror image: val and
+dvorak yes, euro no. So at capacity **the dose trades the permuted-geometry axis
+(dvorak) against the near-QWERTY-with-foreign-lexicon axis (euro)**, and neither
+dose clears everything.
+
+Honesty caveats on that read: single seed each, and PHASE_I §7.2 measured a
+dvorak seed spread of 85.88–90.92 at fixed settings, so the 1.5 pt dvorak
+difference is *inside* the seed noise while the euro deltas (+1.3…+3.3 on four
+of four, same sign) are not. The euro corpora also carry the
+`ALT_LAYOUT_EVAL.md` §3 CKDT-λ confound. **Neither dose is promotable on one
+seed; the p 0.65-vs-0.8 call at ch 256 is a paired-seed question, and it is the
+one the §7 stack has to resolve.** The earlier reading of this section — "the
+dose axis is closed" — was written off the 5 k-row selector before this battery
+existed and is **retracted**.
 
 **(c) CR-CTC is a transfer lever, not an accuracy lever — the strongest one
 measured so far.** At ch 80, α 0.2 costs a small but sign-consistent amount on
@@ -205,11 +230,16 @@ same shape as the PHASE_I §6.1 T′ = 64 result (small val, large transfer) but
 without the contract break. **The refuted blank axis (§2) was mechanism (iii);
 the self-distillation mechanisms are the ones that carry the effect.**
 
-**Round-2 consequence:** the campaign's binding constraint is now the euro
-alt-layout axis at capacity, and CR-CTC is the only measured lever that pushes
-transfer up by pts rather than tenths. Round 3 is `cr192` (α 0.2 at the ship
-width, paired vs `resbn192i`) and `cr256` (α 0.2 on the `ch256-p65` frontier)
-before any stacking.
+**Round-2 consequence:** the campaign's binding constraint is the transfer axis
+at capacity — no single ch 256 dose clears both dvorak and euro — and CR-CTC is
+the only measured lever that moves transfer by points rather than tenths, at a
+val cost of tenths. Round 3 is `cr192` (α 0.2 at the ship width, paired vs
+`resbn192i`) and `cr256` (α 0.2 on the `ch256-p65` frontier) plus `futoaug`.
+Carried forward as required work before any promotion: a **`cr256-p80` arm** (if
+CR-CTC's transfer gain is additive with the high dose, that bundle clears both
+axes at once) and **paired seeds on the ch 256 p 0.65-vs-0.8 call**, since one
+seed cannot separate a 1.5 pt dvorak difference from the 5 pt seed spread that
+axis is known to have.
 
 ### 5.2 Export parity, corrected (affects the PHASE_I §7.3 record)
 
