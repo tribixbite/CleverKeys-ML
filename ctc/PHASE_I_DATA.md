@@ -20,7 +20,24 @@ Two questions:
 
 ## 0. Verdict
 
-*(filled at close of phase — see §3/§6 result tables)*
+1. **The user's intended native-speaker filtering, finally measured: it is a
+   (consistent, noise-floor-magnitude) negative.** Both level arms lose every
+   val slice — including the native-speaker rows themselves, on a
+   leak-matched comparison. The HWS-derived motion gates are a statistical
+   tie with a mildly positive point estimate. **Keep the full-release HWS
+   pool; do not filter by englishLevel** (§3).
+2. **Real Cyrillic data exists and is downloadable today**: the Yandex Cup
+   2023 corpus (6.0 M ЙЦУКЕН swipes, sha256-verified, license unstated —
+   research-use caution) (§4).
+3. **Cyrillic decodes at English-class accuracy with zero model changes**:
+   in-dict t1 **89.64** / t3 95.82 / t5 96.97 (app-ru 50k trie), greedy
+   75.2, from a 94 k-step resbn80 trained on 1 M real rows through the
+   committed `train.py` (§6).
+4. **The no-corpus counterfactual works at geometric-engine level**: a model
+   trained purely on synthetic Cyrillic (English residuals transplanted onto
+   ru polylines, `warp_path` reused verbatim) decodes real swipes at in-dict
+   t1 **76.21** — no real Cyrillic sample anywhere in its pipeline (§5–6).
+   Synthesis can bootstrap a script; real data is worth ~13 t1 on top.
 
 ---
 
@@ -103,8 +120,66 @@ same seed, same eval harness).
 
 ## 3. HWS arms — results
 
-*(pending — training in flight at six-way GPU contention with I-A's capacity
-runs)*
+Full val-9918, exported ONNX, AOSP trie, E1, all rows (`eval_beam.py` dumps →
+`hws_arm_report.py`; raw JSON `cache/phase_ib_arm_report.json`):
+
+| arm | val t1/t3/t5 | FUTO t1 | **HWS t1** | native | advanced | intermediate | beginner (n=142) |
+|---|---|---|---|---|---|---|---|
+| **control** | 87.66 / 92.24 / 93.05 | 94.27 | **81.09** | 81.97 | 80.04 | 81.72 | 71.83 |
+| **quality** | **87.71 / 92.29 / 93.11** | **94.58** | 80.89 | 81.48 | **80.12** | 81.22 | **76.06** |
+| **nativeadv** | 87.30 / 92.12 / 92.99 | 94.39 | 80.25 | 81.43 | 78.94 | 80.44 | 73.24 |
+| **native** | 87.33 / 92.00 / 92.84 | 94.56 | 80.14 | 81.34 | 78.72 | 80.51 | 72.54 |
+
+Alt-layout suite (in-dict az26, E1, t1; control = `phaseH-p50` s1234; PHASE_H
+seed spread on dvorak alone was 88.85–91.05, which bounds how much this table
+can resolve):
+
+| arm | dvorak | azerty | qwertz | german | spanish | dvorak app-98k |
+|---|---|---|---|---|---|---|
+| control | 88.85 | 83.64 | 84.16 | 81.45 | 88.51 | 88.20 |
+| quality | 90.84 | 84.74 | 83.49 | 80.99 | 86.18 | 89.99 |
+| nativeadv | 91.66 | 83.11 | 82.48 | 80.04 | 87.32 | 90.72 |
+| native | 90.03 | 84.98 | 81.89 | 80.95 | 87.88 | 89.62 |
+
+### Reads (single seed; the Phase-C resolution floor of ~1 pt applies)
+
+* **englishLevel filtering is a consistent negative.** Both level arms lose
+  on every aggregate val metric, lose the HWS half (−0.84 / −0.95), and —
+  decisive — lose on the **native-speaker val rows themselves** (81.97 →
+  81.43 / 81.34). The leak asymmetry cannot explain that slice: native
+  contributors are inside the training pool of *all* three arms (T3-family
+  is contributor-dirty), so the native-row comparison is leak-matched, and
+  it still favors keeping everyone's data. Non-native swipes are not noise
+  for native users; they are more of the same motor signal. Individually
+  each delta sits at the noise floor; the *direction* is consistent across
+  all seven slices of both arms. This is the fourth exclusion-style curation
+  negative in the campaign (T2b cascade, T4, KD... and now levels).
+* **The HWS-derived quality gates are a wash with a mildly positive point
+  estimate** — best-or-tied on all three aggregate val metrics (+0.05 /
+  +0.05 / +0.06), +0.31 FUTO, −0.20 HWS, and +4.2 on the beginner slice
+  (n=142, SE ≈ 3.6 — not resolvable). Unlike the FUTO cascade (−0.96 clean
+  at 26 % of the pool), trimming 1.7 % of degenerate tails costs nothing
+  measurable in either direction.
+* **Contributor-overlap disclosure:** on the level arms the excluded-level
+  val rows are contributor-clean while the control's are not; their
+  held-out-contributor HWS slices score 79.81 (nativeadv, n=1,550) and 79.30
+  (native, n=2,913) vs 80.44 / 81.34 for the still-leaked slices — so part
+  of the level arms' intermediate/beginner deficit is leak removal, which is
+  exactly why the leak-matched native slice above is the load-bearing
+  comparison.
+* Cross-layout: no arm separates from the control beyond the known seed
+  spread; the transfer property is insensitive to the HWS composition.
+
+**Recommendation to I-A:** keep the current tier (T3 + 3× full-release HWS)
+for the capacity runs. The quality-gated HWS pool
+(`hws_quality.npz`) is an acceptable drop-in (statistically a tie, tiny
+positive point estimate) — adopt only if a rebuild is happening anyway. Do
+NOT adopt englishLevel filtering at any threshold.
+
+Artifacts (runtime dir, not committed): `ckpt/phaseIB-{nativeadv,native,
+quality}/ctc_swipe_encoder.onnx`, sha256 `e024ac35…` / `0cd1771d…` /
+`f4c0500e…`; per-trace dumps `val_dump_e1.jsonl` alongside; alt-layout JSON
+in `~/ctc-train/altlayout/phaseIB-*`.
 
 ## 4. Cyrillic data acquisition — the Yandex Cup 2023 corpus is LIVE
 
@@ -290,6 +365,18 @@ synth-trained ship would lean hard on its trie, and the λ prior is worth
 not run (GPU shared with I-A's capacity ladder).
 
 *(HWS arm results pending)*
+
+### Cyrillic artifacts + what a joint multi-script model still needs
+
+`ckpt/phaseIB-ru-real/ctc_swipe_encoder.onnx` sha256 `cb8ece6b…`,
+`ckpt/phaseIB-ru-synth/ctc_swipe_encoder.onnx` sha256 `d78a9fb9…` (runtime
+dir; both the standard 1,142,727-byte resbn80 graph). These are ru-only
+prototypes: one model per script. A single model serving both scripts needs
+per-row layout/alphabet batching in `train.py` (I-A's file — a dataset-level
+change, the model itself is already alphabet-free), plus ru entries in the
+app's layout→`CtcLayout` wiring and a ru trie (`CtcLayout.kt` is already
+char-generic). The extra-grid (33-letter) geometry is vendored but untrained;
+ё/ъ remain projected (ё→е, ъ→ь) exactly as the corpus itself does.
 
 ## 7. Data-asset inventory (this phase)
 
