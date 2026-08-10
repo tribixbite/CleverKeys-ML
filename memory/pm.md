@@ -621,24 +621,24 @@ User directive: latency is no longer the constraint (old 2x target was vs the
 concurrent Phase I-B data agent may share the GPU; coordination via commits.
 This agent (I-A) owns train.py.
 
-- [ ] I1 capacity ladder UP with Phase-H layout aug (p=0.5) + Phase-G recipe
+- [x] I1 capacity ladder UP with Phase-H layout aug (p=0.5) + Phase-G recipe
       (no KD, coupled sampler, 188k, T3+3xHWS, 5000-row beam-t1 selection):
       resbn ch128 / ch192 / ch256 (+ deeper probe if a rung says so), seed 1234
       per rung; measure val-9918 (AOSP/E1) + all six alt-layout corpora per
       rung (does layout aug invert ch128's memorization-vs-transfer trade?).
-- [ ] I2 size levers so capacity fits <=5MB: fp16 weight storage (parity +
+- [x] I2 size levers so capacity fits <=5MB: fp16 weight storage (parity +
       argmax stability + CPU-EP latency), weight-only int8 (fp32 compute —
       sidesteps the PHASE_F MASK_NEG activation catastrophe); bytes/accuracy
       per variant on the capacity winner.
-- [ ] I3 training-code headroom: multi-layout checkpoint selection (PHASE_H
+- [x] I3 training-code headroom: multi-layout checkpoint selection (PHASE_H
       names QWERTY-only selection a known gap); T_OUT=64 emission-resolution
       probe (contract-breaking — measure, report as app decision, don't adopt);
       aug interactions + lr/schedule at capacity if underfit/instability shows.
-- [ ] I4 export-code: BN-fold drift at bigger widths; ORT graph profiling at
+- [x] I4 export-code: BN-fold drift at bigger widths; ORT graph profiling at
       ch256; ORT offline-optimized serialization size/latency.
-- [ ] I5 preset sweep for the final candidate on both footings (AOSP + app
+- [x] I5 preset sweep for the final candidate on both footings (AOSP + app
       trie), holdout-confirmed; 3 seeds for the final pick.
-- [ ] I6 PHASE_I.md: findings ranked, capacity/size/transfer table, <=5MB ship
+- [x] I6 PHASE_I.md: findings ranked, capacity/size/transfer table, <=5MB ship
       recommendation, artifacts + sha256 + parity.
 
 2026-08-09 — Phase I-B (data quality + language versatility; owns data-prep /
@@ -826,3 +826,11 @@ ctc/YANDEX_LICENSE_RESEARCH.md). Verdict: **CONFIRMED** (eval-only stands).
 - [ ] Highest-leverage non-engineering item: seeding a Cyrillic/other-script
       collection run at swipe.futo.org is the ONLY route to clean non-Latin real
       data (they shipped Shavian on request).
+      RESULT: winner resbn192i (ch192 + layout-alt p0.65) 3-seed val
+      88.30/92.60/93.26/91.27/86.77 (all bars every seed; +0.61 t1 vs resbn80h);
+      dvorak held-out 89.13 (+12.3 vs geo); ship bytes fp16w 3,052,318 B @ 0.831ms;
+      app preset 0.975/3.0/0.35/0.25/0.9882; ch256 frontier 88.65 recorded
+      (dose-unscaled transfer volatile); t64 probe = app decision (+0.33 4+,
+      +2.5-2.8 transfer, 2x beam); NOT test-validated (no unsealing). Phase J
+      handoff in PHASE_I.md §9 (ch256+p-scaled dose, T64 bundle, per-row layout
+      batching for ru, CR-CTC/aug/blank-penalty levers on the resbn192i base).

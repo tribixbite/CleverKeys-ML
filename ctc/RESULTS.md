@@ -1,5 +1,45 @@
 # CTC Swipe Encoder — Training Results
 
+# Phase I-A (2026-08-10): capacity under the accuracy-first mandate — `resbn192i`
+
+**The latency constraint is retired** (user directive: the 2× target was vs
+the ~178 ms transformer; sub-10 ms is imperceptible, so capacity is bounded by
+**size ≤5 MB**, not speed). Phase I-A ran the capacity ladder UP with the
+Phase-H layout augmentation and found the governing law: **capacity converts
+to accuracy, but the augmentation dose must scale with it** — at p 0.5 the
+held-out dvorak transfer breaks at ch 192 (85.43 vs ch 80's 88.85); raising
+the dose to **p 0.65 fixes it and costs nothing** (beats the p 0.5 twin on
+all eleven measured columns). Full record: `ctc/PHASE_I.md`.
+
+**`resbn192i`** = `resbn:192:1,2,4,8`, layout-alt **p 0.65**, otherwise the
+Phase-G/H recipe. 3 seeds, exported ONNX, E1 / AOSP:
+
+| footing | seed-mean | vs `resbn80h` | vs bars |
+|---|---|---|---|
+| full val-9918 | **88.30 / 92.60 / 93.26 / 91.27 / 86.77** | +0.61/+0.38/+0.26/+0.48/+0.69 | all five, **every seed**; worst-seed t5 margin **+0.34** |
+| dvorak (held out) / app-98k | **89.13** / 88.20 | −0.9 / −1.3 | geo anchor 76.8: **+12.3 / +11.4** |
+| azerty / qwertz / german / spanish | 83.60 / 82.50 / 79.64 / 88.28 | −0.2…−1.9 | all beat geo by +6.3…+14.4 |
+
+**Ship bytes: `artifacts/resbn192i_s1234_fp16w.onnx` — 3,052,318 B, 0.831 ms
+idle (identical to fp32 on val, transfer, latency; argmax 100/100).** App
+preset for it: `0.975 / 3.0 / 0.35 / 0.25 / 0.9882` (holdout-confirmed;
+full-val app-trie 89.23 / 93.54 / 94.30 / 92.53 / 87.52). Benchmark preset
+stays E1 (fourth family in a row).
+
+Also on record: `resbn256i` (ch 256, p 0.5) — the QWERTY frontier at val
+seed-mean **88.65 / 92.61 / 93.32 / 91.26 / 87.29** but transfer-volatile at
+its unscaled dose (dvorak seed-mean 86.92) and 10.7 MB fp32 / 5.36 MB fp16w /
+2.74 MB int8-trunk (int8 measured **free** at this width); size levers
+fp16w (free at every width) and weight-only int8 in `quantize_onnx.py`;
+T′ = 64 probe (+0.33 4+, +2.5–2.8 transfer, 2× beam cost — **contract-
+breaking, an app decision**); multi-layout checkpoint selection in
+`train.py` (small positive, opt-in). Export parity residue grows with width
+(disclosed per artifact; argmax 100/100 everywhere).
+
+Evidence tier: **val + alt-layout corpora only. test-2400 was NOT read** —
+`resbn80g` keeps the test-validated tier; `resbn192i` is the registered
+nominee for a user-approved final unsealing.
+
 # Phase H (2026-08-09): layout-resampling augmentation — the dvorak gap closed, `resbn80h`
 
 **The one decisive cross-layout loss is gone.** `ALT_LAYOUT_EVAL.md` measured
