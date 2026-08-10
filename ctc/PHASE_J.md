@@ -262,3 +262,20 @@ orchestrator polls those logs synchronously. Round scripts:
 resumed with `--resume ckpt/<run>/last.pt` under the **identical** run name and
 args. State is committed at every milestone so a successor can take over from
 this file alone.
+
+**Queued work (all detached, no orchestrator needed to keep it alive):**
+
+* `phaseJ_queue3.sh` — waits for the three 188 k round-2 arms to print
+  `reached step budget`, then `exec`s `phaseJ_round3.sh` (`phaseJ-cr192`,
+  `phaseJ-cr256`, `phaseJ-futoaug`). `phaseJ-ch256-280k` keeps a 4th slot the
+  whole time; the 5080 saturates at four concurrent arms (98 % util, 2.4 GB of
+  16 GB — compute-bound, so a fifth buys nothing).
+* Per-arm battery: `phaseJ_eval.sh <run>` (env `PARITY_TOL` overrides the
+  export tolerance). Cyrillic battery: `phaseJ_eval_ru.sh <run> [layout]` — E1
+  + app-ru-50k, the footing the 76.21 bar was set on.
+* `jsum.py <run>…` in the workdir prints the one-line val + alt-layout summary
+  used in the tables above.
+* Still unstarted: round 4 (joint en+ru single model, ru-only ch 192 rung —
+  both scripted in `phaseJ_round3.sh`'s predecessor and re-derivable from §6),
+  the checkpoint soup (supply is accumulating in `ckpt/phaseJ-ch256-280k/`),
+  the winner stack + 3 seeds, preset sweeps, the pre-registered unsealing, docs.
