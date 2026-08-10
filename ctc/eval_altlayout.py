@@ -75,6 +75,10 @@ LAYOUTS: Dict[str, Tuple[str, str]] = {
     "qwertz": ("de", "de"),
     "german": ("de", "de"),
     "spanish": ("es", "es"),
+    # Phase J realalt heldouts (swipe-5, session-disjoint 20 % splits built by
+    # build_swipe2345.py) — English text on layouts no committed eval used.
+    "clearflow": ("en", "en_aosp"),
+    "kasroz": ("en", "en_aosp"),
 }
 
 #: ``--lexicon LAYOUT=KIND`` overrides. ``en`` selects the app's bundled 98,140-word
