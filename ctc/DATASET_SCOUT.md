@@ -335,8 +335,8 @@ GitHub). Findings below are attributed; the two agreed everywhere they overlappe
 
 | corpus | traces | format / frame | timestamps | licence | script |
 |---|---|---|---|---|---|
-| **futo-org/swipe.futo.org** | 1,262,000 (swipe-1..5) | jsonl/parquet, **normalised letter-area** + official layout JSONs | per-point epoch ms | `mit`, "Copyright (c) 2025 FUTO" | Latin (en/de/es/fr/pl/lt/tok/shaw) |
-| **How-We-Swipe** (OSF `sj67f`) | 109,275 valid / 1,338 users / 11,227 words | per-user `.log` + `.json`, **integer px relative to the keyboard box** | ms on every touchstart/move/end, + touch-ellipse radii | OSF licence record: **MIT**, © Leiva/Kim/Cui/Bi/Oulasvirta 2021 | English |
+| **futo-org/swipe.futo.org** | **1,219,659** (939,550 + 49,970 + 54,269 swipe-1, + 175,870 swipe-2..5) | jsonl/parquet, **normalised letter-area** + official layout JSONs | per-point epoch ms | `mit`, "Copyright (c) 2025 FUTO" | Latin (en/de/es/fr/pl/lt/tok/shaw) |
+| **How-We-Swipe** (OSF `sj67f`) | 109,275 valid / 1,338 users / 11,227 words *(we keep 84,612 after basic hygiene — the sweep's figure counts pre-hygiene traces incl. `is_err=1`)* | per-user `.log` + `.json`, **integer px relative to the keyboard box** | ms on every touchstart/move/end, + touch-ellipse radii | OSF licence record: **MIT**, © Leiva/Kim/Cui/Bi/Oulasvirta 2021 | English |
 | **Yandex Cup 2023 NeuroSwipe** | ~6.0 M (labels on val only) | integer px + key hitboxes | yes | **none granted**; ToU bars commercial (`YANDEX_LICENSE_RESEARCH.md`) | Cyrillic ЙЦУКЕН |
 | **TU Delft VR word-gesture** (4TU DOI `10.4121/2e0d26b2…v1`) | **3,129 / 21 users** | plain-text logs, `POINTS:` = **normalised 0–1, pre-resampled**, median 31 pts | **none per-point** (one epoch-ms per gesture) | `"license": {"name": "CC0"}` | English, **mid-air VR** |
 
