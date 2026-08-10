@@ -264,7 +264,32 @@ Reads:
   preset sweep was run (tuning-asymmetry rules as in ALT_LAYOUT §9 — these
   are floors).
 
-*(synth arm + HWS arm results pending)*
+### `phaseIB-ru-synth` — the no-corpus counterfactual, same valid-10k
+
+Trained on 1,000,000 **synthetic** rows only (English residuals transplanted
+onto ru polylines), checkpoint selected on synthetic val — no real Cyrillic
+sample touched this arm before this table. Same recipe, same eval:
+
+| lexicon | λ | greedy | in-dict t1/t3/t5 | all-rows t1 | ≤3 t1 | 4+ t1 |
+|---|---|---|---|---|---|---|
+| app-ru 50k | 1.1 (E1) | 37.07 | **76.21 / 88.53 / 91.42** | 68.56 | 83.75 | 71.45 |
+| app-ru 50k | 0 | 37.07 | 68.65 / 84.70 / 88.70 | 61.76 | 72.54 | 66.18 |
+| voc 503k | 1.1 | 35.16 | 61.09 / 77.64 / 82.53 | 61.09 | 70.50 | 55.87 |
+
+**Verdict on the synthesis path:** a script with no swipe corpus at all can
+be launched from English motor residuals at **in-dict t1 ≈ 76** on the app
+lexicon — the same accuracy class as the shipped geometric engine's
+cross-layout anchors (71–77) — and closes to ≈ 90 once real data exists
+(the paired real arm above). The synth-vs-real gap (−13.4 in-dict t1) is
+the honest price of the counterfactual: greedy collapses to 37 (emissions
+carry English-magnitude start noise on a denser board, §5) and the lexicon
+does the rest, exactly the pattern ALT_LAYOUT §8 warned about — so a
+synth-trained ship would lean hard on its trie, and the λ prior is worth
++7.6 t1 there vs +0.9 on the real arm. The mixed-data lever
+(synth pre-train → small real fine-tune) is the obvious next rung and was
+not run (GPU shared with I-A's capacity ladder).
+
+*(HWS arm results pending)*
 
 ## 7. Data-asset inventory (this phase)
 
