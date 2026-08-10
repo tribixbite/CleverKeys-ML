@@ -103,10 +103,10 @@ def main() -> int:
 
     letters, centers = load_layout(HERE / "layouts" / args.layout)
     n_letters = len(letters)
-    keys = np.zeros((1, MAX_KEYS, 2), np.float32)
-    keys[0, :n_letters] = centers
-    mask = np.zeros((1, MAX_KEYS), bool)
-    mask[0, :n_letters] = True
+    keys = np.zeros((MAX_KEYS, 2), np.float32)
+    keys[:n_letters] = centers
+    mask = np.zeros((MAX_KEYS,), bool)
+    mask[:n_letters] = True
 
     trie, lex_st = build_trie(args.lexicon, args.yandex_dir)
     print(f"lexicon {args.lexicon}: {lex_st}")
