@@ -612,3 +612,31 @@ HELD OUT of training-geometry sampling (true transfer probe). NO test-2400.
       resbn80g cross-layout UNMEASURED). Every number cited to a named doc
       section; no new measurement run. Phase-G F72/H64 latency probes noted as
       in progress.
+
+2026-08-09 — Phase I-A (capacity under the new ~10ms budget; ship = highest
+accuracy + max versatility, <=5MB preferred smaller; NO test-2400 anywhere)
+
+User directive: latency is no longer the constraint (old 2x target was vs the
+~178ms transformer; users can't feel <10ms). Unlimited training compute. A
+concurrent Phase I-B data agent may share the GPU; coordination via commits.
+This agent (I-A) owns train.py.
+
+- [ ] I1 capacity ladder UP with Phase-H layout aug (p=0.5) + Phase-G recipe
+      (no KD, coupled sampler, 188k, T3+3xHWS, 5000-row beam-t1 selection):
+      resbn ch128 / ch192 / ch256 (+ deeper probe if a rung says so), seed 1234
+      per rung; measure val-9918 (AOSP/E1) + all six alt-layout corpora per
+      rung (does layout aug invert ch128's memorization-vs-transfer trade?).
+- [ ] I2 size levers so capacity fits <=5MB: fp16 weight storage (parity +
+      argmax stability + CPU-EP latency), weight-only int8 (fp32 compute —
+      sidesteps the PHASE_F MASK_NEG activation catastrophe); bytes/accuracy
+      per variant on the capacity winner.
+- [ ] I3 training-code headroom: multi-layout checkpoint selection (PHASE_H
+      names QWERTY-only selection a known gap); T_OUT=64 emission-resolution
+      probe (contract-breaking — measure, report as app decision, don't adopt);
+      aug interactions + lr/schedule at capacity if underfit/instability shows.
+- [ ] I4 export-code: BN-fold drift at bigger widths; ORT graph profiling at
+      ch256; ORT offline-optimized serialization size/latency.
+- [ ] I5 preset sweep for the final candidate on both footings (AOSP + app
+      trie), holdout-confirmed; 3 seeds for the final pick.
+- [ ] I6 PHASE_I.md: findings ranked, capacity/size/transfer table, <=5MB ship
+      recommendation, artifacts + sha256 + parity.
