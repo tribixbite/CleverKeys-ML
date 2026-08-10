@@ -44,8 +44,8 @@ from futo_decoder_ceiling import (ENC_BETA, ENC_BETA_PRUNE, ENC_GAMMA,  # noqa: 
                                   ENC_GAMMA_PRUNE, ENC_LAMBDA, futo_viterbi_beam)
 from futo_decoder_eval import (load_combined_vocab, load_layout,  # noqa: E402
                                load_test)
-from layout_aug import (DEFAULT_REAL_POOL, LayoutAugmenter,  # noqa: E402
-                        load_az_centers, warp_path)
+from layout_aug import (DEFAULT_REAL_POOL, LAYOUT_DIR, LayoutAugmenter,  # noqa: E402
+                        load_az_centers, synth_geometry, warp_path)
 from model import (MAX_KEYS, T_OUT, CtcSwipeEncoder,  # noqa: E402
                    encoder_from_checkpoint, slice_head_torch)
 from paths import (DEFAULT_LAYOUT, DEFAULT_WORKDIR, resolve,  # noqa: E402
@@ -54,7 +54,7 @@ from paths import (DEFAULT_LAYOUT, DEFAULT_WORKDIR, resolve,  # noqa: E402
 BLANK = MAX_KEYS  # 64 — full-head blank index (the Kotlin slice relocates it to K)
 
 #: Args that define the architecture; a --resume must agree on all of them.
-ARCH_ARGS = ("ch", "embed_hid", "feat_version", "block", "dilations")
+ARCH_ARGS = ("ch", "embed_hid", "feat_version", "block", "dilations", "t_out")
 
 #: Affine augmentation bounds (audit fix #13; Phase G samples the feasible
 #: sub-region of these exactly — see SwipeDataset._sample_affine).
@@ -344,11 +344,12 @@ _BV_PRESET = (ENC_GAMMA, ENC_LAMBDA, ENC_BETA, ENC_GAMMA_PRUNE, ENC_BETA_PRUNE)
 
 
 def _beam_init(trie, letters: List[str], targets: List[str], shm, n: int,
-               width: int, preset: Tuple[float, float, float, float, float]) -> None:
+               width: int, preset: Tuple[float, float, float, float, float],
+               t_out: int = T_OUT) -> None:
     global _BV_TRIE, _BV_LETTERS, _BV_TARGETS, _BV_EM, _BV_WIDTH, _BV_PRESET
     _BV_TRIE, _BV_LETTERS, _BV_TARGETS, _BV_WIDTH = trie, letters, targets, width
     _BV_PRESET = preset
-    _BV_EM = np.frombuffer(shm, np.float32).reshape(n, T_OUT, len(letters) + 1)
+    _BV_EM = np.frombuffer(shm, np.float32).reshape(n, t_out, len(letters) + 1)
 
 
 def _beam_chunk(bounds: Tuple[int, int]) -> Tuple[int, int, int]:
@@ -378,6 +379,29 @@ def _beam_chunk(bounds: Tuple[int, int]) -> Tuple[int, int, int]:
     return h1, h3, h5
 
 
+def _probe_centers(spec: str) -> np.ndarray:
+    """Selection-probe spec -> ``[26,2]`` a-z centers.
+
+    ``synth:<seed>`` draws a deterministic :func:`synth_geometry` (the global
+    numpy stream is saved and restored, so the training RNG trajectory is
+    untouched and paired runs with/without probes stay comparable); any other
+    name loads ``layouts/futo_<name>.json``. dvorak is refused — it is the
+    held-out transfer probe and selecting checkpoints on it would convert the
+    transfer eval into a fitting exercise (same argument as PHASE_H §1).
+    """
+    if spec.startswith("synth:"):
+        state = np.random.get_state()
+        np.random.seed(int(spec.split(":", 1)[1]))
+        try:
+            return synth_geometry()
+        finally:
+            np.random.set_state(state)
+    if spec == "dvorak":
+        raise SystemExit("--select-layout-probes: dvorak is the held-out "
+                         "transfer probe; selecting on it voids that eval")
+    return load_az_centers(LAYOUT_DIR / f"futo_{spec}.json")
+
+
 class BeamValidator:
     """Lexicon-beam top-1/3/5 over a fixed val prefix, run in-process during training.
 
@@ -389,13 +413,23 @@ class BeamValidator:
         checkpoints *within* one run, where the comparison is paired.
     :param jobs: fork-pool size. The pool is created once, at construction time,
         and reused for every validation.
+    :param probes: Phase I: selection-probe layout specs (``synth:<seed>`` or a
+        futo layout name). For each probe the first ``probe_rows`` a-z-clean val
+        prefix rows are warped onto that geometry (:func:`layout_aug.warp_path`)
+        once, at construction; every validation then also decodes them with the
+        probe's key centers, and :attr:`score` blends the canonical and probe
+        top-1 rates. PHASE_H §6.2 documented that QWERTY-only selection does not
+        order checkpoints by transfer accuracy; this is the closing of that gap.
+    :param probe_weight: ``score = (t1_qwerty + w * mean(probe_t1)) / (1 + w)``.
     """
 
     def __init__(self, workdir: Path, layout: Path, cache_dir: Path,
                  val_jsonl: Path, vocab: Path, n_rows: int, beam_width: int,
                  jobs: int,
-                 preset: Tuple[float, float, float, float, float] = _BV_PRESET
-                 ) -> None:
+                 preset: Tuple[float, float, float, float, float] = _BV_PRESET,
+                 t_out: int = T_OUT,
+                 probes: Optional[List[str]] = None, probe_rows: int = 2000,
+                 probe_weight: float = 1.0) -> None:
         letters, centers = load_layout(layout)
         rows = load_test(val_jsonl)
         with np.load(cache_dir / "val.npz") as d:
@@ -406,67 +440,128 @@ class BeamValidator:
                 f"beam-val: val.npz has {len(feats)} rows but {val_jsonl.name} has "
                 f"{len(rows)}; re-run prepare_data.py (row order must match)")
         self.n = min(n_rows, len(rows))
+        self.t_out = t_out
         # Targets are the jsonl words lowercased — identical to eval_arms.py, so
         # the selection metric and the reported metric are the same quantity.
         self.targets = [w.lower() for w, _, _, _ in rows[:self.n]]
         mismatch = sum(1 for a, b in zip(self.targets, cached_words[:self.n])
                        if a != b)
-        self.features = torch.from_numpy(feats[:self.n])          # [N,2,64]
         self.n_letters = len(letters)
-        keys = np.zeros((MAX_KEYS, 2), np.float32)
-        keys[:self.n_letters] = centers
-        mask = np.zeros((MAX_KEYS,), bool)
-        mask[:self.n_letters] = True
-        self.keys = torch.from_numpy(keys)[None]                  # [1,64,2]
-        self.mask = torch.from_numpy(mask)[None]                  # [1,64]
+        self.probe_weight = probe_weight
+        self.probe_t1: Dict[str, float] = {}
+        self.score = float("nan")
+
+        def pack(c26: np.ndarray) -> Tuple[torch.Tensor, torch.Tensor]:
+            keys = np.zeros((MAX_KEYS, 2), np.float32)
+            keys[:self.n_letters] = c26
+            mask = np.zeros((MAX_KEYS,), bool)
+            mask[:self.n_letters] = True
+            return torch.from_numpy(keys)[None], torch.from_numpy(mask)[None]
+
+        # Segments: (name, features [m,2,64], keys [1,64,2], mask [1,64], targets).
+        qk, qm = pack(centers)
+        segs = [("qwerty", torch.from_numpy(feats[:self.n]), qk, qm, self.targets)]
+        if probes:
+            # a-z-clean rows only: warp_path needs letter indices 0..25.
+            clean = [i for i in range(self.n)
+                     if self.targets[i] and
+                     all("a" <= c <= "z" for c in self.targets[i])][:probe_rows]
+            if len(clean) < probe_rows:
+                print(f"beam-val: only {len(clean)} a-z-clean rows for the "
+                      f"layout probes (asked {probe_rows})")
+            src26 = np.asarray(centers, np.float32)[:26]
+            for spec in probes:
+                c26 = _probe_centers(spec)
+                warped = np.stack([
+                    warp_path(feats[i].astype(np.float32),
+                              np.frombuffer(self.targets[i].encode(), np.uint8)
+                              .astype(np.int64) - 97, src26, c26)
+                    for i in clean])
+                pk, pm = pack(c26)
+                segs.append((spec, torch.from_numpy(warped), pk, pm,
+                             [self.targets[i] for i in clean]))
+        self.segments = []          # (name, lo, hi, features, keys, mask)
+        all_targets: List[str] = []
+        off = 0
+        for name, f, k, m, tg in segs:
+            self.segments.append((name, off, off + len(tg), f, k, m))
+            all_targets.extend(tg)
+            off += len(tg)
+        self.n_total = off
 
         trie = load_combined_vocab(vocab)
-        self._shm = mp.RawArray("f", self.n * T_OUT * (self.n_letters + 1))
+        self._shm = mp.RawArray("f", self.n_total * t_out * (self.n_letters + 1))
         self._view = np.frombuffer(self._shm, np.float32).reshape(
-            self.n, T_OUT, self.n_letters + 1)
-        step = max(1, (self.n + jobs - 1) // jobs)
-        self.chunks = [(a, min(a + step, self.n)) for a in range(0, self.n, step)]
+            self.n_total, t_out, self.n_letters + 1)
+        # Chunks never span a segment boundary, so per-segment hit counts are a
+        # sum over whole chunks.
+        self.chunks: List[Tuple[int, int]] = []
+        self._chunk_seg: List[int] = []
+        for si, (_, lo, hi, _, _, _) in enumerate(self.segments):
+            m = hi - lo
+            step = max(1, (m + jobs - 1) // jobs)
+            for a in range(lo, hi, step):
+                self.chunks.append((a, min(a + step, hi)))
+                self._chunk_seg.append(si)
         ctx = mp.get_context("fork")
         self.pool = ctx.Pool(jobs, initializer=_beam_init,
-                             initargs=(trie, letters, self.targets, self._shm,
-                                       self.n, beam_width, preset))
-        print(f"beam-val: {self.n} rows, trie {trie.num_words} words, "
-              f"width {beam_width}, {jobs} procs, preset {preset}"
+                             initargs=(trie, letters, all_targets, self._shm,
+                                       self.n_total, beam_width, preset, t_out))
+        print(f"beam-val: {self.n} rows"
+              + (f" + {self.n_total - self.n} layout-probe rows "
+                 f"({', '.join(p for p in probes)}; weight {probe_weight})"
+                 if probes else "")
+              + f", trie {trie.num_words} words, width {beam_width}, {jobs} "
+              f"procs, preset {preset}"
               + (f"  ({mismatch} targets differ from the a-z-normalised cache)"
                  if mismatch else ""))
 
     @torch.no_grad()
     def run(self, model: torch.nn.Module, device: str, batch: int = 512,
             forward=None) -> Tuple[float, float, float]:
-        """-> ``(t1, t3, t5)`` percentages for *model* on the fixed prefix.
+        """-> ``(t1, t3, t5)`` percentages on the canonical prefix.
 
-        :param forward: ``(feats, keys, mask) -> sliced log-probs [B,32,K+1]``.
+        Side effects: :attr:`probe_t1` holds per-probe top-1 and :attr:`score`
+        the blended selection score (= canonical t1 when no probes are set).
+
+        :param forward: ``(feats, keys, mask) -> sliced log-probs [B,T',K+1]``.
             Defaults to the base encoder's full head, sliced. ``train_refine.py``
             passes the refinement head so the head is selected on the same
             lexicon-beam top-1 the encoder arms are, rather than on greedy.
         """
         was_training = model.training
         model.eval()
-        off = 0
-        for s in range(0, self.n, batch):
-            f = self.features[s:s + batch].to(device)
-            b = f.shape[0]
-            keys = self.keys.to(device).expand(b, -1, -1)
-            mask = self.mask.to(device).expand(b, -1)
-            if forward is None:
-                sliced = slice_head_torch(model(f, keys, mask)[0], self.n_letters)
-            else:
-                sliced = forward(f, keys, mask)                    # [b,32,27]
-            self._view[off:off + b] = sliced.detach().cpu().numpy()
-            off += b
+        for _, lo, hi, feats, keys, mask in self.segments:
+            for s in range(0, hi - lo, batch):
+                f = feats[s:s + batch].to(device)
+                b = f.shape[0]
+                k = keys.to(device).expand(b, -1, -1)
+                m = mask.to(device).expand(b, -1)
+                if forward is None:
+                    sliced = slice_head_torch(model(f, k, m)[0], self.n_letters)
+                else:
+                    sliced = forward(f, k, m)                      # [b,T',27]
+                self._view[lo + s:lo + s + b] = sliced.detach().cpu().numpy()
         if was_training:
             model.train()
-        h1 = h3 = h5 = 0
-        for a, b_, c in self.pool.map(_beam_chunk, self.chunks):
-            h1 += a
-            h3 += b_
-            h5 += c
-        return (h1 / self.n * 100.0, h3 / self.n * 100.0, h5 / self.n * 100.0)
+        seg_hits = [[0, 0, 0] for _ in self.segments]
+        for (a, b_, c), si in zip(self.pool.map(_beam_chunk, self.chunks),
+                                  self._chunk_seg):
+            seg_hits[si][0] += a
+            seg_hits[si][1] += b_
+            seg_hits[si][2] += c
+        h1, h3, h5 = seg_hits[0]
+        t1 = h1 / self.n * 100.0
+        self.probe_t1 = {}
+        for (name, lo, hi, _, _, _), (p1, _, _) in zip(self.segments[1:],
+                                                       seg_hits[1:]):
+            self.probe_t1[name] = p1 / (hi - lo) * 100.0
+        if self.probe_t1:
+            pm = sum(self.probe_t1.values()) / len(self.probe_t1)
+            self.score = (t1 + self.probe_weight * pm) / (1.0 + self.probe_weight)
+        else:
+            self.score = t1
+        return (t1, h3 / self.n * 100.0, h5 / self.n * 100.0)
 
     def close(self) -> None:
         self.pool.close()
@@ -591,6 +686,7 @@ def build_checkpoint(model, opt, sched, step: int, epoch: int, best: float,
         "feat_version": args.feat_version,
         "block": args.block,
         "dilations": tuple(int(v) for v in args.dilations.split(",")),
+        "t_out": getattr(args, "t_out", T_OUT),
     }
     if ema is not None:
         payload["model_raw"] = model.state_dict()
@@ -632,6 +728,12 @@ def main() -> int:
                          "Both Phase-F blocks export with zero normalization nodes.")
     ap.add_argument("--dilations", default="1,2,4,8",
                     help="comma-separated dilation per trunk block")
+    ap.add_argument("--t-out", type=int, default=T_OUT, choices=(32, 64),
+                    dest="t_out",
+                    help="Phase I probe: emission frame count. 32 = the shipped "
+                         "contract (stride-2 stem); 64 = stride-1 stem, doubled "
+                         "emission resolution. 64 is CONTRACT-BREAKING — "
+                         "measurement only, the app decides any move")
     ap.add_argument("--total-steps", type=int, default=0, dest="total_steps",
                     help="step-equalized budget: cosine horizon and stopping are "
                          "measured in optimizer steps, not epochs (0 = use --epochs)")
@@ -678,6 +780,20 @@ def main() -> int:
                          "anti-correlates with beam top-1.")
     ap.add_argument("--beam-width", type=int, default=100, dest="beam_width")
     ap.add_argument("--beam-jobs", type=int, default=12, dest="beam_jobs")
+    ap.add_argument("--select-layout-probes", default="",
+                    dest="select_layout_probes",
+                    help="Phase I: comma-separated selection-probe layouts "
+                         "('synth:<seed>' or a futo layout name; dvorak "
+                         "refused). best.pt is then chosen on a blend of "
+                         "canonical and warped-probe beam top-1 — PHASE_H §6.2 "
+                         "showed QWERTY-only selection does not order "
+                         "checkpoints by transfer accuracy")
+    ap.add_argument("--select-layout-rows", type=int, default=2000,
+                    dest="select_layout_rows",
+                    help="val-prefix rows warped per selection probe")
+    ap.add_argument("--select-layout-weight", type=float, default=1.0,
+                    dest="select_layout_weight",
+                    help="w in score = (t1_qwerty + w*mean(probe_t1)) / (1+w)")
     ap.add_argument("--select-preset", default="", dest="select_preset",
                     help="scoring preset the SELECTION beam uses, as "
                          "'gamma,lambda,beta,gammaPrune,betaPrune' (default: the "
@@ -731,12 +847,22 @@ def main() -> int:
                 raise SystemExit("--select-preset needs 5 floats: "
                                  "gamma,lambda,beta,gammaPrune,betaPrune")
             sel_preset = (vals[0], vals[1], vals[2], vals[3], vals[4])
+        probes = [p.strip() for p in args.select_layout_probes.split(",")
+                  if p.strip()]
         beam_val = BeamValidator(args.workdir, args.layout, cache_dir,
                                  resolve(args.workdir, args.val_jsonl),
                                  resolve(args.workdir, args.vocab),
                                  args.beam_val_rows, args.beam_width,
-                                 args.beam_jobs, sel_preset)
-    select_metric = "val_beam_t1" if beam_val is not None else "val_greedy"
+                                 args.beam_jobs, sel_preset, t_out=args.t_out,
+                                 probes=probes or None,
+                                 probe_rows=args.select_layout_rows,
+                                 probe_weight=args.select_layout_weight)
+    if beam_val is None:
+        select_metric = "val_greedy"
+    elif beam_val.segments[1:]:
+        select_metric = "val_beam_mix"
+    else:
+        select_metric = "val_beam_t1"
     # A comma-separated --train-npz concatenates caches; repeating a name repeats
     # its rows, which is how the HWS-oversampling arm is expressed.
     train_npz = [cache_dir / p.strip() for p in args.train_npz.split(",") if p.strip()]
@@ -774,11 +900,12 @@ def main() -> int:
     dilations = tuple(int(v) for v in args.dilations.split(","))
     model = CtcSwipeEncoder(ch=args.ch, embed_hid=args.embed_hid,
                             dilations=dilations, feat_version=args.feat_version,
-                            block=args.block).to(device)
+                            block=args.block, t_out=args.t_out).to(device)
     n_params = sum(p.numel() for p in model.parameters())
     print(f"run {args.run_name}  params: {n_params / 1e6:.3f}M ({n_params})  "
           f"device: {device}  feat_v{args.feat_version} block={args.block} "
-          f"ch={args.ch} dil={dilations}  train {len(train_ds)}  val {len(val_ds)}")
+          f"ch={args.ch} dil={dilations} t_out={args.t_out}  "
+          f"train {len(train_ds)}  val {len(val_ds)}")
 
     # EMA shadow + a second module to run the val pass on the averaged weights.
     ema = ModelEMA(model, args.ema_decay) if args.ema_decay > 0 else None
@@ -787,7 +914,7 @@ def main() -> int:
         eval_model = CtcSwipeEncoder(ch=args.ch, embed_hid=args.embed_hid,
                                      dilations=dilations,
                                      feat_version=args.feat_version,
-                                     block=args.block).to(device)
+                                     block=args.block, t_out=args.t_out).to(device)
         print(f"EMA on (decay {args.ema_decay}); val and export use averaged weights")
 
     # ── knowledge distillation (Phase F) ────────────────────────────────────────
@@ -924,8 +1051,8 @@ def main() -> int:
                     t_log_e = t_logs[0] if len(t_logs) == 1 else \
                         torch.logsumexp(torch.stack(t_logs), 0) - math.log(len(t_logs))
                 kd = kd_loss(log_e, t_log_e)
-            log_e = log_e.permute(1, 0, 2)                      # [T=32,B,65] for CTCLoss
-            in_lens = torch.full((log_e.shape[1],), T_OUT, dtype=torch.long)
+            log_e = log_e.permute(1, 0, 2)                      # [T',B,65] for CTCLoss
+            in_lens = torch.full((log_e.shape[1],), args.t_out, dtype=torch.long)
             loss = ctc(log_e, targets, in_lens, tlens)
             # `running` stays the CTC term alone, so the logged `ctc_loss` remains
             # comparable across every arm in the campaign whether KD is on or off.
@@ -952,7 +1079,8 @@ def main() -> int:
                 bm = beam_val.run(eval_model, device) if beam_val is not None else None
                 beam_secs = time.time() - bt0 if bm else 0.0
                 # Phase D: the checkpoint is chosen by the metric that ships.
-                score = bm[0] if bm else acc
+                # Phase I: with layout probes on, by the blended score instead.
+                score = beam_val.score if bm else acc
                 lr_now = sched.get_last_lr()[0]
                 secs = time.time() - t0
                 mean_loss = running / max(nb, 1)
@@ -961,6 +1089,11 @@ def main() -> int:
                 evals += 1
                 bstr = (f"  beam t1 {bm[0]:5.2f} t3 {bm[1]:5.2f} t5 {bm[2]:5.2f} "
                         f"({beam_secs:.1f}s)" if bm else "")
+                if bm and beam_val.probe_t1:
+                    bstr += ("  probes "
+                             + " ".join(f"{k} {v:5.2f}"
+                                        for k, v in beam_val.probe_t1.items())
+                             + f"  mix {beam_val.score:5.2f}")
                 kdstr = f"  kd {mean_kd:.4f}" if teachers else ""
                 print(f"epoch {epoch:3d} step {step:6d}  ctc_loss {mean_loss:.4f}"
                       f"{kdstr}  val_greedy {acc * 100:.2f}%{bstr}  "
@@ -975,6 +1108,9 @@ def main() -> int:
                         rec.update({"val_beam_t1": bm[0], "val_beam_t3": bm[1],
                                     "val_beam_t5": bm[2],
                                     "beam_seconds": round(beam_secs, 3)})
+                        if beam_val.probe_t1:
+                            rec["probe_t1"] = beam_val.probe_t1
+                            rec["val_beam_mix"] = beam_val.score
                     mf.write(json.dumps(rec) + "\n")
                 if score > best:
                     best, best_epoch, best_eval = score, epoch, evals

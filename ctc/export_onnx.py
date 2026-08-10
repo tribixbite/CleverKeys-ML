@@ -61,8 +61,11 @@ def main() -> int:
     model = encoder_from_checkpoint(ck).eval()
     model.load_state_dict(ck["model"])
     print(f"arch: ch={model.ch} block={model.block} feat_v{model.feat_version} "
-          f"dil={model.dilations}  params "
+          f"dil={model.dilations} t_out={model.t_out}  params "
           f"{sum(p.numel() for p in model.parameters())}")
+    if model.t_out != 32:
+        print(f"⚠ t_out={model.t_out} is CONTRACT-BREAKING (shipped contract is "
+              f"[1,32,·] outputs) — measurement artifact only")
 
     # BatchNorm in eval mode is a per-channel affine, so it folds exactly into the
     # preceding conv (Phase F). Verified numerically here rather than assumed: a
@@ -115,8 +118,8 @@ def main() -> int:
         worst_sliced = max(worst_sliced, float(np.abs(out_lp - ref_lp).max()))
         worst_full = max(worst_full, float(np.abs(out - ref.numpy()).max()))
         agree += int((out_lp.argmax(-1) == ref_lp.argmax(-1)).all())
-    print(f"sliced [32,{num_letters + 1}] max |onnx - torch| = {worst_sliced:.2e}   "
-          f"argmax agreement {agree}/{PARITY_TRIALS}")
+    print(f"sliced [{model.t_out},{num_letters + 1}] max |onnx - torch| = "
+          f"{worst_sliced:.2e}   argmax agreement {agree}/{PARITY_TRIALS}")
     print(f"(raw 65-wide head max abs = {worst_full:.2e}; the pad columns sit at "
           f"~{-1e4:.0e} where the float32 ULP is ~9.8e-4, so they are excluded "
           f"by design — see audit fix #1)")

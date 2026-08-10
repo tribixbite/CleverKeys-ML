@@ -43,7 +43,7 @@ import torch.nn.functional as F
 
 MAX_KEYS = 64
 T_IN = 64
-T_OUT = 32          # one stride-2 stem: 64 -> 32
+T_OUT = 32          # contract default: one stride-2 stem, 64 -> 32 frames
 NUM_FREQ = 8        # 8x8 cosine features -> 64-dim positional encoding per key
 NUM_COEFF = NUM_FREQ * NUM_FREQ   # 64 — contract-frozen `coefficients` width
 MASK_NEG = -1.0e4   # finite "off" logit for pad key slots
@@ -337,20 +337,28 @@ class CtcSwipeEncoder(nn.Module):
         for the depthwise/GLU/GRN/SE block, ``"dwsep"`` for the Phase-F
         depthwise-separable block with foldable BatchNorm, ``"resbn"`` for the
         original dense block with its GroupNorms swapped for foldable BatchNorms.
+    :param t_out: emission frame count (Phase I probe). 32 = the shipped contract
+        (stride-2 stem); 64 = stride-1 stem, doubling the emission resolution.
+        CONTRACT-BREAKING for any value other than 32: the Kotlin slice, the
+        refinement head input and the exported shapes all assume ``[·,32,·]``, so
+        a t_out=64 model is a measurement artifact until the app decides to move.
     """
 
     def __init__(self, ch: int = 96, dilations: tuple = (1, 2, 4, 8),
                  embed_hid: int = EMBED_HID, feat_version: int = 1,
-                 block: str = "res") -> None:
+                 block: str = "res", t_out: int = T_OUT) -> None:
         super().__init__()
+        if T_IN % t_out != 0:
+            raise ValueError(f"t_out must divide T_IN={T_IN}, got {t_out}")
         self.ch = ch
         self.embed_hid = embed_hid
         self.feat_version = feat_version
         self.block = block
         self.dilations = tuple(dilations)
+        self.t_out = int(t_out)
         in_ch = feat_channels(feat_version)
         self.prox = KeyProximity() if feat_version >= 2 else None
-        self.stem = nn.Conv1d(in_ch, ch, 5, stride=2, padding=2)  # 64 -> 32 frames
+        self.stem = nn.Conv1d(in_ch, ch, 5, stride=T_IN // t_out, padding=2)
         # dwsep pairs every conv with a BatchNorm so the whole normalizer folds away
         # at export; the other blocks keep GroupNorm, which cannot fold (it is a
         # function of the activations, not of running statistics).
@@ -466,6 +474,7 @@ def encoder_from_checkpoint(ck: dict) -> CtcSwipeEncoder:
         dilations=tuple(ck.get("dilations", (1, 2, 4, 8))),
         feat_version=int(ck.get("feat_version", 1)),
         block=str(ck.get("block", "res")),
+        t_out=int(ck.get("t_out", T_OUT)),
     )
 
 
