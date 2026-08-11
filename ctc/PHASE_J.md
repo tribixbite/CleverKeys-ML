@@ -618,11 +618,33 @@ same greedy protocol, BN re-estimated):
 
 **The soup gain is a third of what the ch 256 arm showed.** That arm had 23
 snapshots over a 280 k schedule; these have 15 over 188 k, and the accepted
-members are correspondingly fewer (2 and 4). If the §6.3 ratio between selection
-t1 and full-val ≤3 carries (+0.50 → +0.38), a +0.15 selection gain projects to
-roughly **+0.11 on ≤3 — short of the −0.20 the finalist needs.** Projection is
-not measurement, so the full-val decode of both soup checkpoints is running; the
-number it returns, not this arithmetic, decides the gate.
+members are correspondingly fewer (2 and 4).
+
+And on the stratum that matters the effect **does not survive at all.** Full
+val-9918, soup vs the same seed's `best.pt`:
+
+| seed | t1 | t3 | t5 | **≤3** | 4+ |
+|---|---|---|---|---|---|
+| s4321 best.pt | 88.48 | 92.71 | 93.38 | 91.18 | 87.07 |
+| s4321 **soup** | 88.49 | 92.75 | 93.33 | **91.32** | 87.01 |
+| Δ | +0.01 | +0.04 | −0.05 | **+0.14** | −0.06 |
+| s7777 best.pt | 88.44 | 92.58 | 93.38 | 91.24 | 86.98 |
+| s7777 **soup** | 88.26 | 92.51 | 93.22 | **90.91** | 86.89 |
+| Δ | −0.18 | −0.07 | −0.16 | **−0.33** | −0.09 |
+
+**≤3 goes +0.14 on one seed and −0.33 on the other — sign-inconsistent, mean
+−0.10.** Every other metric is flat-to-down on the paired mean too. The §6.3
+result (+0.38 on ≤3) was **one measurement on one non-candidate run**, and it
+does not generalise to the finalist's recipe. Under the campaign's own
+sign-consistency rule the soup is **not promotable**, and the one lever that
+could have closed the ≤3 gap is spent.
+
+Recorded plainly because §6.3 was committed as a positive and briefed as the
+route to the last bar: **that was over-read from a single run, and the paired
+seeds retract it.** The soup remains a real effect on the ch 256 / 280 k
+configuration (+0.50 selection, +0.38 ≤3 there) — it is the *generalisation*
+that fails, which is why the protocol requires the lever be re-measured on the
+candidate rather than assumed to travel.
 
 ## 6.7 Two more negatives: FUTO-parity augs and the dose repair
 
