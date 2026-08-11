@@ -355,7 +355,10 @@ SE).
    against it failed: layout-alt dose, CR-CTC, FUTO-parity augmentations, the
    checkpoint soup (sign-inconsistent, mean −0.10) and a stratum-aware
    `minmargin` decode sweep over the E1 region, which bought **+0.03** where
-   ~+0.33 was needed (`PHASE_J.md` §6.7, §6.4.1, §6.6.2, §6.8b).
+   ~+0.33 was needed (`PHASE_J.md` §6.7, §6.4.1, §6.6.2, §6.8b). The decode
+   sweep is the diagnostic one: gamma and beta re-rank candidates by length and
+   **cannot conjure a short candidate the beam never generated**, so
+   `PHASE_J.md` §9 reads the residue as a candidate-generation problem (§7).
 2. **The Cyrillic bar (76.21 in-dict t1) is NOT beaten.** Capacity on synthetic
    ru made it worse (ch 192 / 188 k → 73.53), and a joint en+ru single model
    ties at best on ru (76.56, +0.35, inside one binomial SE at n = 8,471, and
@@ -833,8 +836,11 @@ is a conservative estimate of that engine (`FAIR_REMATCH.md` §7).
   and Cyrillic bars did not fall (§2.8). Its §2.1–§2.3 rows do not exist and must
   not be filled in from val figures.
 * **The `≤3` stratum** — the finalist's one en shortfall (−0.07). Five levers
-  have been measured against it and all five failed (§2.8); no candidate lever
-  remains on the register.
+  have been measured against it and all five failed (§2.8). `PHASE_J.md` §9
+  diagnoses the residue as a **candidate-generation** problem, not a training or
+  re-ranking one, and leaves three untried directions on the register: T′ = 64
+  emission resolution (contract-breaking, an app decision), a length-conditioned
+  beam, and a ≤3-specific training signal.
 * **Cyrillic** — the 76.21 bar stands. The λ ≈ 2.0 per-language preset finding
   (§2.8) is a genuine ~1 pt gain for whatever ru model ships, but it lifts every
   model equally and so resolves nothing. `sw2345` itself has no Cyrillic
