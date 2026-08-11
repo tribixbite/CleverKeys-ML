@@ -880,6 +880,40 @@ to the shippable model on both sweep halves (§6.9). The correct Cyrillic number
 is ≈ 77.4, not 76.21** — free accuracy for the app, available today, on the
 model already shipped.
 
+## 10. Ship artifacts, size, latency
+
+Idle-box latency, the `PHASE_F.md` §0 protocol, ORT CPU, 3 rounds:
+
+| artifact | params | bytes | mean / p90 | % of 10 ms budget |
+|---|---|---|---|---|
+| `resbn192i` fp32 (incumbent) | 1,512,802 | 6,068,519 | 0.819 / 0.833 ms | 8 % |
+| `sw2345_s1234.onnx` fp32 | 1,512,802 | 6,068,519 | 0.816 / 0.830 ms | 8 % |
+| **`sw2345_s1234_fp16w.onnx`** ← ship bytes | 1,512,802 | **3,052,318 (2.91 MiB)** | 0.842 / 0.859 ms | 8 % |
+
+**Size and latency clear their bars with two orders of margin on latency**
+(0.84 ms against < 50 ms) and 2.91 MiB against ≤ 5 MB. The finalist is
+byte-identical in architecture to the incumbent — the whole Phase-J gain is
+data, so it costs nothing at inference.
+
+Two disclosures against `PHASE_I` §8, which reported fp16w as free on every
+axis:
+
+* **fp16w is 3 % slower here, not identical** (0.842 vs 0.816 ms). Small, and
+  inside round-to-round spread on this instrument, but it is not the "identical"
+  that was published for `resbn192i`.
+* **fp16w's weight-rounding residue on this model is 2.30e-02 sliced (argmax
+  100/100)** — two orders larger than the fp32 export residues in §5.2, as
+  expected from rounding 1.5 M weights to fp16, and the reason the accuracy
+  claim below is measured rather than inherited.
+
+| file | sha256 |
+|---|---|
+| `artifacts/sw2345_s1234.onnx` | `96dd27ece698fa981530639700e66e0689acd2d3f024ad214e8a79b3fa083a30` |
+| `artifacts/sw2345_s1234_fp16w.onnx` | `2e820c121fc69ae95a9b2e22444fe14c47f5c5253df4696a0d0a432e364fc7b8` |
+
+<!-- TODO(fp16w-val): full val-9918 decode of the fp16w artifact is running;
+     the ship claim is not final until it lands within 0.02 of the fp32 row. -->
+
 ## 7. Continuity protocol (after the 2026-08-10 and 2026-08-11 orchestrator losses)
 
 Trainings are launched **detached** (`nohup setsid` + per-run
