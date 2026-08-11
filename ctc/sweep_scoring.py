@@ -133,6 +133,50 @@ def score_grid(traces: List[TraceCandidates], gamma: float, beta: float,
     return t1 / n * 100, t3 / n * 100, t5 / n * 100
 
 
+def score_all(traces: List[TraceCandidates], gamma: float, beta: float,
+              lam: float) -> Tuple[float, float, float, float, float]:
+    """-> ``(t1, t3, t5, le3_t1, ge4_t1)`` percentages in ONE ranking pass.
+
+    Phase J: the terminal condition is conjunctive over five val metrics, two of
+    which are length strata, so a sweep that optimises aggregate t1 alone cannot
+    express it. ``--objective minmargin`` needs all five per grid point.
+    """
+    n = len(traces)
+    t1 = t3 = t5 = 0
+    acc = {"<=3": [0, 0], "4+": [0, 0]}
+    for tc in traces:
+        r = tc.rank(gamma, beta, lam)
+        a = acc[tc.stratum]
+        a[0] += 1
+        if r < 0:
+            continue
+        hit = r < 1
+        t1 += hit
+        t3 += r < 3
+        t5 += r < 5
+        a[1] += hit
+    return (t1 / n * 100, t3 / n * 100, t5 / n * 100,
+            acc["<=3"][1] / max(acc["<=3"][0], 1) * 100,
+            acc["4+"][1] / max(acc["4+"][0], 1) * 100)
+
+
+def objective_key(metrics: Tuple[float, ...], objective: str,
+                  bars: Sequence[float]) -> Tuple[float, ...]:
+    """Sort key (higher is better) for a grid point's metrics.
+
+    ``t1``        — the historical key ``(t1, t3)``; every pre-Phase-J number
+                    was tuned under it and it stays the default.
+    ``minmargin`` — maximise the WORST margin over the five bars
+                    ``(t1, t3, t5, le3, ge4)``, tie-broken by the mean margin.
+                    This is a direct encoding of "clear every bar", so it will
+                    trade aggregate t1 away to lift a lagging stratum.
+    """
+    if objective == "t1":
+        return (metrics[0], metrics[1])
+    margins = [m - b for m, b in zip(metrics, bars)]
+    return (min(margins), sum(margins) / len(margins))
+
+
 def strata(traces: List[TraceCandidates], gamma: float, beta: float,
            lam: float) -> Dict[str, Tuple[int, float]]:
     """Top-1 by length stratum."""
@@ -246,6 +290,15 @@ def main() -> int:
                          "beam pass over --sweep-rows and --holdout-rows at the "
                          "--preset prune setting; scoring uses --preset. 0 must "
                          "be in the grid — it is the exact incumbent")
+    ap.add_argument("--objective", default="t1", choices=("t1", "minmargin"),
+                    help="what the grid maximises. 't1' = the historical "
+                         "(t1,t3) key every pre-Phase-J preset was tuned under. "
+                         "'minmargin' = the worst margin over --bars across "
+                         "(t1,t3,t5,le3,ge4), i.e. a direct encoding of the "
+                         "conjunctive 'clear every bar' condition")
+    ap.add_argument("--bars", default="88.30,92.60,93.26,91.27,86.77",
+                    help="t1,t3,t5,le3,ge4 bars for --objective minmargin "
+                         "(default: the resbn192i 3-seed val bars)")
     ap.add_argument("--lambda-only", action="store_true", dest="lambda_only",
                     help="sweep ONLY lambda over --grid-lambda, holding gamma/beta/"
                          "gammaPrune/betaPrune at --preset. lambda is the "
@@ -256,6 +309,9 @@ def main() -> int:
                          "--full-rows are confirmation only.")
     seal.add_argument(ap)
     args = ap.parse_args()
+    bars = [float(v) for v in args.bars.split(",")]
+    if len(bars) != 5:
+        raise SystemExit("--bars needs exactly 5 values: t1,t3,t5,le3,ge4")
 
     global GRID_GAMMA, GRID_BETA, GRID_LAMBDA
     if args.grid_gamma:
@@ -401,16 +457,20 @@ def main() -> int:
               f"{len(GRID_LAMBDA)} = {len(GRID_GAMMA) * len(GRID_BETA) * len(GRID_LAMBDA)}")
         scored = []
         for g, b, lam in itertools.product(GRID_GAMMA, GRID_BETA, GRID_LAMBDA):
-            t1, t3, t5 = score_grid(sweep_tr, g, b, lam)
-            scored.append(((t1, t3), (g, lam, b, base[3], base[4]), (t1, t3, t5)))
+            m = score_all(sweep_tr, g, b, lam)
+            scored.append((objective_key(m, args.objective, bars),
+                           (g, lam, b, base[3], base[4]), m))
         scored.sort(key=lambda r: r[0], reverse=True)
         print("[pass1] top 5:")
         for key, p, m in scored[:5]:
             print(f"   gamma {p[0]:.4f} lambda {p[1]:.4f} beta {p[2]:.4f}"
-                  f"   t1 {m[0]:5.2f}  t3 {m[1]:5.2f}  t5 {m[2]:5.2f}")
+                  f"   t1 {m[0]:5.2f}  t3 {m[1]:5.2f}  t5 {m[2]:5.2f}"
+                  f"  <=3 {m[3]:5.2f}  4+ {m[4]:5.2f}"
+                  f"  minmargin {min(v - b for v, b in zip(m, bars)):+5.2f}")
         w1 = scored[0][1]
         results["pass1_winner"] = list(w1)
-        results["pass1_grid"] = [{"preset": list(p), "t1": m[0], "t3": m[1], "t5": m[2]}
+        results["pass1_grid"] = [{"preset": list(p), "t1": m[0], "t3": m[1],
+                                  "t5": m[2], "le3": m[3], "ge4": m[4]}
                                  for _, p, m in scored]
 
         # ── pass 2: prune params +-REFINE_STEP, local (gamma, beta, lambda) grid ──
@@ -431,8 +491,9 @@ def main() -> int:
             tr = collect(pool, trie, targets, sw_lo, sw_hi, gp, bp, args.jobs)
             loc = []
             for g, b, lam in itertools.product(loc_g, loc_b, GRID_LAMBDA):
-                t1, t3, t5 = score_grid(tr, g, b, lam)
-                loc.append(((t1, t3), (g, lam, b, gp, bp), (t1, t3, t5)))
+                m = score_all(tr, g, b, lam)
+                loc.append((objective_key(m, args.objective, bars),
+                            (g, lam, b, gp, bp), m))
             loc.sort(key=lambda r: r[0], reverse=True)
             print(f"   gp {gp:.4f} bp {bp:.4f}  best t1 {loc[0][2][0]:5.2f} "
                   f"(gamma {loc[0][1][0]:.4f} beta {loc[0][1][2]:.4f} "
