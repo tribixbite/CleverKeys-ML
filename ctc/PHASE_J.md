@@ -443,8 +443,13 @@ while every real-data lexicon-beam metric falls. The natural reading is
 **overfitting to the synthetic generator**: with a purely synthetic training
 set *and* a purely synthetic selection set, nothing in the loop can see the
 real-data gap widening, and capacity spends itself on generator artefacts.
-(A `last.pt`-vs-`best.pt` probe is running to separate this from a pure
-checkpoint-selection failure; either way the rung does not ship.)
+**The checkpoint-selection explanation is refuted by measurement.** If
+greedy-based selection (`--beam-val-rows 0`) had simply picked a bad checkpoint,
+the end-of-schedule weights would decode differently — they do not:
+`last.pt` scores in-dict t1 **73.30** / t3 87.00 / t5 90.20 (greedy 39.94)
+against `best.pt`'s 73.53 / 86.80 / 90.17. The entire last stretch of the
+schedule sits ~2.7 pt under a model a third its size, so this is the training
+distribution, not the selector.
 
 **Consequence: 76.21 stands as the shippable Cyrillic number**, and the ru path
 does not scale by adding capacity to synthetic data. The remaining live route
