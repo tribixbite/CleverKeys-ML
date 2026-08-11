@@ -101,7 +101,7 @@ not opened; see §2.8.
 
 | model | arch | params | bytes | laptop latency (enc-only) | evidence tier | preset it is quoted at |
 |---|---|---|---|---|---|---|
-| **`sw2345`** ← the Phase-J finalist | `resbn:192:1,2,4,8`, embed_hid 96, BN folded at export; `resbn192i` recipe + the `tier_sw234` (101,842 rows) and `tier_sw5q` (24,707 rows) pools; 1,285,381 train rows (`PHASE_J.md` §3.1, §6.6.1) | **1,512,802** | **3,052,318** (fp16w ship artifact; 6,068,519 fp32) | **0.842 ms** mean / 0.859 p90 fp16w; 0.816 fp32 (`PHASE_F.md` §0 protocol) | **val + alt-layout validated only, NOT test-validated**, 3 seeds (`RESULTS.md` §Phase J) | benchmark **E1**; no app-trie sweep run for it |
+| **`sw2345`** ← the Phase-J finalist | `resbn:192:1,2,4,8`, embed_hid 96, BN folded at export; `resbn192i` recipe + the `tier_sw234` (101,842 rows) and `tier_sw5q` (24,707 rows) pools; 1,285,381 train rows (`PHASE_J.md` §3.1, §8) | **1,512,802** | **3,052,318** (fp16w ship artifact; 6,068,519 fp32) | **0.842 ms** mean / 0.859 p90 fp16w; 0.816 fp32 (`PHASE_F.md` §0 protocol) | **val + alt-layout validated only, NOT test-validated**, 3 seeds (`RESULTS.md` §Phase J) | benchmark **E1**; no app-trie sweep run for it |
 | `resbn192i` — the Phase-I incumbent / bar-holder | `resbn:192:1,2,4,8`, embed_hid 96, layout-alt p 0.65 | not published in `RESULTS.md` §Phase I-A | 3,052,318 (fp16w ship artifact) | not published | **val + alt-layout only, NOT test-validated**, 3 seeds | benchmark **E1**; app preset `0.975 / 3.0 / 0.35 / 0.25 / 0.9882` |
 | **`resbn80g`** ← the Phase-G candidate | `resbn:80:1,2,4,8`, embed_hid 96, 4 dilated blocks, BN folded at export | **279,346** | **1,142,727** | **0.215 ms** class — *inherited, not re-measured* (identical graph and parameter count to `fast_resbn80`; `RESULTS.md` §Phase G, `PHASE_G.md` §4) | **test-validated on both footings**, 3 seeds (third unsealing, `PHASE_G.md` §7.5) | benchmark **E1** `1.05 / 1.1 / 0.2 / 0.3734 / 0.9882`; **app** `gamma 0.9, lambda 4.0, beta 0.25, alpha 0.0, gammaPrune 0.25, betaPrune 0.9882` (`PHASE_G.md` §6) |
 | `fast_resbn80` ⚠ **superseded** | same graph, 94 k steps, KD from ch 192, legacy affine sampler | 279,346 | 1,142,727 | **0.215 ms** (mean, `PHASE_F.md` §0 protocol / §6 frontier) | test-validated, 3 seeds (second unsealing, `PHASE_F.md` §16.5) — **superseded as the speed-class ship candidate** (`RESULTS.md` §Phase G) | E1 on both footings |
@@ -212,7 +212,7 @@ Seed-means at E1 (ours) / published preset (FUTO). Bar: 85.52 / 91.54 / 92.80 /
 
 | model | t1 | t3 | t5 | ≤3 (n=3,389) | 4+ (n=6,529) | source |
 |---|---|---|---|---|---|---|
-| **`sw2345`** ⚠ val + alt-layout only | **88.51** | **92.67** | **93.37** | 91.20 | **87.11** | `RESULTS.md` §Phase J; `PHASE_J.md` §6.6.1 |
+| **`sw2345`** ⚠ val + alt-layout only | **88.51** | **92.67** | **93.37** | 91.20 | **87.11** | `RESULTS.md` §Phase J; `PHASE_J.md` §8 |
 | `resbn192i` ⚠ val + alt-layout only | 88.30 | 92.60 | 93.26 | **91.27** | 86.77 | `RESULTS.md` §Phase I-A |
 | ch 192 | **88.06** | **92.32** | **93.08** | 90.86 | **86.62** | `PHASE_E.md` §5 via `THREEWAY_AUDIT.md` §2 |
 | ch 128 | 87.88 | 92.23 | 92.96 | **90.98** | 86.26 | same |
@@ -311,7 +311,7 @@ pt on t1), and **the only model it resolves is ch 192, on two of three seeds.**
 Seed variance is not the limiting factor anywhere (sd 0.04–0.73). Row sampling on
 a 2,400-row split is.
 
-### 2.8 The Phase-J finalist `sw2345` — 10 of 11 internal bars, and the two that stand
+### 2.8 The Phase-J finalist `sw2345` — 10 of 11 internal bars on the seed-mean footing (5 of 11 every-seed), and the two that stand
 
 **Evidence tier: val + alt-layout validated only. NOT test-validated.**
 test-2400 was **not** unsealed in Phase J: the pre-registered rule was that the
@@ -320,7 +320,7 @@ below may be compared against any test bar, and `resbn80g` retains the
 test-validated tier (`RESULTS.md` §Phase J, `PHASE_J.md` header + §0).
 
 **val-9918, E1 / AOSP, exported ONNX, seeds 1234 / 4321 / 7777**
-(`PHASE_J.md` §6.6.1):
+(`PHASE_J.md` **§8** — note §6.6.1 carries superseded two-seed figures):
 
 | metric | s1234 | s4321 | s7777 | **seed-mean** | bar | Δ |
 |---|---|---|---|---|---|---|
@@ -384,7 +384,7 @@ bar rises with it and the Cyrillic axis remains **not beaten**. Any app-side
 Cyrillic decode should use λ ≈ 2.0 on the ru lexicon; this is a *per-language*
 preset finding and does **not** touch E1 on the en footings.
 
-**Bar tally: 10 of the 11 en bars** — 4 of 5 val, 6 of 6 alt-layout — **and the
+**Bar tally: 10 of the 11 en bars **on the seed-mean footing** (the campaign's stated bar footing; on the stricter every-seed reading it is **5 of 11** — only t1, t5, 4+, dvorak-app and german clear on all three seeds)** — 4 of 5 val, 6 of 6 alt-layout — **and the
 Cyrillic bar, which is a separate axis, also stands**. Phase J did **not** meet
 its terminal condition, and no part of it is test-validated.
 
@@ -875,7 +875,7 @@ is a conservative estimate of that engine (`FAIR_REMATCH.md` §7).
 |---|---|
 | §0 bars | `RESULTS.md` §"Verified test-2400 results"; `PHASE_F.md` §0, §15.2; `FAIR_REMATCH.md` §2, §4 |
 | §0.1 campaign bars | `PHASE_J.md` §0, §6.5; `RESULTS.md` §Phase I-A |
-| §2.8 Phase-J finalist | `RESULTS.md` §Phase J; `PHASE_J.md` §3.1, §3.3, §6.5, §6.6.1, §6.6.2, §6.7, §6.8, §6.8b, §6.9 |
+| §2.8 Phase-J finalist | `RESULTS.md` §Phase J; `PHASE_J.md` §3.1, §3.3, §6.5, §6.6.2, §6.7, §6.8, §8, §6.8b, §6.9 |
 | §1 model cards | `RESULTS.md` §Phase J + §Phase I-A + §Phase G + §Artifacts; `PHASE_F.md` §6, §8, §9; `THREEWAY_AUDIT.md` §3 |
 | §2.1 | `RESULTS.md` §"Verified test-2400 results", §"The second unsealing"; `PHASE_G.md` §7.5; `THREEWAY_AUDIT.md` §1 |
 | §2.2 | `PHASE_G.md` §7.5 config B; `RESULTS.md` §"The second unsealing" config B; `PHASE_F.md` §15.1–15.2 |

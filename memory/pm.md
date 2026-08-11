@@ -894,7 +894,8 @@ int8-trunk free at ch256), latency <50ms (trivially met).
       ch80/94k bar's 76.21, while greedy improves +3.11. Synthetic train AND
       synthetic selection => generator overfitting; last.pt refutes the
       selector explanation. 76.21 stands.
-- [x] PHASE J CLOSED 2026-08-11 — TERMINAL CONDITION **NOT MET** (10/11 bars).
+- [x] PHASE J CLOSED 2026-08-11 — TERMINAL CONDITION **NOT MET** (10/11 bars
+      on the SEED-MEAN footing; 5/11 on the stricter every-seed reading).
       Finalist sw2345 = resbn192i + tier_sw234 + tier_sw5q, 3 seeds:
       val 88.51/92.67/93.37/91.20/87.11 (bars +0.21/+0.07/+0.11/**-0.07**/+0.34)
       and ALL SIX alt-layouts beaten (+0.17..+1.00). The <=3 stratum misses by

@@ -571,6 +571,12 @@ says so.
 
 ### 6.6.1 The alt-layout seed-means flip the finalist
 
+> **SUPERSEDED FIGURES — do not quote this section's numbers.** Everything below
+> is the **two-seed** state of 2026-08-11 midday, kept for the decision trail
+> because it is what flipped the finalist. The third seed moved all of it:
+> `sw2345`'s `≤3` shortfall is **−0.07, not −0.36**, and its tally is **10 / 11**
+> seed-mean, not 7 / 11. **§8 is authoritative.**
+
 Same three seeds, az26 in-dict, E1. `sw2345` has two seeds so far (s1234,
 s4321); its third is training.
 
@@ -857,7 +863,7 @@ down — consistent with the §3.2 pre-registered caveat that the val HWS half
 keeps the uncorrected frame.
 
 
-## 8. The finalist at three seeds — 10 of 11 bars
+## 8. The finalist at three seeds — 10 of 11 bars (seed-mean footing; 5 of 11 every-seed)
 
 **`sw2345`** = the `resbn192i` recipe (resbn ch 192, dil 1,2,4,8, embed_hid 96,
 T3+3×HWS, 188 k steps, batch 256, lr 3e-3, wd 0.01, warmup 1 k, coupled affine,
@@ -886,7 +892,15 @@ val-9918 (E1/AOSP) and az26 in-dict alt-layouts (E1).
 91.08 / −0.20 and dvorak at 90.26. The third seed moved every one of them; where
 the two disagree, these are the numbers.)*
 
-**Ten of eleven bars fall. `≤3` misses by 0.07 pt** — two rows out of 3,389,
+**Ten of eleven bars fall on the seed-mean footing — the footing §0 states the
+bars in. On the stricter every-seed reading it is five of eleven** (t1, t5, 4+,
+dvorak-app, german); t3 fails only on s1234 (−0.01), dvorak only on s7777
+(−0.04), and azerty, qwertz, spanish and ≤3 each fail on one or two seeds. Both
+numbers are reported because Phase I-A preferred the every-seed reading and the
+two footings disagree sharply for this candidate — the finalist's margins are
+thinner and its seed spread wider than `resbn192i`'s were.
+
+**`≤3` misses by 0.07 pt** — two rows out of 3,389,
 averaged over three seeds. Note it is *closer* than the two-seed estimate
 (−0.20) that §6.6.1 carried: s7777's ≤3 of 91.44 clears the bar on its own, and
 the seed spread on that stratum (90.91–91.44) is 8× the shortfall. **A tie this

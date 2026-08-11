@@ -1,12 +1,12 @@
 # CTC Swipe Encoder — Training Results
 
-# Phase J (2026-08-11): the convergence campaign closes 10 of 11 bars — `sw2345`, and the two stones that stand
+# Phase J (2026-08-11): the convergence campaign closes 10 of 11 bars on the seed-mean footing (5 of 11 every-seed) — `sw2345`, and the two stones that stand
 
 **The campaign's terminal condition was NOT met.** Phase J was run under the
 directive "high-confidence SOTA for what existing usable datasets and research
 admit" — a ≤5 MB model beating the incumbents on **every** spread, layout and
 language — with a **pre-registered rule that test-2400 is unsealed if and only
-if all bars fall**. The finalist beats **10 of the 11 en bars**; the `≤3` (words
+if all bars fall**. The finalist beats **10 of the 11 en bars **on the seed-mean footing** (the campaign's stated bar footing; on the stricter every-seed reading it is **5 of 11** — only t1, t5, 4+, dvorak-app and german clear on all three seeds)**; the `≤3` (words
 of ≤3 letters) val stratum misses by **0.07 pt**, and the **Cyrillic bar is not
 beaten**. The rule therefore did not fire: **test-2400 was NOT read, nothing in
 Phase J is test-validated, and `resbn80g` retains the test-validated tier.**
@@ -67,7 +67,11 @@ informational and are **not** part of the 11-bar tally: `sw2345` scores
 **clearflow 91.06** and **kasroz 92.07**. Both corpora are small and
 single-cohort (±0.7–1.1 pt binomial SE).
 
-**Tally: 10 of the 11 en bars — 4 of 5 val, 6 of 6 alt-layout, `≤3` −0.07.** The
+**Tally: 10 of the 11 en bars on the seed-mean footing — 4 of 5 val, 6 of 6
+alt-layout, `≤3` −0.07.** Every-seed, the reading is **5 of 11**: only t1, t5,
+4+, dvorak-app and german clear the bar on all three seeds. Both footings are
+reported because the campaign's bars are seed-means but Phase I-A preferred
+every-seed, and the two disagree sharply here. The
 Cyrillic axis is counted separately and it also stands (below).
 
 ## Cyrillic — the bar is not beaten, and the published ru number was under-tuned
