@@ -1,5 +1,164 @@
 # CTC Swipe Encoder — Training Results
 
+# Phase J (2026-08-11): the convergence campaign closes 10 of 11 bars — `sw2345`, and the two stones that stand
+
+**The campaign's terminal condition was NOT met.** Phase J was run under the
+directive "high-confidence SOTA for what existing usable datasets and research
+admit" — a ≤5 MB model beating the incumbents on **every** spread, layout and
+language — with a **pre-registered rule that test-2400 is unsealed if and only
+if all bars fall**. The finalist beats **10 of the 11 en bars**; the `≤3` (words
+of ≤3 letters) val stratum misses by **0.07 pt**, and the **Cyrillic bar is not
+beaten**. The rule therefore did not fire: **test-2400 was NOT read, nothing in
+Phase J is test-validated, and `resbn80g` retains the test-validated tier.**
+Full record: `ctc/PHASE_J.md`.
+
+**`sw2345`** (arm `phaseJ-sw2345`) = the `resbn192i` recipe — `resbn:192:1,2,4,8`,
+embed_hid 96, T3 + 3×HWS, 188 k steps, batch 256, lr 3e-3, wd 0.01, warmup 1 k,
+coupled affine sampler, layout-alt **p 0.65**, no KD, 5 k-row beam-t1 checkpoint
+selection, **E1** decode preset — plus the two new FUTO data pools built this
+phase (`PHASE_J.md` §3.1): **`tier_sw234`** (101,842 rows from swipe-2/3/4) and
+**`tier_sw5q`** (24,707 rows, swipe-5 **qwerty-en only**). **1,512,802 params,
+1,285,381 train rows.** Session-disjointness against the swipe-1 train corpus
+and zero holdout-trace overlap were verified on the complete pools, not
+inherited from the scout.
+
+## The 3-seed val table — four bars fall, `≤3` does not
+
+Seeds 1234 / 4321 / 7777, full val-9918, E1 / AOSP trie, exported ONNX. Bars are
+`resbn192i`'s Phase I-A seed-means.
+
+| metric | s1234 | s4321 | s7777 | **seed-mean** | bar | Δ |
+|---|---|---|---|---|---|---|
+| t1 | 88.51 | 88.57 | 88.46 | **88.51** | 88.30 | **+0.21** |
+| t3 | 92.59 | 92.72 | 92.70 | **92.67** | 92.60 | **+0.07** |
+| t5 | 93.35 | 93.48 | 93.28 | **93.37** | 93.26 | **+0.11** |
+| ≤3 (n=3,389) | 90.91 | 91.24 | 91.44 | **91.20** | 91.27 | **−0.07 — MISS** |
+| 4+ (n=6,529) | 87.26 | 87.18 | 86.90 | **87.11** | 86.77 | **+0.34** |
+
+**The `≤3` miss is recorded as a miss, not rounded away.** Every lever measured
+against that stratum failed: layout-alt dose (worse), CR-CTC (worse),
+FUTO-parity augmentations (worse), the checkpoint soup (sign-inconsistent across
+seeds, mean −0.10), and a stratum-aware `minmargin` decode sweep over the E1
+region, which moved it **+0.03** where roughly +0.33 was needed
+(`PHASE_J.md` §6.7, §6.4.1, §6.6.2, §6.8b).
+
+## Alt-layout — all six bars fall
+
+Same three seeds, az26 in-dict protocol, E1, seed-means:
+
+| corpus | bar | `sw2345` 3-seed | Δ |
+|---|---|---|---|
+| dvorak (held out of training) | 89.13 | **89.87** | **+0.74** |
+| dvorak, app-98k trie | 88.20 | **88.98** | **+0.78** |
+| azerty | 83.60 | **83.81** | **+0.21** |
+| qwertz | 82.50 | **83.01** | **+0.51** |
+| german | 79.64 | **80.64** | **+1.00** |
+| spanish | 88.28 | **88.45** | **+0.17** |
+
+Two further real-layout corpora were built and evaluated this phase and have
+**no incumbent** — their zero-shot floors were established here
+(`PHASE_J.md` §3.3, 91.08 / 90.19 on `resbn192i` s1234), so they are
+informational and are **not** part of the 11-bar tally: `sw2345` scores
+**clearflow 91.06** and **kasroz 92.07**. Both corpora are small and
+single-cohort (±0.7–1.1 pt binomial SE).
+
+**Tally: 10 of the 11 en bars — 4 of 5 val, 6 of 6 alt-layout, `≤3` −0.07.** The
+Cyrillic axis is counted separately and it also stands (below).
+
+## Cyrillic — the bar is not beaten, and the published ru number was under-tuned
+
+The Cyrillic bar is `phaseIB-ru-synth`'s **in-dict t1 76.21** (app-ru 50 k trie,
+E1, real Yandex val rows; **EVAL-ONLY — no Yandex training rows anywhere**, per
+`YANDEX_LICENSE_RESEARCH.md`). **It stands.** Two routes were tried and both
+closed (`PHASE_J.md` §6.5, §6.8):
+
+* **more capacity on synthetic ru made it worse** — ch 192 / 188 k scores
+  73.53 in-dict t1 against the ch 80 / 94 k bar-holder's 76.21, while its
+  *greedy* number improves by 3.1 pt: overfitting to the synthetic generator,
+  confirmed on `last.pt` (73.30), so not a checkpoint-selection artefact;
+* a **joint en+ru single model** (one 65-wide head, 1 M synthetic ru rows on
+  ru_jcuken) reaches ru t1 76.56 — **+0.35, inside one binomial SE at
+  n = 8,471, and behind the bar on t3/t5** — while costing **−0.42 en val t1**
+  against a stated tolerance of 0.3. **Not adopted.** A running 2,000-row figure
+  of 77.40 was briefly carried for this model and is **wrong**; the completed
+  9,416-row decode is 76.56.
+
+**Correction, model-independent and worth shipping.** Every ru number ever
+published in this campaign — **the 76.21 bar included** — was decoded at **E1's
+λ = 1.1**, while the app ru lexicon stores `freq = 255 − rank`, the compressed
+CKDT scale that wants a larger λ. A symmetric λ sweep over both ru models (tuned
+on val rows 0:4708, confirmed on the untouched 4708:9416, `PHASE_J.md` §6.9)
+puts the optimum at **λ = 2.0**, worth about **+1.2 to the synth-only model on
+both halves**:
+
+| λ | `phaseIB-ru-synth` tune / confirm | joint en+ru tune / confirm |
+|---|---|---|
+| 1.1 (as published) | 75.73 / 76.70 | 76.77 / 76.34 |
+| **2.0** | **76.91 / 77.92** | **77.83 / 78.23** |
+| 3.0 | 75.82 / — | 76.39 / — |
+
+**The honest shippable Cyrillic number is therefore ≈ 77.4 in-dict t1, not
+76.21** — a full point of free accuracy for the app's Cyrillic path. It does
+**not** change the verdict: the lever lifts the challenger equally, so the bar
+rises with it and the Cyrillic axis is still **NOT beaten**.
+
+## Size and latency
+
+Measured on the `PHASE_F.md` §0 idle-box protocol (ORT CPU, 3 rounds):
+
+| artifact | params | bytes | mean / p90 | ≤5 MB? |
+|---|---|---|---|---|
+| `sw2345_s1234.onnx` fp32 | 1,512,802 | 6,068,519 | 0.816 / 0.830 ms | no (6.07 MB) |
+| **`sw2345_s1234_fp16w.onnx`** ← ship bytes | 1,512,802 | **3,052,318 (2.91 MiB)** | 0.842 / 0.859 ms | **yes** |
+| `resbn192i` fp32 (incumbent, re-measured here) | 1,512,802 | 6,068,519 | 0.819 / 0.833 ms | no |
+
+The finalist is architecturally identical to the incumbent — the entire Phase-J
+gain is training data, so it costs nothing at inference. **fp16w is free on
+accuracy, measured on this model rather than inherited:** val-9918 decodes
+88.51/92.58/93.35/90.91/87.26 through the fp16w graph against fp32's
+88.51/92.59/93.35/90.91/87.26. Two asterisks, both disclosed in `PHASE_J.md`
+§10: fp16w is **3 % slower** here (not "identical" as Phase I reported for
+`resbn192i`), and its weight-rounding residue is 2.30e-02 sliced with argmax
+100/100 — real in the emissions, invisible after the beam.
+
+sha256: fp32 `96dd27ece698fa981530639700e66e0689acd2d3f024ad214e8a79b3fa083a30`,
+fp16w `2e820c121fc69ae95a9b2e22444fe14c47f5c5253df4696a0d0a432e364fc7b8`.
+
+## Also on record — the levers that failed, and one correction to Phase I
+
+* **CR-CTC is dropped.** Its large transfer gain at ch 80 (+3.13 dvorak) does
+  **not** survive capacity: at ch 192 it is dvorak −1.63, and on the ch 256
+  high-dose bundle it destroys the euro advantage that was the bundle's whole
+  purpose (−1.62 / −0.93 / −1.32 / −2.16). The §5.1c "strongest transfer lever
+  measured" reading is **retracted** (`PHASE_J.md` §6.4.1).
+* **The checkpoint soup does not generalise.** +0.50 selection t1 / +0.38 `≤3`
+  on the `ch256-280k` arm; on the finalist's recipe the paired seeds give `≤3`
+  +0.14 and −0.33 — sign-inconsistent, so **not promotable** under the
+  campaign's own rule (`PHASE_J.md` §6.6.2).
+* **Rejected:** the FUTO-parity augmentation bundle (every val metric down,
+  greedy −5.4), the HWS Y-frame ×7/6 train-side correction (rejected, and the
+  arm cannot answer its own question — the val HWS half keeps the uncorrected
+  frame), the 280 k schedule extension at ch 256 (a tie), real-alt-layout
+  training rows (val-neutral, and it costs the campaign its only two never-seen
+  real-layout eval corpora), and the blank-penalty decode axis (zero is a sharp
+  optimum).
+* **E1 transferred unchanged for a fifth model family.** A symmetric
+  stratum-aware sweep over the E1 region landed both the finalist and the
+  incumbent back on their own E1 numbers to within ±0.07 on every metric
+  (`PHASE_J.md` §6.8b) — the strongest evidence yet that E1 is a property of the
+  emission/trie pair, not of an individual model.
+* **Export-parity correction to `PHASE_I.md` §7.3.** Its "the residue grows with
+  width" finding was an artefact of a white-noise export probe. On real val
+  traces at real layout centers the residue is essentially width-flat
+  (0.8–1.6e-4) and argmax parity was and is 100/100, so **no accuracy number
+  anywhere in the campaign moves** (`PHASE_J.md` §5.2).
+
+Evidence tier: **val + alt-layout corpora only. test-2400 was NOT read** — the
+pre-registered unsealing requires all bars, `≤3` and Cyrillic did not fall, and
+so the seal was not spent. `resbn80g` keeps the test-validated tier;
+`sw2345` may not be quoted as test-validated, and no equal-footing claim against
+FUTO is made for it.
+
 # Phase I-A (2026-08-10): capacity under the accuracy-first mandate — `resbn192i`
 
 **The latency constraint is retired** (user directive: the 2× target was vs
@@ -34,11 +193,16 @@ fp16w (free at every width) and weight-only int8 in `quantize_onnx.py`;
 T′ = 64 probe (+0.33 4+, +2.5–2.8 transfer, 2× beam cost — **contract-
 breaking, an app decision**); multi-layout checkpoint selection in
 `train.py` (small positive, opt-in). Export parity residue grows with width
-(disclosed per artifact; argmax 100/100 everywhere).
+(disclosed per artifact; argmax 100/100 everywhere) — **withdrawn by Phase J
+§5.2**: that was a property of the retired white-noise probe, and on real
+traces the residue is width-flat.
 
 Evidence tier: **val + alt-layout corpora only. test-2400 was NOT read** —
 `resbn80g` keeps the test-validated tier; `resbn192i` is the registered
-nominee for a user-approved final unsealing.
+nominee for a user-approved final unsealing. **Phase J supersedes this as the
+val + alt-layout frontier** (`sw2345`, above) and holds `resbn192i`'s seed-means
+as its bars; the unsealing was **not** executed, because Phase J's `≤3` and
+Cyrillic bars did not fall.
 
 # Phase H (2026-08-09): layout-resampling augmentation — the dvorak gap closed, `resbn80h`
 
