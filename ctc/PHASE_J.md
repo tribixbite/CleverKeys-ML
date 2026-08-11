@@ -530,6 +530,88 @@ does not scale by adding capacity to synthetic data. The remaining live route
 to beating it is `phaseJ-joint` (en+ru in one model, where the en half supplies
 real traces to the shared trunk) — running.
 
+## 6.6 The 3-seed finalist table — and the one bar that does not fall
+
+`sw234`, seeds 1234/4321/7777, full val-9918 (E1/AOSP), exported ONNX.
+
+| metric | s1234 | s4321 | s7777 | **seed-mean** | bar (`resbn192i`) | Δ |
+|---|---|---|---|---|---|---|
+| t1 | 88.69 | 88.48 | 88.44 | **88.54** | 88.30 | **+0.24** |
+| t3 | 92.66 | 92.71 | 92.58 | **92.65** | 92.60 | **+0.05** |
+| t5 | 93.30 | 93.38 | 93.38 | **93.35** | 93.26 | **+0.09** |
+| ≤3 | 91.32 | 91.18 | 91.24 | **91.25** | 91.27 | **−0.02** |
+| 4+ | 87.32 | 87.07 | 86.98 | **87.12** | 86.77 | **+0.35** |
+
+**Four of the five val bars fall; `≤3` does not, by 0.02 pt.** On a 3,389-row
+stratum one row is 0.0295 pt, so the 3-seed mean is **one row** behind the
+incumbent. That is a tie in every sense except the one that matters here: the
+campaign's terminal condition says *beat*, and 91.25 does not beat 91.27. It is
+recorded as a miss, not rounded away.
+
+The single-seed picture that looked like a clean sweep in §6.1a was seed 1234
+being the best of three (it is the only seed whose ≤3 clears). **This is the
+~1 pt single-seed floor doing exactly what the protocol says it does**, and it
+is why the stack goes to three seeds before anything is claimed.
+
+`sw2345` at two seeds does not rescue it: s1234/s4321 give ≤3 90.91 / 91.24
+(mean 91.08), i.e. **further** from the bar than `sw234`, even though it is
+level on t1 (88.54) and better on t5 (93.42) and 4+ (87.22). The extra sw5q
+rows do not buy short words.
+
+**Where the ≤3 stone can still be moved:** the checkpoint soup was measured at
+**+0.38 on exactly this stratum** (§6.3). `sw234` s4321/s7777 carry snapshots
+and are being souped now; s1234 was trained before the snapshot decision, so an
+identical re-run (`phaseJ-sw234-snap`) is in flight to give the ship seed its
+own soup supply. If the soup's ≤3 gain reproduces on this recipe, the bar
+falls; if it does not, the campaign stops short of its terminal condition and
+says so.
+
+## 6.7 Two more negatives: FUTO-parity augs and the dose repair
+
+| arm | val t1/t3/t5/≤3/4+ | vs its control |
+|---|---|---|
+| `phaseJ-futoaug` | 87.86/92.28/93.04/91.00/86.23 | **−0.46/−0.42/−0.21/−0.21/−0.60** vs `resbn192i` s1234 |
+| `phaseJ-sw234-p80` | 88.32/92.47/93.32/91.03/86.92 | −0.37/−0.19/+0.02/−0.29/−0.40 vs `sw234` s1234 |
+
+**(a) The FUTO-parity augmentation bundle (shear ±0.1, rotation ±8°,
+time-reversal p 0.25, frame-hold masking) is rejected** — every val metric down,
+greedy down 5.4 pt (72.75 → 67.35). Matching the reference implementation's
+augmentation menu is not the same as matching what helps this model; the
+coupled affine sampler already covers the useful part of that space, and the
+rest is noise injected into a model that is not overfitting.
+
+**(b) The dose repair fails on the val side.** p 0.65 → 0.8 on the sw234 data
+costs −0.37 t1 / −0.29 ≤3 / −0.40 4+, the same direction §5.1b measured at
+ch 192 on the base recipe. Since `sw234`'s remaining problem is `≤3` — which
+this makes *worse* — dose cannot be the repair, whatever it does to the euro
+corpora (alt-layout decode running).
+
+## 6.8 The joint en+ru model beats the Cyrillic bar and fails the en tolerance
+
+`phaseJ-joint` = the base recipe + 1,000,000 synthetic ru rows on the ru_jcuken
+geometry via `--train-layouts`, one 65-wide head serving both scripts, NO
+Yandex training rows.
+
+| axis | joint | reference | Δ |
+|---|---|---|---|
+| ru in-dict t1 (app-ru 50 k, E1, real Yandex val) | **≈77.4**\* | 76.21 bar | **≈+1.2** |
+| en val t1 | 87.90 | 88.32 (`resbn192i` s1234) | **−0.42** |
+| en val t3/t5/≤3/4+ | 92.49/93.24/90.50/86.55 | 92.70/93.25/91.21/86.83 | −0.21/−0.01/−0.71/−0.28 |
+
+\* 2,000-row running figure; final pending.
+
+**The stretch goal was "joint en+ru single model without en regression > 0.3",
+and −0.42 exceeds it.** So the honest verdict is: a single model serving both
+scripts is *feasible and beats the Cyrillic bar*, but not free — it costs 0.42
+en t1 and 0.71 on short words. It is **not adopted** under the stated
+tolerance, and it is reported as the best Cyrillic result the campaign
+produced.
+
+This also completes the ru story: **capacity on synthetic data alone made ru
+worse (§6.5), and real cross-script data made it better** — consistent with the
+generator-overfitting diagnosis, and the reason the joint arm was the predicted
+route once `ru192` failed.
+
 ## 7. Continuity protocol (after the 2026-08-10 and 2026-08-11 orchestrator losses)
 
 Trainings are launched **detached** (`nohup setsid` + per-run
