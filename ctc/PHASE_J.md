@@ -380,9 +380,26 @@ early-schedule snapshot degraded the average, exactly as the flat-minimum story
 predicts. Note the soup is worth **more than the entire 280 k schedule
 extension it was harvested from** (§6.1d: that extension was a tie).
 
+Full val-9918 (E1/AOSP, exported ONNX), soup vs its own parent `best.pt`:
+
+| | t1 | t3 | t5 | ≤3 | 4+ | greedy |
+|---|---|---|---|---|---|---|
+| `phaseJ-ch256-280k` best.pt | 88.61 | 92.66 | **93.38** | 91.30 | 87.21 | 74.04 |
+| **soup (4 members)** | **88.99** | 92.54 | 93.23 | **91.68** | **87.59** | 75.57 |
+| Δ | **+0.38** | −0.12 | −0.15 | **+0.38** | **+0.38** | +1.53 |
+
+**88.99 t1 / 87.59 4+ are the highest full-val figures of the entire campaign**
+(the previous best was 88.69, reached independently by `ch256-p65` and
+`sw234`). The gain is not free of shape, though: **the soup buys t1 and both
+length strata while giving back a little t3/t5** — averaging sharpens the top
+hypothesis and slightly flattens the tail ordering. Against the campaign bars
+that leaves it +0.69 / −0.06 / −0.03 / +0.41 / +0.82, i.e. **it would miss the
+t3 and t5 bars by a hair** on this (non-candidate) parent.
+
 Consequence for the campaign: **the 3-seed stack runs must carry
-`--snapshot-every 4`**, so the soup can be applied to the ship candidate.
-Full-val confirmation of the +0.50 is a separate measurement (running).
+`--snapshot-every 4`**, so the soup can be applied to the ship candidate — but
+the t3/t5 giveback means the soup is a *candidate* for the final artifact, not
+an automatic win, and it must be re-measured on the winner rather than assumed.
 
 ## 7. Continuity protocol (after the 2026-08-10 and 2026-08-11 orchestrator losses)
 
