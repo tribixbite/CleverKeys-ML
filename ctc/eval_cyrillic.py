@@ -93,6 +93,11 @@ def main() -> int:
     ap.add_argument("--beam-width", type=int, default=100)
     ap.add_argument("--top-k", type=int, default=8)
     ap.add_argument("--limit", type=int, default=0)
+    ap.add_argument("--rows", default="",
+                    help="row slice 'lo:hi' over the val file, for tune/confirm "
+                         "halves in a preset sweep (Phase J). Empty = all rows. "
+                         "Applied before every other filter, so the two halves "
+                         "are disjoint by construction")
     ap.add_argument("--progress", type=int, default=1000)
     ap.add_argument("--out-json", type=Path, default=None)
     args = ap.parse_args()
@@ -117,8 +122,15 @@ def main() -> int:
     oov = unproj = n_seen = 0
     t0 = time.time()
     all_rows_misses = 0          # OOV+unprojectable count as top-1 misses here
+    row_lo, row_hi = 0, 1 << 62
+    if args.rows:
+        row_lo, row_hi = (int(v) for v in args.rows.split(":"))
     with open(val, encoding="utf-8") as f:
-        for line in f:
+        for row_i, line in enumerate(f):
+            if row_i < row_lo:
+                continue
+            if row_i >= row_hi:
+                break
             if args.limit and n_seen >= args.limit:
                 break
             o = json.loads(line)
@@ -157,6 +169,7 @@ def main() -> int:
 
     res = {
         "onnx": str(args.onnx), "layout": args.layout, "lexicon": args.lexicon,
+        "rows_slice": args.rows or "all",
         "preset": preset, "rows": n_seen, "decoded": b_tal.n,
         "unprojectable": unproj, "oov": oov,
         "greedy_t1": round(g_tal.t1 / max(g_tal.n, 1) * 100, 2),
