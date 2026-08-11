@@ -357,6 +357,33 @@ Not yet scheduled for want of slots: `phaseJ-futoaug` (Spec B bundle) and
 `phaseJ-joint` (en+ru single model). Both are launch-ready
 (`phaseJ_round4.sh`).
 
+## 6.3 Checkpoint soup (J6) — a real, free gain on the selection metric
+
+`soup_checkpoints.py --run phaseJ-ch256-280k --max-members 8 --beam-jobs 4`
+over the 23 `--snapshot-every 4` snapshots. Greedy, ranked by each snapshot's
+logged selection t1, each candidate scored by *the shipping metric* (5 k-row
+lexicon-beam top-1) after BN re-estimation over 20,480 augmented train rows —
+BN running stats are not weights and averaging them without re-estimation is
+the trap this script exists to avoid.
+
+| step | members | selection beam t1 |
+|---|---|---|
+| seed (`snap_264000`, the single best) | 1 | 86.82 |
+| + `snap_252000` | 2 | 86.92 |
+| + `snap_204000` | 3 | 87.14 |
+| + `snap_192000` | 4 | **87.32** |
+| 9 further candidates | — | all rejected (80.6–87.0) |
+
+**+0.50 selection t1 for zero training cost and zero inference cost.** The
+accepted members span 192 k–264 k, i.e. the last third of the schedule; every
+early-schedule snapshot degraded the average, exactly as the flat-minimum story
+predicts. Note the soup is worth **more than the entire 280 k schedule
+extension it was harvested from** (§6.1d: that extension was a tie).
+
+Consequence for the campaign: **the 3-seed stack runs must carry
+`--snapshot-every 4`**, so the soup can be applied to the ship candidate.
+Full-val confirmation of the +0.50 is a separate measurement (running).
+
 ## 7. Continuity protocol (after the 2026-08-10 and 2026-08-11 orchestrator losses)
 
 Trainings are launched **detached** (`nohup setsid` + per-run
