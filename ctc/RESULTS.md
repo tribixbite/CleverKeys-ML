@@ -40,7 +40,12 @@ against that stratum failed: layout-alt dose (worse), CR-CTC (worse),
 FUTO-parity augmentations (worse), the checkpoint soup (sign-inconsistent across
 seeds, mean −0.10), and a stratum-aware `minmargin` decode sweep over the E1
 region, which moved it **+0.03** where roughly +0.33 was needed
-(`PHASE_J.md` §6.7, §6.4.1, §6.6.2, §6.8b).
+(`PHASE_J.md` §6.7, §6.4.1, §6.6.2, §6.8b). The sweep is the diagnostic result:
+gamma and beta re-rank candidates by length and cannot conjure a short candidate
+the beam never generated, so `PHASE_J.md` §9 reads the shortfall as a
+**candidate-generation** problem and leaves three untried directions on the
+register — T′ = 64 emission resolution (contract-breaking, an app decision), a
+length-conditioned beam, and a ≤3-specific training signal.
 
 ## Alt-layout — all six bars fall
 
@@ -155,9 +160,11 @@ fp16w `2e820c121fc69ae95a9b2e22444fe14c47f5c5253df4696a0d0a432e364fc7b8`.
 
 Evidence tier: **val + alt-layout corpora only. test-2400 was NOT read** — the
 pre-registered unsealing requires all bars, `≤3` and Cyrillic did not fall, and
-so the seal was not spent. `resbn80g` keeps the test-validated tier;
-`sw2345` may not be quoted as test-validated, and no equal-footing claim against
-FUTO is made for it.
+so the seal was not spent. **No pre-registration was filed and no
+`test2400_seal.json` unsealing entry was appended**, because the gate's
+precondition never came true; the split has still been read exactly three times.
+`resbn80g` keeps the test-validated tier; `sw2345` may not be quoted as
+test-validated, and no equal-footing claim against FUTO is made for it.
 
 # Phase I-A (2026-08-10): capacity under the accuracy-first mandate — `resbn192i`
 
