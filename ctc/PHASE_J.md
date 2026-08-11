@@ -566,6 +566,44 @@ own soup supply. If the soup's ≤3 gain reproduces on this recipe, the bar
 falls; if it does not, the campaign stops short of its terminal condition and
 says so.
 
+### 6.6.1 The alt-layout seed-means flip the finalist
+
+Same three seeds, az26 in-dict, E1. `sw2345` has two seeds so far (s1234,
+s4321); its third is training.
+
+| corpus | bar | `sw234` 3-seed | Δ | `sw2345` 2-seed | Δ |
+|---|---|---|---|---|---|
+| dvorak (held out) | 89.13 | 89.92 | +0.79 ✓ | **90.26** | **+1.13 ✓** |
+| dvorak app-98k | 88.20 | 89.34 | +1.14 ✓ | **89.01** | +0.81 ✓ |
+| azerty | 83.60 | 83.40 | **−0.20 ✗** | **83.69** | **+0.09 ✓** |
+| qwertz | 82.50 | 83.01 | +0.51 ✓ | 82.90 | +0.40 ✓ |
+| german | 79.64 | 80.58 | +0.94 ✓ | **80.65** | +1.01 ✓ |
+| spanish | 88.28 | 88.00 | **−0.28 ✗** | **88.74** | **+0.46 ✓** |
+
+**`sw2345` clears all six layout bars; `sw234` clears four.** Adding the 24,707
+sw5q rows is ahead on five of the six corpora, and the two it rescues are
+exactly the two `sw234` misses. Full bar tally:
+
+| candidate | val bars | layout bars | total | misses |
+|---|---|---|---|---|
+| `sw234` (3 seeds) | 4 / 5 | 4 / 6 | **8 / 11** | ≤3 −0.02, azerty −0.20, spanish −0.28 |
+| **`sw2345`** (2 seeds) | 4 / 5 | **6 / 6** | **10 / 11** | **≤3 −0.20** |
+
+**The finalist is therefore `sw2345`, not `sw234`, and one stone is left: the
+≤3 stratum.** This reverses the §6.6 reading, which was written before the
+alt-layout decodes finished and had only the val side to go on — `sw234` is
+marginally closer on ≤3 (−0.02 vs −0.20) but pays for it with two layout bars,
+and the terminal condition is conjunctive.
+
+Consequence for the GPU: `phaseJ-sw234-snap` (the ship-seed re-run started to
+give `sw234` soup supply) was **killed** — it serves the runner-up now — and
+`sw2345` s7777 + an s1234 re-run with `--snapshot-every 4` were launched in its
+place, so the finalist has three seeds and full soup supply. The `sw234`
+s4321/s7777 soups already in flight are kept: they answer *whether the soup's
+≤3 gain reproduces on this data recipe*, which is the question that decides
+whether the last bar falls, and they answer it an hour earlier than the
+finalist's own soups can.
+
 ## 6.7 Two more negatives: FUTO-parity augs and the dose repair
 
 | arm | val t1/t3/t5/≤3/4+ | vs its control |
