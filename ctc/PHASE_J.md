@@ -779,6 +779,81 @@ changed (−0.42 t1, tolerance 0.3) and the conclusion is unchanged:
 > is shipped; it is not a lever that lets the joint model beat the bar-holder,
 > because the bar rises with it.
 
+## 7. Continuity protocol (after the 2026-08-10 and 2026-08-11 orchestrator losses)
+
+Trainings are launched **detached** (`nohup setsid` + per-run
+`ckpt_<run>.launch.log`) so an orchestrator death cannot kill them; the
+orchestrator polls those logs synchronously. Round scripts:
+`phaseJ_round2.sh`, `phaseJ_eval_round1.sh` in the workdir. A killed run is
+resumed with `--resume ckpt/<run>/last.pt` under the **identical** run name and
+args. State is committed at every milestone so a successor can take over from
+this file alone.
+
+**What actually survives an orchestrator death (measured twice, 2026-08-10 and
+2026-08-11):** `nohup setsid` **trainings survive** — every round-1 and round-2
+arm finished after its orchestrator died. Long-lived **waiter/queue shell
+scripts do NOT** — `phaseJ_queue3/4.sh` and the `phaseJ_eval_round34.sh` chain
+were all gone after the second loss, so rounds 3-4 never auto-started and four
+GPU-hours idled. **Rule: launch the work itself detached; never let a queued
+stage depend on a babysitter process.** Batteries are cheap to re-run by hand
+(`phaseJ_eval.sh <run>`), so run them from a live orchestrator, not a chain.
+
+**Queued work:**
+
+* `phaseJ_queue3.sh` — waits for the three 188 k round-2 arms to print
+  `reached step budget`, then `exec`s `phaseJ_round3.sh` (`phaseJ-cr192`,
+  `phaseJ-cr256`, `phaseJ-futoaug`). `phaseJ-ch256-280k` keeps a 4th slot the
+  whole time; the 5080 saturates at four concurrent arms (98 % util, 2.4 GB of
+  16 GB — compute-bound, so a fifth buys nothing).
+* Per-arm battery: `phaseJ_eval.sh <run>` (env `PARITY_TOL` overrides the
+  export tolerance). Cyrillic battery: `phaseJ_eval_ru.sh <run> [layout]` — E1
+  + app-ru-50k, the footing the 76.21 bar was set on.
+* `jsum.py <run>…` in the workdir prints the one-line val + alt-layout summary
+  used in the tables above.
+* `phaseJ_queue4.sh` — round 4, scheduled **per slot** rather than per round
+  (the non-CR arm finishes hours before the 2×-cost CR arms, and a freed slot
+  should not idle): `futoaug` → `phaseJ-joint` (en+ru single model), `cr192` →
+  `phaseJ-ru192` (ru-only ch 192 rung), `cr256` → `phaseJ-cr256-p80` (the
+  §5.1b bundle: CR-CTC on the only dose that clears the euro bars).
+* Battery chains run themselves as arms land: `phaseJ_eval_round2.sh` and
+  `phaseJ_eval_round34.sh` (the latter routes `phaseJ-ru192` to the ru battery
+  and gives `phaseJ-joint` both). So the whole of rounds 2–4 — train **and**
+  eval — completes with no orchestrator attached; a successor's first act
+  should be `jsum.py` over the finished runs plus `tail` of the `*.launch.log`s.
+**Decision rule for the round-3 landing (written in advance so a successor does
+not have to re-derive it).** Run `phaseJ_eval.sh` on each arm as it lands, then:
+
+1. `sw234-cr` is the presumptive winner **iff** it keeps `sw234`'s val gain
+   (≥ +0.2 t1 over `resbn192i` s1234) *and* repairs the transfer bill (dvorak
+   back to ≥ 90.0, azerty ≥ 84.0). `cr192` is its attribution control: if
+   `cr192` alone already shows the transfer repair at ch 192, the stack claim is
+   clean; if `cr192` shows the ch-80 gain vanishing at capacity, then any
+   `sw234-cr` transfer is a data×CR interaction and must be labelled as such.
+2. If `sw2345` beats `sw234` on val without further transfer loss, the stack
+   base becomes sw234+sw5q.
+3. `cr256-p80` is promoted only if it clears **both** the euro bars and dvorak
+   ≥ 89.13 — that is the whole reason the arm exists. At ~2.6× the ship bytes it
+   needs int8-trunk to make ≤5 MB, so it must win by more than a tenth.
+4. **Then 3 seeds (1234/4321/7777) of the single winner, not of several.** The
+   campaign's remaining GPU is the binding resource and every bar is a seed-mean
+   bar; a second candidate at 3 seeds costs a full day.
+5. Anything decided by < ~1 pt on one seed is a paired-seed question, not a
+   verdict (the standing rule, and §5.1b is the phase's example of it biting).
+
+Launch-ready and unscheduled: `phaseJ-futoaug`, `phaseJ-joint` (both in
+`phaseJ_round4.sh`), and the ch 256 dose paired seeds (§5.1b).
+
+* Still unstarted and needing a decision-maker: the checkpoint soup (supply is
+  accumulating in `ckpt/phaseJ-ch256-280k/`, `soup_checkpoints.py --run`), the
+  winner stack + 3 seeds, preset sweeps, the pre-registered unsealing, docs.
+
+**Early mid-schedule signal on round 2** (selection beam at ~66 k of 188 k,
+noisy, recorded so a successor knows what to expect): `sw234` 84.64 and
+`realalt` 85.18 vs the base's 84.30 at the same step; `yfix` 82.90, i.e. clearly
+down — consistent with the §3.2 pre-registered caveat that the val HWS half
+keeps the uncorrected frame.
+
+
 ## 8. The finalist at three seeds — 10 of 11 bars
 
 **`sw2345`** = the `resbn192i` recipe (resbn ch 192, dil 1,2,4,8, embed_hid 96,
@@ -924,77 +999,3 @@ So the 2.30e-02 weight-rounding residue above is real in the emissions and
 invisible after the lexicon beam — the fp16w halving is free on accuracy for
 this model too, now on its own measurement rather than inherited from
 `resbn192i`'s. The one honest asterisk stays the 3 % latency difference.
-
-## 7. Continuity protocol (after the 2026-08-10 and 2026-08-11 orchestrator losses)
-
-Trainings are launched **detached** (`nohup setsid` + per-run
-`ckpt_<run>.launch.log`) so an orchestrator death cannot kill them; the
-orchestrator polls those logs synchronously. Round scripts:
-`phaseJ_round2.sh`, `phaseJ_eval_round1.sh` in the workdir. A killed run is
-resumed with `--resume ckpt/<run>/last.pt` under the **identical** run name and
-args. State is committed at every milestone so a successor can take over from
-this file alone.
-
-**What actually survives an orchestrator death (measured twice, 2026-08-10 and
-2026-08-11):** `nohup setsid` **trainings survive** — every round-1 and round-2
-arm finished after its orchestrator died. Long-lived **waiter/queue shell
-scripts do NOT** — `phaseJ_queue3/4.sh` and the `phaseJ_eval_round34.sh` chain
-were all gone after the second loss, so rounds 3-4 never auto-started and four
-GPU-hours idled. **Rule: launch the work itself detached; never let a queued
-stage depend on a babysitter process.** Batteries are cheap to re-run by hand
-(`phaseJ_eval.sh <run>`), so run them from a live orchestrator, not a chain.
-
-**Queued work:**
-
-* `phaseJ_queue3.sh` — waits for the three 188 k round-2 arms to print
-  `reached step budget`, then `exec`s `phaseJ_round3.sh` (`phaseJ-cr192`,
-  `phaseJ-cr256`, `phaseJ-futoaug`). `phaseJ-ch256-280k` keeps a 4th slot the
-  whole time; the 5080 saturates at four concurrent arms (98 % util, 2.4 GB of
-  16 GB — compute-bound, so a fifth buys nothing).
-* Per-arm battery: `phaseJ_eval.sh <run>` (env `PARITY_TOL` overrides the
-  export tolerance). Cyrillic battery: `phaseJ_eval_ru.sh <run> [layout]` — E1
-  + app-ru-50k, the footing the 76.21 bar was set on.
-* `jsum.py <run>…` in the workdir prints the one-line val + alt-layout summary
-  used in the tables above.
-* `phaseJ_queue4.sh` — round 4, scheduled **per slot** rather than per round
-  (the non-CR arm finishes hours before the 2×-cost CR arms, and a freed slot
-  should not idle): `futoaug` → `phaseJ-joint` (en+ru single model), `cr192` →
-  `phaseJ-ru192` (ru-only ch 192 rung), `cr256` → `phaseJ-cr256-p80` (the
-  §5.1b bundle: CR-CTC on the only dose that clears the euro bars).
-* Battery chains run themselves as arms land: `phaseJ_eval_round2.sh` and
-  `phaseJ_eval_round34.sh` (the latter routes `phaseJ-ru192` to the ru battery
-  and gives `phaseJ-joint` both). So the whole of rounds 2–4 — train **and**
-  eval — completes with no orchestrator attached; a successor's first act
-  should be `jsum.py` over the finished runs plus `tail` of the `*.launch.log`s.
-**Decision rule for the round-3 landing (written in advance so a successor does
-not have to re-derive it).** Run `phaseJ_eval.sh` on each arm as it lands, then:
-
-1. `sw234-cr` is the presumptive winner **iff** it keeps `sw234`'s val gain
-   (≥ +0.2 t1 over `resbn192i` s1234) *and* repairs the transfer bill (dvorak
-   back to ≥ 90.0, azerty ≥ 84.0). `cr192` is its attribution control: if
-   `cr192` alone already shows the transfer repair at ch 192, the stack claim is
-   clean; if `cr192` shows the ch-80 gain vanishing at capacity, then any
-   `sw234-cr` transfer is a data×CR interaction and must be labelled as such.
-2. If `sw2345` beats `sw234` on val without further transfer loss, the stack
-   base becomes sw234+sw5q.
-3. `cr256-p80` is promoted only if it clears **both** the euro bars and dvorak
-   ≥ 89.13 — that is the whole reason the arm exists. At ~2.6× the ship bytes it
-   needs int8-trunk to make ≤5 MB, so it must win by more than a tenth.
-4. **Then 3 seeds (1234/4321/7777) of the single winner, not of several.** The
-   campaign's remaining GPU is the binding resource and every bar is a seed-mean
-   bar; a second candidate at 3 seeds costs a full day.
-5. Anything decided by < ~1 pt on one seed is a paired-seed question, not a
-   verdict (the standing rule, and §5.1b is the phase's example of it biting).
-
-Launch-ready and unscheduled: `phaseJ-futoaug`, `phaseJ-joint` (both in
-`phaseJ_round4.sh`), and the ch 256 dose paired seeds (§5.1b).
-
-* Still unstarted and needing a decision-maker: the checkpoint soup (supply is
-  accumulating in `ckpt/phaseJ-ch256-280k/`, `soup_checkpoints.py --run`), the
-  winner stack + 3 seeds, preset sweeps, the pre-registered unsealing, docs.
-
-**Early mid-schedule signal on round 2** (selection beam at ~66 k of 188 k,
-noisy, recorded so a successor knows what to expect): `sw234` 84.64 and
-`realalt` 85.18 vs the base's 84.30 at the same step; `yfix` 82.90, i.e. clearly
-down — consistent with the §3.2 pre-registered caveat that the val HWS half
-keeps the uncorrected frame.
