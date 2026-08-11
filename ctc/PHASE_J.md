@@ -604,6 +604,26 @@ s4321/s7777 soups already in flight are kept: they answer *whether the soup's
 whether the last bar falls, and they answer it an hour earlier than the
 finalist's own soups can.
 
+### 6.6.2 Does the soup's ≤3 gain reproduce on this recipe? Only partly
+
+The §6.3 soup was harvested from `ch256-280k` and gave +0.50 selection t1 /
++0.38 full-val ≤3. Repeated on the sw234-family recipe (15 snapshots each,
+same greedy protocol, BN re-estimated):
+
+| run | members | selection t1 | single-best | Δ |
+|---|---|---|---|---|
+| `ch256-280k` (§6.3) | 4 | 87.32 | 86.82 | **+0.50** |
+| `sw234` s4321 | 2 | 86.42 | 86.26 | **+0.16** |
+| `sw234` s7777 | 4 | 86.00 | 85.86 | **+0.14** |
+
+**The soup gain is a third of what the ch 256 arm showed.** That arm had 23
+snapshots over a 280 k schedule; these have 15 over 188 k, and the accepted
+members are correspondingly fewer (2 and 4). If the §6.3 ratio between selection
+t1 and full-val ≤3 carries (+0.50 → +0.38), a +0.15 selection gain projects to
+roughly **+0.11 on ≤3 — short of the −0.20 the finalist needs.** Projection is
+not measurement, so the full-val decode of both soup checkpoints is running; the
+number it returns, not this arithmetic, decides the gate.
+
 ## 6.7 Two more negatives: FUTO-parity augs and the dose repair
 
 | arm | val t1/t3/t5/≤3/4+ | vs its control |
