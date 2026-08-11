@@ -351,6 +351,11 @@ the checkpoint soup (J6).
 | `phaseJ-sw2345` | does the data lever keep converting? sw234 + sw5q (+24,707) |
 | **`phaseJ-sw234-cr`** | **the stack candidate**: the val lever (§6.1a) + the transfer lever (§5.1c) |
 | `phaseJ-cr256-p80` | the frontier bundle: CR-CTC on the only ch 256 dose that clears the euro bars (§5.1b) |
+| `phaseJ-ru192` | ru-only capacity+schedule rung vs the 76.21 bar (ch 80 / 94 k / synth-only) — added as a 5th slot because it selects on greedy (`--beam-val-rows 0`) and so costs no CPU beam workers |
+
+Not yet scheduled for want of slots: `phaseJ-futoaug` (Spec B bundle) and
+`phaseJ-joint` (en+ru single model). Both are launch-ready
+(`phaseJ_round4.sh`).
 
 ## 7. Continuity protocol (after the 2026-08-10 and 2026-08-11 orchestrator losses)
 
