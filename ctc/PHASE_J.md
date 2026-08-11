@@ -779,6 +779,107 @@ changed (−0.42 t1, tolerance 0.3) and the conclusion is unchanged:
 > is shipped; it is not a lever that lets the joint model beat the bar-holder,
 > because the bar rises with it.
 
+## 8. The finalist at three seeds — 10 of 11 bars
+
+**`sw2345`** = the `resbn192i` recipe (resbn ch 192, dil 1,2,4,8, embed_hid 96,
+T3+3×HWS, 188 k steps, batch 256, lr 3e-3, wd 0.01, warmup 1 k, coupled affine,
+layout-alt p 0.65, no KD, 5 k-row beam-t1 selection, E1 decode) **plus
+`tier_sw234` (101,842 rows) + `tier_sw5q` (24,707 rows)**. 1,512,802 params,
+1,285,381 training rows. Seeds 1234 / 4321 / 7777, exported ONNX, full
+val-9918 (E1/AOSP) and az26 in-dict alt-layouts (E1).
+
+| metric | s1234 | s4321 | s7777 | **seed-mean** | bar | Δ |
+|---|---|---|---|---|---|---|
+| val t1 | 88.51 | 88.57 | 88.46 | **88.51** | 88.30 | **+0.21** ✓ |
+| val t3 | 92.59 | 92.72 | 92.70 | **92.67** | 92.60 | **+0.07** ✓ |
+| val t5 | 93.35 | 93.48 | 93.28 | **93.37** | 93.26 | **+0.11** ✓ |
+| val ≤3 | 90.91 | 91.24 | 91.44 | **91.20** | 91.27 | **−0.07 ✗** |
+| val 4+ | 87.26 | 87.18 | 86.90 | **87.11** | 86.77 | **+0.34** ✓ |
+| dvorak (held out) | 91.09 | 89.42 | 89.09 | **89.87** | 89.13 | **+0.74** ✓ |
+| dvorak app-98k | 89.05 | 88.97 | 88.93 | **88.98** | 88.20 | **+0.78** ✓ |
+| azerty | 84.02 | 83.35 | 84.07 | **83.81** | 83.60 | **+0.21** ✓ |
+| qwertz | 82.14 | 83.66 | 83.24 | **83.01** | 82.50 | **+0.51** ✓ |
+| german | 80.76 | 80.54 | 80.63 | **80.64** | 79.64 | **+1.00** ✓ |
+| spanish | 88.00 | 89.48 | 87.88 | **88.45** | 88.28 | **+0.17** ✓ |
+| clearflow (zero-shot) | 91.44 | 89.64 | 92.10 | **91.06** | — floor | — |
+| kasroz (zero-shot) | 91.40 | 91.40 | 93.41 | **92.07** | — floor | — |
+
+**Ten of eleven bars fall. `≤3` misses by 0.07 pt** — two rows out of 3,389,
+averaged over three seeds. Note it is *closer* than the two-seed estimate
+(−0.20) that §6.6.1 carried: s7777's ≤3 of 91.44 clears the bar on its own, and
+the seed spread on that stratum (90.91–91.44) is 8× the shortfall. **A tie this
+close is still not a beat, and the campaign's terminal condition says beat.**
+
+A same-seed re-run (`phaseJ-sw2345-snap`, s1234 with snapshots, differing only
+by cudnn nondeterminism) landed val 88.54/92.73/93.39/91.06/87.23 with markedly
+worse transfer (dvorak 88.24, spanish 87.71) — a useful reminder, recorded
+because it is uncomfortable, that **even a fixed seed does not fix the transfer
+axis to better than ~1–3 pt** in this harness.
+
+## 9. Terminal condition: NOT MET — the verdict and the two stones
+
+The campaign's terminal condition was a ≤5 MB, <50 ms model beating
+`resbn192i` on **all** val spreads, **all six** alt-layouts, and the Cyrillic
+bar, with test-2400 unsealed only if every one of those fell.
+
+| axis | status |
+|---|---|
+| val t1 / t3 / t5 / 4+ | **beaten** (+0.21 / +0.07 / +0.11 / +0.34) |
+| **val ≤3** | **NOT beaten (−0.07)** — stone 1 |
+| all six alt-layouts | **beaten** (+0.17 … +1.00) |
+| **Cyrillic 76.21** | **NOT beaten** — stone 2 |
+| size / latency | met (§10) |
+
+**test-2400 was NOT unsealed. No pre-registration was filed and no seal-ledger
+entry was appended**, because the gate's precondition never came true. Nothing
+in Phase J is test-validated; `resbn80g` keeps that tier. This is the rule the
+campaign committed to in advance, applied against its own preferred outcome.
+
+### Stone 1 — the ≤3 stratum, and why it is a candidate-generation problem
+
+Every lever the phase could aim at it was aimed at it, and all five failed:
+
+| lever | effect on ≤3 | §|
+|---|---|---|
+| layout-alt dose p 0.65 → 0.8 | −0.29 | 6.7b |
+| CR-CTC α 0.2 | −0.50 (at ch 192, on the base) | 6.4.1 |
+| FUTO-parity augmentation bundle | −0.21 | 6.7a |
+| checkpoint soup | +0.14 / −0.33, sign-inconsistent | 6.6.2 |
+| stratum-aware decode preset (symmetric) | +0.03 | 6.8b |
+
+The decode-side result is the diagnostic one. `--objective minmargin` had the
+whole E1 region to trade `4+`'s +0.34 spare margin into `≤3`, and it moved ≤3
+by +0.03 — for the incumbent too. **Gamma and beta re-rank candidates by
+length; they cannot conjure a short candidate the beam never generated.** On a
+≤3-letter word the trace is 2–3 keys long, the lexicon neighbourhood is dense,
+and the true word is either in the beam early or absent. That points the
+remaining work at *candidate generation*, not at training or re-ranking:
+
+* **T′ = 64 emission resolution** (PHASE_I §6.1) — measured at +0.33 on 4+ and
+  +2.5–2.8 on transfer, never measured on ≤3 with a modern recipe. It doubles
+  the frames the beam can branch on, which is exactly the short-word bottleneck.
+  Contract-breaking (`[1,32,·]` is frozen), so it is an app decision.
+* **Beam width / short-word surfacing** — every number in this campaign used
+  width 100 with a single global pruning setting. A length-conditioned beam
+  (wider or differently pruned for short traces, where the cost is trivial
+  because the traces are short) has never been tried.
+* **A ≤3-specific training signal** — no arm ever oversampled short words; the
+  stratum is 34 % of val and a much smaller share of the FUTO training mix.
+
+### Stone 2 — Cyrillic
+
+Not beaten, and the phase's two attempts failed in instructive opposite ways:
+capacity on synthetic data made it **worse** (§6.5: ch 192/188 k scores 73.53
+against ch 80/94 k's 76.21 while its *greedy* improves 3.1 pt — generator
+overfitting, with `last.pt` refuting the selector explanation), and a joint
+en+ru model ties at best while costing −0.42 en (§6.8).
+
+The stone did yield the campaign's most directly useful side-finding: **the ru
+decode preset was never language-tuned, and λ = 2.0 is worth ≈ +1.2 in-dict t1
+to the shippable model on both sweep halves (§6.9). The correct Cyrillic number
+is ≈ 77.4, not 76.21** — free accuracy for the app, available today, on the
+model already shipped.
+
 ## 7. Continuity protocol (after the 2026-08-10 and 2026-08-11 orchestrator losses)
 
 Trainings are launched **detached** (`nohup setsid` + per-run
