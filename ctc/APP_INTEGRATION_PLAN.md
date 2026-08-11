@@ -1,8 +1,9 @@
 # APP_INTEGRATION_PLAN — wiring the CTC swipe engine into CleverKeys (G3 + G5)
 
 **Date:** 2026-08-08 · **Updated:** 2026-08-11 (Phase J — see **§7**, which carries
-the post-Phase-J model menu, the Cyrillic λ finding, the fixture state, and the
-multi-script verdict; §7 supersedes D1, §1(d), §1(e) and O1 where they disagree).
+the Cyrillic λ finding (§7.1), the post-Phase-J model menu and fixture state
+(§7.2), the user-dictionary pointer (§7.3) and the multi-script verdict (§7.4);
+§7 supersedes D1, §1(d), §1(e) and O1 where they disagree).
 **Scope:** exact, apply-nearly-verbatim diffs for the app repo
 (`/home/will/git/swype/CleverKeys`, READ-ONLY for this session — nothing there was
 modified). All facts below were verified against app-repo HEAD `79ddfb0f` and this
@@ -37,10 +38,11 @@ sha256 `a18ea58cd662b0e18b6daadaf417361f93fd0b146ce6478d4d6a62e7e185fa8a`,
 **D1 is stale as of 2026-08-11 and is left standing only as the record of what was
 decided on 2026-08-08.** Phase G added `resbn80g` (test-validated, 1.14 MB) and
 Phase J added `sw2345` (best measured accuracy, **not** test-validated). The
-current menu, with evidence tiers, is **§7.1**. D2's E1 preset still holds for the
-Phase-J finalist on the benchmark footing (§7.1), but the app-trie λ question
-(O3/§7.1) is open for it. Every other decision (D3–D8) is unaffected: the finalist
-is architecturally identical to what D1 assumed, same frozen I/O contract.
+current menu, with evidence tiers, is **§7.2**. D2's E1 preset still holds for the
+Phase-J finalist on the benchmark footing (§7.2), but the app-trie λ question
+(O3, §7.2) is open for it, and `resbn80g` would ship at a *different* preset
+(λ 4.0). Every other decision (D3–D8) is unaffected: the finalist is
+architecturally identical to what D1 assumed, same frozen I/O contract.
 
 ---
 
@@ -1291,6 +1293,11 @@ sha256sum src/main/assets/models/ctc_swipe_encoder.onnx
 | current `models/` assets | 10,293,047 | swipe_encoder 5,317,537 + swipe_decoder 4,975,510 |
 | APK delta | ≈ +2.6–2.8 MB per ABI APK | fp32 conv weights are high-entropy; zip gains are small. Applies to each of the 3 ABI APKs (asset is ABI-independent but each APK carries all assets) |
 
+**Superseded in part by §7.2** — the shelf has changed twice since this was
+written (`resbn80g` in Phase G, `sw2345` in Phase J). The copy command above is
+correct in *form* for any of them: same asset path, same contract, only the source
+artifact and the expected sha change.
+
 Alternatives on the shelf (do NOT ship two models — see O2):
 `fast_resbn80_s1234.onnx` (1,142,727 B, 0.215 ms, val-only evidence, wider t5
 margin) and `fast_resbn72_s1234.onnx` (944,487 B, 0.186 ms, val-only). If one of
@@ -1301,6 +1308,12 @@ parity test is meaningless against a different graph. The stale pre-campaign
 `artifacts/ctc_swipe_encoder.onnx` (r2, 394 k params) must NOT be shipped.
 
 ### 1(e) Golden fixture + parity wiring
+
+> **Fixture bytes below are stale (2026-08-11).** The wiring, the two copy
+> destinations and the "fixture and preset move together" rule are unchanged, but
+> `artifacts/ctc_model_golden.json` is no longer the ch 128 fixture quoted here —
+> it was regenerated from `resbn80g_s1234` at the `resbn80g` preset. Current
+> fixture state, and what adopting the Phase-J finalist would require, is **§7.2**.
 
 **Missing-fixture fact (verified):** `src/test/resources/ctc/` does not exist in
 the app repo; `CtcParityTest` has been failing its `assertWithMessage("golden
@@ -1760,7 +1773,11 @@ user-reachable at commit 4.
 
 ## 6. Open decisions for the user (each with a recommendation)
 
-- **O1 — Which model ships (D1). Updated 2026-08-08.** Recommend `ch128_s1234`
+- **O1 — Which model ships (D1). Superseded 2026-08-11 → see §7.2** for the
+  post-Phase-G/J menu (`resbn80g` test-validated at 1.14 MB; `sw2345` best
+  measured accuracy but **not** test-validated). The 2026-08-08 text is kept
+  below unedited as the record of the state it was written in.
+- **O1 (2026-08-08 text) — Which model ships (D1).** Recommend `ch128_s1234`
   (2.8 MB) for maximum accuracy — 87.29 → 87.92 test t1 over `fast_resbn80` at the
   AOSP trie. But the evidence-tier argument for it is **gone**: `fast_resbn80`
   (1.1 MB, 0.215 ms) is now *also* test-validated, clearing all five test bars on
@@ -1795,7 +1812,13 @@ user-reachable at commit 4.
   an empty slate (bar clears; user sees no swipe output). Alternative: route those
   swipes to neural at the InputCoordinator level. Recommend the empty slate for v1
   (mode is opt-in, en-first) + a follow-up once the multi-language story (langpack
-  tries + per-language validation) exists.
+  tries + per-language validation) exists. **Updated 2026-08-11:** part of that
+  story now exists — a Cyrillic model with a measured number and a per-language λ
+  that must travel with it (§7.1), and a measured verdict against folding en+ru
+  into one model (§7.4). The en-only gate stays for v1; the per-language preset
+  axis is the piece to build first, because every non-en script the app can serve
+  reads its frequencies off the CKDT `255 − rank` scale, not the AOSP scale E1 was
+  fitted on.
 - **O6 — When does ctc become default / replace hybrid's internals?** Not in this
   change. Per the decision doc: only after a beta cycle, and ideally after the G4
   refinement-head question is settled. Revisit with field feedback.
@@ -1808,48 +1831,119 @@ user-reachable at commit 4.
   §1c-vii: follow the `geo_*` precedent (not reset). Flag because the current
   non-reset of `swipe_engine_mode`/`geo_*` looks like an accident of history rather
   than a decision.
+- **O9 — Adopt the Phase-J finalist `sw2345` (new, 2026-08-11)?** Recommendation:
+  **decide it explicitly, do not drift into it.** It is the best-measured model in
+  the campaign (all six alt-layout bars, four of five val bars, 2.91 MiB, 0.842 ms)
+  and a pure file swap, but it is **val + alt-layout validated only** and would
+  displace a **test-validated** incumbent (`resbn80g`). Adoption also pulls two
+  chores: regenerating the golden fixture at the ship preset, and answering the
+  app-trie λ question. All of it is laid out in §7.2.
+- **O10 — Per-language decode preset (new, 2026-08-11).** Recommendation:
+  **build the axis, independent of O9.** λ = 2.0 on the ru CKDT lexicon is worth
+  ≈ +1.2 in-dict t1 to whichever Cyrillic model ships, needs no retrain, and is
+  blocked only by the fact that `CtcScoringParams` has no language axis today
+  (§7.1). It is also the prerequisite for ever relaxing O5's en-only gate.
 
 ---
 
 ## 7. Phase J update (2026-08-11) — new candidate, and one free win that needs no model change
 
-Full record: `PHASE_J.md`. Two items here are actionable by the app; one is a
-model swap that needs an owner decision, the other is a decode constant that
-does not.
+Full record: `PHASE_J.md` (verdict §9, artifacts §10); cross-repo summary in
+`MODEL_COMPARISON.md` §2.8 and §5.
 
-### 7.1 The free win: the Cyrillic decode λ is mistuned — worth ≈ +1.2 t1 today
+**The headline an integrator must not miss: Phase J's terminal condition was NOT
+met.** Ten of eleven bars fell; the `≤3` val stratum missed by 0.07 and the
+Cyrillic bar was not beaten, so **test-2400 was not unsealed and nothing in Phase
+J is test-validated** — `resbn80g` keeps that tier. What follows is therefore one
+free decode constant that needs no decision (§7.1), one model swap that needs an
+owner decision made with its evidence tier in full view (§7.2), one unshipped
+prerequisite that interacts with both (§7.3), and one closed question (§7.4).
+
+### 7.1 The free win: the Cyrillic decode λ is mistuned — worth ≈ +1.2 t1, no model change
 
 **This requires no new model.** Every Cyrillic number this campaign ever
 published, including the 76.21 bar, was decoded at the English benchmark
-preset's `lambda = 1.1`. But the app's bundled **langpack-ru CKDT v2** lexicon
-stores `freq = 255 − rank` — the compressed CKDT scale that `PHASE_I.md` §7.4
-already showed wants a *larger* λ. Nobody had ever swept λ per language
+preset's `lambda = 1.1`. But the app's **langpack-ru CKDT v2** lexicon stores
+`freq = 255 − rank` — the compressed CKDT scale that `PHASE_I.md` §7.4 already
+showed wants a *larger* λ. Nobody had ever swept λ per language
 (`PHASE_I_DATA.md` disclosed the gap).
+
+Lexicon provenance, verified in the app repo: `scripts/dictionaries/langpack-ru.zip`
+(manifest `{"code":"ru","version":2,"wordCount":50000}`), imported by
+`LanguagePackManager` into `files/langpacks/ru/dictionary.bin` and read by
+`CkdtDictionaryReader` (magic `CKDT`, version 2, per word `uint8` frequency rank,
+0 = most frequent). `eval_cyrillic.py` builds its trie from **that exact zip** with
+`freq = max(1, 255 − rank)`, so the eval scale and the app scale match by
+construction — this is the app's own ru lexicon, not a proxy. Note it is an
+*importable* pack, not an APK asset (nothing under `src/main/assets/dictionaries/`
+is ru).
 
 Swept symmetrically over both ru models, tuned on ru val rows 0:4708 and
 confirmed on the untouched 4708:9416 (`PHASE_J.md` §6.9):
 
-| λ | shipped synth-only ru model, tune / confirm |
-|---|---|
-| 1.1 (what ships today) | 75.73 / 76.70 |
-| **2.0** | **76.91 / 77.92** |
-| 3.0 | 75.82 / — |
-| 4.0 | 73.88 / — |
+| λ | shippable synth-only ru model (`phaseIB-ru-synth`), tune / confirm | joint en+ru challenger, tune / confirm |
+|---|---|---|
+| 1.1 (the published footing) | 75.73 / 76.70 | 76.77 / 76.34 |
+| **2.0** | **76.91 / 77.92** | **77.83 / 78.23** |
+| 3.0 | 75.82 / — | 76.39 / — |
+| 4.0 | 73.88 / — | 74.50 / — |
 
 **+1.2 in-dict t1 on both halves. The correct expected Cyrillic accuracy is
-≈ 77.4, not the 76.21 currently documented.** The lever is model-independent
-(it lifted the joint challenger by the same amount), so it is a pure decode
-constant, available on the model already installed.
+≈ 77.4, not the 76.21 currently documented.** The lever is **model-independent**
+— it lifted the joint challenger by the same order (+1.1 tune / +1.9 confirm),
+which is why it changes no verdict in `PHASE_J.md` §6.9 but does change the
+number the app should expect. It is a pure decode constant: no retrain, no new
+artifact, no change to the Cyrillic model itself.
+
+Scope of "today", stated exactly: the Cyrillic *model* needs no change, but the
+app cannot exercise any of this yet — `src/main/assets/models/` carries only the
+legacy transformer (`swipe_encoder_android.onnx` / `swipe_decoder_android.onnx`),
+there is no CTC artifact of any script in the app, and this repo's
+`ctc/artifacts/` has no ru ONNX either. So λ = 2.0 is a constant that must land
+*with* the Cyrillic path whenever it is wired — free, but not yet collectable.
 
 **Where it has to live — this is a real code change, not a config edit.**
-`CtcScoringParams` (`src/main/kotlin/tribixbite/cleverkeys/swipe/ctc/CtcScoringParams.kt`)
-is keyed by **model signature**, not by language: the factories are
-`encoderOnly()`, `encoderDecoder()` and `fallback()`, each a fixed constant set
-ported from FUTO's `scoring.json`. **There is no per-language axis today.**
-Adopting this finding means adding one — the minimal shape being a λ override
-selected by the active langpack/script alongside the existing signature key, so
-Latin scripts keep their tuned λ and Cyrillic gets 2.0. Nothing else in the
-preset moves.
+Verified against app HEAD `62c9419f` (clean tree; nothing in the app repo was
+modified):
+
+* **The scoring preset is GLOBAL, not per-language.** `CtcScoringParams`
+  (`src/main/kotlin/tribixbite/cleverkeys/swipe/ctc/CtcScoringParams.kt`) is a
+  data class with three companion factories — `encoderOnly()`, `encoderDecoder()`,
+  `fallback()` — each a fixed constant set ported from FUTO's `scoring.json` and
+  keyed, per its own KDoc, by the **active model-combination signature**. There is
+  no language parameter anywhere in the file, and no caller passes one.
+* **Nothing in `src/main/` constructs one today** — the only references are
+  `CtcModuleTest` and `CtcOnnxLatencyBenchmarkTest`. The preset is global by
+  omission (the engine is unwired), not by a considered decision, so adding the
+  axis breaks no existing contract.
+* **This plan keeps it global.** §1(b) adds one more constant factory,
+  `tunedV2(beamWidth, topK)`, and §1(c)-iii constructs it in exactly one place —
+  `CtcEngineAdapter.decoderFor(mapped, trie, beamWidth)`, whose memo key is
+  `Triple(mapped, trie, beamWidth)`, with **no language component**. The adapter
+  does receive the active language (`decodeAsync(..., language: String)`, sourced
+  in `InputCoordinator` from
+  `predictionCoordinator.getDictionaryManager()?.getCurrentLanguage()` falling back
+  to `config.primary_language`) but uses it only as a gate against the constant
+  `LANGUAGE = "en"`, returning an empty slate otherwise.
+* **Minimal shape of the change**, therefore: (1) select the preset by language
+  next to the signature — e.g. `CtcScoringParams.tunedV2(language, beamWidth, topK)`
+  or a `presetFor(language)` table — returning λ 2.0 for CKDT-scale scripts and
+  λ 1.1 for the AOSP-scale en trie; (2) add `language` to the `decoderFor` memo key
+  so a language switch rebuilds the decoder instead of silently reusing the
+  previous λ; (3) relax the `LANGUAGE = "en"` gate for the scripts that have a
+  model *and* a validated preset (O5). Nothing else in the preset moves.
+* **No precedent to copy for a per-language *scoring* constant.** The app's
+  per-language state is done with key suffixes
+  (`LanguagePreferenceKeys.customWordsKey("ru") == "custom_words_ru"`), but the
+  nearest analogue to λ on the geometric side — `Config.geo_frequency_weight`
+  (`Defaults.GEO_FREQUENCY_WEIGHT`, read once in `GeometricEngineAdapter` into
+  `GeometricEngineConfig.frequencyWeight`) — is a single global float used for
+  every language. The λ axis would be the first language-keyed scorer constant in
+  the app.
+* **Do not generalise this to the geometric engine.** The sweep measured the CTC
+  beam's λ against CTC emissions only. `geo_frequency_weight` is a different
+  scorer with a different range (0.0–0.4, default 0.12) and no equivalent sweep
+  exists; nothing here licenses touching it.
 
 **Caution, stated because it interacts:** no evaluation in this campaign
 included a **user dictionary**, and λ multiplies the frequency term, so a larger
@@ -1858,6 +1952,21 @@ user-dictionary v1 fix (see §7.3) is unshipped; if it lands, λ = 2.0 should be
 re-confirmed with user-dictionary entries present rather than assumed to carry.
 
 ### 7.2 The new model candidate: `sw2345` — better, and NOT test-validated
+
+**The menu, with evidence tiers.** `MODEL_COMPARISON.md` §5 is the authoritative
+matrix; this is the app-facing subset, and it replaces D1/§1(d)/O1. Read the tier
+column before the accuracy column — they no longer point the same way.
+
+| option | ship bytes / params / encoder | evidence tier | preset + fixture that must travel with it |
+|---|---|---|---|
+| **`sw2345`** (Phase-J finalist, NEW) | 3,052,318 fp16w (2.91 MiB) / 1,512,802 / 0.842 ms mean, 0.859 p90 | **val + alt-layout validated ONLY — NOT test-validated.** 3 seeds, val-9918 + 7 alt-layout corpora, no sealed split at all | **E1** (`1.05 / 1.1 / 0.2 / 0.3734 / 0.9882`); fixture regenerated from it at the ship preset — **does not exist as a replacement yet** (below) |
+| `resbn80g` (Phase-G recommendation) | 1,142,727 fp32 (1.09 MiB) / 279,346 / 0.215 ms class | **Test-validated on both footings, every seed** — the only model that still holds that tier | `0.9 / 4.0 / 0.25 / 0.25 / 0.9882` **and** fixture `ctc_model_golden.json` sha256 `ce3b5456ad13543ac09ac8c2610374bd8847b15f740f9004a98efea59d74f134`, which is what `artifacts/` carries today |
+| `ch128_s1234` (the original D1 pick) | 2,799,865 fp32 / 689,282 / 0.455 ms | Test-validated, all five bars every seed, both tries | E1; its fixture (sha `a18ea58c…`) is **no longer** the one in `artifacts/` |
+
+The accuracy ranking and the evidence ranking are inverted, deliberately: the seal
+was not spent because Phase J's terminal condition was not met. **Choosing
+`sw2345` means choosing the best-measured model and the weaker evidence tier at
+the same time.**
 
 | | value |
 |---|---|
@@ -1872,39 +1981,145 @@ re-confirmed with user-dictionary entries present rather than assumed to carry.
 
 **Integration is a file swap: no code change.** The whole Phase-J gain is
 training data (two new FUTO pools, 126,549 extra rows); the graph, the contract
-and the preset are unchanged.
+and the preset are unchanged. Re-verified on the artifact itself: inputs
+`features [1,2,64] f32`, `layout_keys [1,64,2] f32`, `layout_mask [1,64] bool`;
+outputs `log_emissions [1,32,65] f32` (+ the unfetched `coefficients`/`lambda`),
+opset 17, fully static — i.e. exactly the contract §1(a)'s `OnnxCtcEmissionModel`
+is written against. §1(d)'s copy command applies verbatim with the source path and
+expected sha changed. Note the ship bytes are **fp16w**, so the APK delta is
+≈ +2.9 MB per ABI rather than D1's +2.6–2.8 MB.
+
+**fp16w is free on accuracy here, measured rather than inherited**
+(`PHASE_J.md` §10): full val-9918 (E1/AOSP) decoded *through the fp16w graph*
+gives 88.51 / 92.58 / 93.35 / 90.91 / 87.26 against the fp32 artifact's
+88.51 / 92.59 / 93.35 / 90.91 / 87.26 — Δ ≤ 0.01 on every metric, seed 1234. Two
+asterisks travel with it: fp16w is **3 % slower** on this instrument (0.842 vs
+0.816 ms fp32, not the "identical" Phase I published), and its weight-rounding
+residue is 2.30e-02 on the sliced head (argmax 100/100) — real in the emissions,
+invisible after the lexicon beam.
+
+**The preset needs no per-model retuning on the benchmark footing, and this is
+now well evidenced.** Phase J swept the E1 region symmetrically over both the
+finalist and the incumbent with a stratum-aware `minmargin` objective (tuned on
+val`[0:4959]`, confirmed on val`[4959:9918]`), and **both models landed back on
+their own E1 numbers to within ±0.07 on every metric** — the fifth model family
+for which E1 transfers unchanged (`PHASE_J.md` §6.8b). So D2's `tunedV2` constants
+carry over to `sw2345` as written.
+
+**Open, and material to shipping: the app-trie λ has never been swept for this
+model.** Everything above is the AOSP 146,964-word footing. The app ships
+`en_enhanced.json` (98,140 entries → the 98,081-word STRIP trie of O3, on the
+compressed 134–255 scale), and on that trie the
+precedent runs the other way — O3/`PHASE_F.md` §15.4 measured the λ optimum at
+2.0–2.5 for the campaign-2 models, and `resbn80g` ships at λ 4.0
+(`MODEL_COMPARISON.md` §5). `MODEL_COMPARISON.md` §5's own entry for `sw2345` says
+"no app-trie sweep has been run for it". Two honest options: ship E1 unchanged
+(consistent with every published `sw2345` number and with the fixture rule), or
+sweep λ on the app trie first and move the fixture with it. Do **not** mix — the
+fixture records the preset it was generated at (`MODEL_COMPARISON.md` §5.1, and
+the fixture paragraph below).
 
 **Evidence tier — read this before adopting.** `sw2345` is **val + alt-layout
 validated only. It is NOT test-validated.** Phase J's terminal condition was
-*not* met: the `≤3` val stratum missed its bar by 0.07, so under the campaign's
-own pre-registered rule **test-2400 was not unsealed** — no pre-registration was
-filed and no seal-ledger entry appended. **`resbn80g` remains the only
-test-validated model.** Adopting `sw2345` therefore means promoting a val-only
-model over a test-validated one; that is the owner's call, not a default.
+*not* met: the `≤3` val stratum missed its bar by **0.07** (91.20 seed-mean
+against 91.27 — roughly two rows of 3,389, and closer than the two-seed estimate,
+but a miss and not rounded away), so under the campaign's own pre-registered rule
+**test-2400 was not unsealed** — no pre-registration was filed and no seal-ledger
+entry appended, and nothing in Phase J may be quoted against any test bar.
+**`resbn80g` remains the only test-validated model.** Adopting `sw2345` therefore
+means promoting a val-only model over a test-validated incumbent; that is the
+owner's call, not a default. (The Cyrillic bar is the second axis Phase J did not
+beat — §7.1, §7.4 — but it is orthogonal to this en-side swap.)
 
-A **golden fixture regenerated from `sw2345` at the ship preset is required
-before adoption** (the `MODEL_COMPARISON.md` §5.1 rule). One has been generated
-as `artifacts/sw2345_s1234_golden_CANDIDATE.json` and deliberately does **not**
-replace `ctc_model_golden.json`, precisely because adoption is undecided.
+**Golden fixture — REQUIRED before adoption, and not landed.** The
+fixture-and-preset rule (`MODEL_COMPARISON.md` §5.1) is that the shipped model,
+the runtime preset and the fixture move together: the fixture records its own
+`source_onnx_sha256` and `preset`, and `CtcParityTest` asserts Kotlin reproduces
+Python bit-for-bit *at that preset*. So adopting `sw2345` requires regenerating
+the fixture from `sw2345_s1234.onnx` at whatever preset ships and re-landing both
+app-repo copies (§1(e)).
 
-### 7.3 User-dictionary v1 fix — still unshipped
+State today, verified in `artifacts/`:
 
-`RESEARCH_SCAN.md`'s on-device personalization v1 remains the reference design
-and is **not implemented**. It matters twice over here: no campaign eval had a
-user dictionary at all, so every published number is a no-user-dictionary
-number, and §7.1's λ increase makes the frequency term stronger, which is
-exactly the axis injected user words sit on.
+| file | source model / preset | bytes | sha256 |
+|---|---|---|---|
+| `ctc_model_golden.json` (the real fixture) | `resbn80g_s1234` at `0.9 / 4.0 / 0.25 / 0.25 / 0.9882` | 140,204 | `ce3b5456ad13543ac09ac8c2610374bd8847b15f740f9004a98efea59d74f134` |
+| `sw2345_s1234_golden_CANDIDATE.json` (candidate only) | `sw2345_s1234` at E1 | 140,098 | `b397715091b0ccb26be802842a6b3048efbeba7fbc3fd19572face62f12b47b7` |
+
+The candidate carries the same 10 cases (6 `featurize` + 4 `beam`) and the same
+`layout` block the app's two parity tests consume, so it is drop-in *if* adoption
+happens — but it has deliberately **not** replaced `ctc_model_golden.json`,
+because adoption is undecided. Nothing should be copied into the app repo from
+the `_CANDIDATE` file until that decision is made; and if the app-trie λ question
+above resolves to anything other than E1, the candidate is stale and must be
+regenerated at the chosen preset.
+
+### 7.3 User-dictionary v1 fix — still unshipped, and it interacts with λ
+
+**Where the design lives (the pointer this plan should have carried):**
+`RESEARCH_SCAN.md` §2.5 item 1 — *"wire the personal lexicon into the CTC path"*:
+merge the system user dictionary + custom words + `UserVocabulary` into
+`CtcLexiconTrie` (clamped frequency, modelled on
+`GeometricEngineAdapter.mergeUserWords`) and add a **capped** personalization term
+via the reserved `alpha` slot, validation-gated per user. Supporting sections:
+§2.2 (the survey finding — *"there is no user-dictionary merge in the CTC trie
+yet"*), §2.3 (the value bound, +0.5–2 t1 for an active user, and the λ
+amplification caveat), and the table row **(c1)**, ranked 1 for value per
+engineering unit.
+
+**Status: not implemented.** The app has no CTC engine wired at all, so it has no
+CTC user-dictionary merge either. This plan's own §1(c)-iii/D4 covers *part* of
+v1 on paper — custom words merged at clamped 1..255, disabled words dropped,
+memo invalidated by a content hash — but it is unshipped like the rest of the
+plan, and it does not cover the system user dictionary, `UserVocabulary` boosts,
+or the `alpha` rerank term.
+
+**Why it belongs in this section — the caution.** **No evaluation anywhere in
+this campaign included a user dictionary** (`PHASE_F.md` §15.5, `PHASE_G.md` §6,
+`MODEL_COMPARISON.md` §5.2), so every number in this document is a
+no-user-dictionary number. User entries are injected at the **top of the
+frequency scale** (freq 255 after clamping; the geometric precedent inserts custom
+words at 1000 before clamping), and λ multiplies exactly that term — so a larger
+λ amplifies them. This is a live risk for two presets already on the table:
+`resbn80g`'s app preset at λ 4.0, and §7.1's ru λ 2.0 on a CKDT `255 − rank`
+lexicon where a user word outranks every real word in the pack. Whichever lands
+first, the personal-lexicon merge must ship with a boost cap and a validation
+gate rather than a bare insert, and λ should be re-confirmed with user entries
+present rather than assumed to carry.
 
 ### 7.4 Multi-script status — separate per-script models remain the plan
 
-A joint en+ru single model was built and measured (`PHASE_J.md` §6.8): one
-65-wide per-key-slot head serves both scripts, which works. It **ties** the
-Cyrillic bar at best (76.56 vs 76.21 at λ 1.1; 78.23 vs 77.92 on the confirm
-half at λ 2.0, inside one binomial SE) and costs **−0.42 en t1** against a
-stated 0.3 tolerance, with greedy collapsing 37.07 → 23.68. **Feasible, not
-adopted.** Per-script models stay the plan.
+A joint en+ru single model was built and measured (`PHASE_J.md` §6.8, §6.9): the
+base recipe plus 1,000,000 synthetic ru rows on the `ru_jcuken` geometry, one
+65-wide per-key-slot head serving both scripts (no Yandex training rows anywhere;
+Yandex val is eval-only). **Two scripts in one head demonstrably works** — and
+the measured price is why it is not adopted:
+
+| axis | joint | reference | Δ |
+|---|---|---|---|
+| ru in-dict t1, λ 1.1 (app-ru 50 k, E1, n = 8,471) | 76.56 | 76.21 bar | +0.35, inside one binomial SE (±0.46) |
+| ru in-dict t1, λ 2.0, confirm half | 78.23 | 77.92 | +0.31, inside one SE (±0.64 at n = 4,240) |
+| ru in-dict t3 / t5, λ 1.1 | 88.16 / 91.12 | 88.53 / 91.42 | **−0.37 / −0.30** |
+| ru in-dict t3 / t5, λ 2.0 confirm half | 88.94 / 91.49 | 89.50 / 92.00 | **−0.56 / −0.51** |
+| ru greedy | 23.68 | 37.07 | **−13.39** |
+| en val t1 | 87.90 | 88.32 | **−0.42** against a stated 0.3 tolerance |
+
+**Verdict: feasible, not adopted — separate per-script models remain the plan.**
+The ru side is a tie at best (ahead on t1 by less than one SE on both sweep
+halves, *behind* on t3/t5), the en side breaks its tolerance, and the greedy
+collapse shows what the shared head costs: per-slot emissions get much blurrier
+and only the lexicon beam hides it.
+
+Consequence for this plan: O5's en-only gate is unchanged, and the multi-language
+route is a per-script model plus a per-language preset (§7.1), not one model for
+everything.
 
 ## Appendix A — this repo's supporting change (already committed alongside this plan)
+
+> **Records the 2026-08-08 state.** The `make_golden.py` changes below still hold
+> (they are why the fixture carries `featurize` cases and a `layout` block at all),
+> but the fixture *contents* described here are two regenerations out of date —
+> current fixture state is the table in §7.2.
 
 `make_golden.py`:
 - new `FEATURIZE_CASES` (5 fixed branch probes: single-point, zero-duration,
