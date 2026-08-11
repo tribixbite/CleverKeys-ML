@@ -423,6 +423,60 @@ running) has to answer — under the §7 decision rule `sw234-cr` has already
 failed clause 1 (it must keep ≥ +0.2 t1 over base and it is −0.51), so it can
 only survive on an exceptional transfer result.
 
+### 6.4.1 Round-3 transfer — **CR-CTC does not survive capacity**
+
+Alt-layout az26 in-dict, E1. Bars in the header row.
+
+| arm | val t1 | dvorak (89.13) | azerty (83.60) | qwertz (82.50) | german (79.64) | spanish (88.28) | dvorak-app (88.20) |
+|---|---|---|---|---|---|---|---|
+| `resbn192i` s1234 | 88.32 | 90.60 | 84.59 | 82.73 | 79.76 | 88.85 | 89.17 |
+| `phaseJ-sw234` | **88.69** | 88.85 | 83.35 | 82.90 | 80.40 | 87.32 | 88.60 |
+| `phaseJ-sw2345` | 88.51 | **91.09** | 84.02 | 82.14 | **80.76** | 88.00 | — |
+| `phaseJ-cr192` | 88.12 | 88.97 | 84.59 | 81.47 | 80.26 | 88.34 | 87.63 |
+| `phaseJ-sw234-cr` | 87.81 | 89.34 | 84.40 | 82.48 | 80.13 | 88.23 | 88.89 |
+| `phaseJ-cr256-p80` | 88.10 | 89.42 | 82.30 | 81.97 | 78.67 | 86.86 | 88.85 |
+
+**(a) The CR-CTC transfer gain was a ch-80 phenomenon and it is hereby
+retracted as a general lever.** §5.1c reported +3.13 dvorak / +3.74 dvorak-app
+at ch 80 and called it "the strongest transfer lever measured". At the ship
+width the same flags give **dvorak −1.63** (88.97 vs the base's 90.60) and
+dvorak-app −1.54; at ch 256 on the high dose they **destroy the euro advantage
+that was the entire reason for that bundle** — `ch256-p80`'s 83.92 / 82.90 /
+79.99 / 89.02 becomes 82.30 / 81.97 / 78.67 / 86.86, i.e. −1.62 / −0.93 /
+−1.32 / −2.16, four of four negative and outside the noise floor. Meanwhile the
+val cost is paid at every width. **CR-CTC is dropped from the campaign.**
+
+The one place it still looks positive is *relative to `sw234`*: `sw234-cr`
+beats `sw234` on dvorak +0.49, azerty +1.05, spanish +0.91. Stated honestly,
+that is a sign flip on the same lever depending on which data it is applied to,
+each side measured once, on the axis (dvorak) whose seed spread PHASE_I §7.2
+measured at 5 pt. **It is not strong enough evidence to keep a lever that is
+clearly negative on the larger, four-of-four euro measurement.** `sw234-cr`
+also fails the §7 rule outright on val (87.81 vs the 88.30 bar).
+
+**(b) `cr256-p80` fails decision-rule clause 3** — it had to clear both the euro
+bars and dvorak ≥ 89.13, and it clears only dvorak (89.42) while missing all
+four euro bars and the val bar. The ch 256 frontier is now out of candidates:
+p 0.65 misses euro, p 0.8 misses dvorak+≤3, and the CR bundle misses nearly
+everything.
+
+**(c) The 5 k-row selector misled again, in the opposite direction.**
+`sw2345` had the round's best selection t1 (86.92 vs `sw234`'s 86.50) and is
+*worse* on full val (88.51 vs 88.69, ≤3 −0.41). Every promotion in this phase
+must be read off the full battery; the selector orders checkpoints within a run,
+not runs against each other.
+
+**(d) Where that leaves the campaign: no single arm clears everything.**
+`sw234` takes all five val bars and misses three layout bars by 0.25 / 0.25 /
+0.96 (dvorak, azerty, spanish). `sw2345` takes four of six layout bars and
+misses two val bars by 0.01 / 0.36. Every one of those misses is inside the
+~1 pt single-seed floor against bars that are 3-seed means, so **the difference
+between "misses by 0.25" and "clears" is a seed question, which is exactly what
+the 3-seed run answers.** Launched on that basis: `sw234` s4321 + s7777 (both
+with `--snapshot-every 4` for the soup), plus `sw234-p80` — the dose repair,
+since §5.1b established dose as the euro lever and `sw234`'s misses are two
+euro corpora plus dvorak.
+
 ## 6.5 `phaseJ-ru192` — the Cyrillic capacity rung is a NEGATIVE
 
 ch 192 / 188 k / synth-only vs the `phaseIB-ru-synth` bar (ch 80 / 94 k), both
