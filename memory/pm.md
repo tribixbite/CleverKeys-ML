@@ -884,7 +884,20 @@ int8-trunk free at ch256), latency <50ms (trivially met).
       2-3h): CR-CTC | shear+rot | time-reversal | frame-hold; data arms:
       swipe2345q @ ch192-p65 paired vs phaseI-ch192-p65; HWS-Y @ ch80;
       realalt @ ch80 (+ its own holdout eval).
-- [ ] J6 checkpoint soup (beam-t1-selected greedy soup + BN re-estimation
+- [x] J6 checkpoint soup — DONE, POSITIVE: +0.50 selection t1 / +0.38 full-val
+      t1 (4 members, BN re-estimated) but -0.12 t3 / -0.15 t5. Candidate for
+      the final artifact, must be re-measured on the winner. Stack seeds carry
+      --snapshot-every 4.
+- [x] J4b CR-CTC — RETRACTED after round 3: the +3.13 dvorak at ch80 becomes
+      -1.63 at ch192 and wrecks the euro corpora at ch256. Lever dropped.
+- [x] J7a ru-only rung — NEGATIVE: ch192/188k = 73.53 in-dict t1 vs the
+      ch80/94k bar's 76.21, while greedy improves +3.11. Synthetic train AND
+      synthetic selection => generator overfitting; last.pt refutes the
+      selector explanation. 76.21 stands.
+- [~] J8a 3 seeds of the leading candidate sw234 (s4321/s7777 running with
+      snapshots; s1234 already measured) + sw234-p80 dose repair, + futoaug
+      and joint en+ru still in flight.
+- [ ] J6-old checkpoint soup (beam-t1-selected greedy soup + BN re-estimation
       before export fold) on the best completed run — offline script.
 - [ ] J7 multi-script: joint en+ru-synth arm (per-row layout batching);
       eval en full suite + ru real-val (EVAL-ONLY per YANDEX_LICENSE). If
