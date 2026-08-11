@@ -398,6 +398,29 @@ stage depend on a babysitter process.** Batteries are cheap to re-run by hand
   and gives `phaseJ-joint` both). So the whole of rounds 2–4 — train **and**
   eval — completes with no orchestrator attached; a successor's first act
   should be `jsum.py` over the finished runs plus `tail` of the `*.launch.log`s.
+**Decision rule for the round-3 landing (written in advance so a successor does
+not have to re-derive it).** Run `phaseJ_eval.sh` on each arm as it lands, then:
+
+1. `sw234-cr` is the presumptive winner **iff** it keeps `sw234`'s val gain
+   (≥ +0.2 t1 over `resbn192i` s1234) *and* repairs the transfer bill (dvorak
+   back to ≥ 90.0, azerty ≥ 84.0). `cr192` is its attribution control: if
+   `cr192` alone already shows the transfer repair at ch 192, the stack claim is
+   clean; if `cr192` shows the ch-80 gain vanishing at capacity, then any
+   `sw234-cr` transfer is a data×CR interaction and must be labelled as such.
+2. If `sw2345` beats `sw234` on val without further transfer loss, the stack
+   base becomes sw234+sw5q.
+3. `cr256-p80` is promoted only if it clears **both** the euro bars and dvorak
+   ≥ 89.13 — that is the whole reason the arm exists. At ~2.6× the ship bytes it
+   needs int8-trunk to make ≤5 MB, so it must win by more than a tenth.
+4. **Then 3 seeds (1234/4321/7777) of the single winner, not of several.** The
+   campaign's remaining GPU is the binding resource and every bar is a seed-mean
+   bar; a second candidate at 3 seeds costs a full day.
+5. Anything decided by < ~1 pt on one seed is a paired-seed question, not a
+   verdict (the standing rule, and §5.1b is the phase's example of it biting).
+
+Launch-ready and unscheduled: `phaseJ-futoaug`, `phaseJ-joint` (both in
+`phaseJ_round4.sh`), and the ch 256 dose paired seeds (§5.1b).
+
 * Still unstarted and needing a decision-maker: the checkpoint soup (supply is
   accumulating in `ckpt/phaseJ-ch256-280k/`, `soup_checkpoints.py --run`), the
   winner stack + 3 seeds, preset sweeps, the pre-registered unsealing, docs.
