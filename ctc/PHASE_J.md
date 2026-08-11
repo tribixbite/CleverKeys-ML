@@ -594,23 +594,31 @@ Yandex training rows.
 
 | axis | joint | reference | Δ |
 |---|---|---|---|
-| ru in-dict t1 (app-ru 50 k, E1, real Yandex val) | **≈77.4**\* | 76.21 bar | **≈+1.2** |
+| ru in-dict t1 (app-ru 50 k, E1, real Yandex val, n=8,471 decoded) | 76.56 | **76.21 bar** | +0.35 |
+| ru in-dict t3 / t5 | 88.16 / 91.12 | 88.53 / 91.42 | **−0.37 / −0.30** |
+| ru greedy | 23.68 | 37.07 | **−13.39** |
 | en val t1 | 87.90 | 88.32 (`resbn192i` s1234) | **−0.42** |
 | en val t3/t5/≤3/4+ | 92.49/93.24/90.50/86.55 | 92.70/93.25/91.21/86.83 | −0.21/−0.01/−0.71/−0.28 |
 
-\* 2,000-row running figure; final pending.
+**Correction to a figure this document briefly carried.** The running 2,000-row
+number was 77.40 and an earlier revision of this section reported the ru result
+as "≈77.4, ≈+1.2 over the bar". The completed 9,416-row decode is **76.56**.
+The running figure was an early-rows artefact and the claim built on it was
+wrong; it is corrected here rather than quietly amended.
 
-**The stretch goal was "joint en+ru single model without en regression > 0.3",
-and −0.42 exceeds it.** So the honest verdict is: a single model serving both
-scripts is *feasible and beats the Cyrillic bar*, but not free — it costs 0.42
-en t1 and 0.71 on short words. It is **not adopted** under the stated
-tolerance, and it is reported as the best Cyrillic result the campaign
-produced.
+**Verdict: the joint model does not beat the Cyrillic bar, and it fails the en
+tolerance.** +0.35 on ru t1 is inside one binomial SE (±0.46 at n = 8,471), and
+t3/t5 are *behind* the bar, so the ru axis is a **tie at best**. The en side is
+−0.42 t1 against a stated tolerance of 0.3. Two scripts in one 65-wide head is
+demonstrably *feasible* — and the greedy collapse (37.07 → 23.68) shows what it
+costs: the shared head's per-slot emissions get much blurrier, and only the
+lexicon beam hides it. **Not adopted.**
 
-This also completes the ru story: **capacity on synthetic data alone made ru
-worse (§6.5), and real cross-script data made it better** — consistent with the
-generator-overfitting diagnosis, and the reason the joint arm was the predicted
-route once `ru192` failed.
+This closes the ru story without a win: **capacity on synthetic data made ru
+worse (§6.5), and real cross-script data did not make it reliably better.**
+`phaseIB-ru-synth`'s 76.21 stands as the shippable Cyrillic number, and the
+campaign's Cyrillic bar is **NOT beaten** — one of the two stones left standing
+(§9).
 
 ## 7. Continuity protocol (after the 2026-08-10 and 2026-08-11 orchestrator losses)
 
