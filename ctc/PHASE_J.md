@@ -283,7 +283,76 @@ Composition notes: the yfix arm swaps the base's `train_t3 + hws×2` for
 that is far below the noise floor; the realalt heldouts stop being zero-shot for
 that arm only (§3.3 keeps the zero-shot floors for everything else).
 
-## 7. Continuity protocol (after the 2026-08-10 orchestrator loss)
+### 6.1 Round-2 battery — one clear promote, one clear reject, two closed axes
+
+Seed 1234, full battery, same footing as §5.1. Δ columns are against
+`resbn192i` s1234 (the paired same-seed base), except `ch256-280k`, which is
+paired against `phaseJ-ch256-p65` (its own 188 k twin).
+
+| arm | val t1/t3/t5/≤3/4+ | Δval | dvorak | azerty | qwertz | german | spanish | dvorak-app | clearflow | kasroz |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| `resbn192i` s1234 | 88.32/92.70/93.25/91.21/86.83 | — | 90.60 | 84.59 | 82.73 | 79.76 | 88.85 | 89.17 | 91.08* | 90.19* |
+| **`phaseJ-sw234`** | **88.69/92.66/93.30/91.32/87.32** | **+0.37/−0.04/+0.05/+0.11/+0.49** | 88.85 | 83.35 | 82.90 | 80.40 | 87.32 | 88.60 | 91.80 | 90.05 |
+| `phaseJ-realalt` | 88.42/92.70/93.37/91.35/86.89 | +0.10/0.00/+0.12/+0.14/+0.06 | 88.89 | 83.11 | 83.91 | 80.45 | 87.49 | 88.44 | 96.35† | 94.89† |
+| `phaseJ-yfix` | 87.43/91.94/92.72/90.50/85.83 | **−0.89/−0.76/−0.53/−0.71/−1.00** | 87.46 | 82.58 | 81.97 | 79.49 | 88.40 | 86.69 | 89.16 | 92.47 |
+| `phaseJ-ch256-280k` | 88.61/92.66/93.38/91.30/87.21 | −0.08/−0.09/+0.01/+0.09/−0.17 ‡ | 88.60 | 82.92 | 81.89 | 78.76 | 87.88 | 87.67 | 91.08 | 90.19 |
+
+\* §3.3 zero-shot floors. † in-domain for this arm (its train splits were
+trained on) — **not** a transfer number. ‡ vs `phaseJ-ch256-p65`, not the base.
+
+**(a) `sw234` is the phase's best result so far: it sweeps all five val bars on
+a single seed, at ch 192.** 88.69/92.66/93.30/91.32/87.32 vs the 3-seed bars
+88.30/92.60/93.26/91.27/86.77 → +0.39/+0.06/+0.04/+0.05/+0.55, and against its
+own paired seed +0.37 t1 / +0.49 4+. It reaches **exactly `phaseJ-ch256-p65`'s
+val t1 (88.69) with 57 % of the parameters** — 101,842 rows of genuinely new
+data convert as efficiently as 76 % more width, and unlike width they cost
+nothing at inference. The bill is transfer: dvorak −1.75, azerty −1.24, spanish
+−1.53 (qwertz +0.17, german +0.64, dvorak-app −0.57). **Promoted into the
+stack**, with the transfer debt to be paid by CR-CTC (§5.1c) — hence the
+`sw234-cr` arm in round 3.
+
+**(b) `realalt` is val-neutral-to-positive but not worth its price.** All five
+val metrics move +0.00…+0.14 — real alt-geometry rows do not hurt QWERTY. The
+clearflow/kasroz jumps (+5.3 / +4.7) are **in-domain**, exactly what training on
+their train splits should produce, and they are not evidence of transfer. On the
+corpora that stayed held-out the picture is mixed and net-negative (dvorak
+−1.71, azerty −1.48, spanish −1.36 against qwertz +1.18, german +0.69). Verdict:
+**kept out of the stack** — the arm buys tenths of val and costs the campaign
+its only two never-seen real-layout eval corpora, which are worth more as
+measurement than as 2.5 % of the training mix.
+
+**(c) `yfix` is rejected — and the arm cannot answer the question it was built
+for.** Every val metric drops (−0.53…−1.00, the largest coherent negative in the
+phase) and transfer drops with it. The §3.2 caveat was pre-registered and it
+binds: **the val HWS half keeps the uncorrected frame**, so a train-side-only
+correction is penalised by construction, and this experiment cannot separate
+"the ×7/6 scale is wrong" from "train and benchmark now disagree about the HWS
+frame". The swipetest-geometry derivation in §3.2 still looks right on the data;
+acting on it would require re-framing the HWS half of val-9918, which would void
+comparability with every number in Phases A–I. **Not adopted, question left
+open, reason recorded.**
+
+**(d) The ch 256 underfit signal did not convert — the schedule axis is
+closed.** PHASE_I §5 flagged ch 256 as unsaturated at 188 k (train loss still
+falling, best checkpoint at epoch 39 of 41). Giving it 49 % more schedule
+(280 k) produces a tie at best: −0.08/−0.09/+0.01/+0.09/−0.17 against its own
+188 k twin, and dvorak −1.06 / dvorak-app −1.22. Train-loss headroom at this
+scale is not val headroom. (Its clearflow/kasroz land on 91.08/90.19, digit-for
+-digit the §3.3 zero-shot floors — a coincidence of the lexicon beam, since the
+greedy numbers differ by up to 5.8 pt; flagged here so nobody later reads it as
+a copy error.) The arm's `--snapshot-every 4` supply is still the material for
+the checkpoint soup (J6).
+
+## 6.2 Arms in flight (round 3, launched 2026-08-11 00:12, seed 1234)
+
+| arm | question |
+|---|---|
+| `phaseJ-cr192` | CR-CTC α 0.2 at the ship width, paired vs `resbn192i` — does the ch 80 transfer gain (§5.1c) survive capacity? |
+| `phaseJ-sw2345` | does the data lever keep converting? sw234 + sw5q (+24,707) |
+| **`phaseJ-sw234-cr`** | **the stack candidate**: the val lever (§6.1a) + the transfer lever (§5.1c) |
+| `phaseJ-cr256-p80` | the frontier bundle: CR-CTC on the only ch 256 dose that clears the euro bars (§5.1b) |
+
+## 7. Continuity protocol (after the 2026-08-10 and 2026-08-11 orchestrator losses)
 
 Trainings are launched **detached** (`nohup setsid` + per-run
 `ckpt_<run>.launch.log`) so an orchestrator death cannot kill them; the
@@ -293,7 +362,16 @@ resumed with `--resume ckpt/<run>/last.pt` under the **identical** run name and
 args. State is committed at every milestone so a successor can take over from
 this file alone.
 
-**Queued work (all detached, no orchestrator needed to keep it alive):**
+**What actually survives an orchestrator death (measured twice, 2026-08-10 and
+2026-08-11):** `nohup setsid` **trainings survive** — every round-1 and round-2
+arm finished after its orchestrator died. Long-lived **waiter/queue shell
+scripts do NOT** — `phaseJ_queue3/4.sh` and the `phaseJ_eval_round34.sh` chain
+were all gone after the second loss, so rounds 3-4 never auto-started and four
+GPU-hours idled. **Rule: launch the work itself detached; never let a queued
+stage depend on a babysitter process.** Batteries are cheap to re-run by hand
+(`phaseJ_eval.sh <run>`), so run them from a live orchestrator, not a chain.
+
+**Queued work:**
 
 * `phaseJ_queue3.sh` — waits for the three 188 k round-2 arms to print
   `reached step budget`, then `exec`s `phaseJ_round3.sh` (`phaseJ-cr192`,
