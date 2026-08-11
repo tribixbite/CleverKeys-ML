@@ -431,7 +431,7 @@ Alt-layout az26 in-dict, E1. Bars in the header row.
 |---|---|---|---|---|---|---|---|
 | `resbn192i` s1234 | 88.32 | 90.60 | 84.59 | 82.73 | 79.76 | 88.85 | 89.17 |
 | `phaseJ-sw234` | **88.69** | 88.85 | 83.35 | 82.90 | 80.40 | 87.32 | 88.60 |
-| `phaseJ-sw2345` | 88.51 | **91.09** | 84.02 | 82.14 | **80.76** | 88.00 | — |
+| `phaseJ-sw2345` | 88.51 | **91.09** | 84.02 | 82.14 | **80.76** | 88.00 | **89.05** |
 | `phaseJ-cr192` | 88.12 | 88.97 | 84.59 | 81.47 | 80.26 | 88.34 | 87.63 |
 | `phaseJ-sw234-cr` | 87.81 | 89.34 | 84.40 | 82.48 | 80.13 | 88.23 | 88.89 |
 | `phaseJ-cr256-p80` | 88.10 | 89.42 | 82.30 | 81.97 | 78.67 | 86.86 | 88.85 |
@@ -476,6 +476,26 @@ the 3-seed run answers.** Launched on that basis: `sw234` s4321 + s7777 (both
 with `--snapshot-every 4` for the soup), plus `sw234-p80` — the dose repair,
 since §5.1b established dose as the euro lever and `sw234`'s misses are two
 euro corpora plus dvorak.
+
+Tallying the shortfalls once `sw2345`'s app-trie number landed (89.05, clearing
+that bar) makes the choice between the two closer than clause 2 of the rule
+assumed, and in `sw2345`'s favour on the criterion that actually matters —
+**worst single shortfall**:
+
+| candidate | bars cleared | misses | worst miss |
+|---|---|---|---|
+| `sw234` | 8 / 11 | dvorak −0.28, azerty −0.25, spanish −0.96 | **0.96** |
+| `sw2345` | 7 / 11 | t3 −0.01, ≤3 −0.36, qwertz −0.36, spanish −0.28 | **0.36** |
+
+`sw234` clears more bars; `sw2345` is never far from any of them and carries the
+larger margins where it wins (dvorak +1.96, german +1.12). Since the two differ
+by 24,707 rows (2 % of the mix) and their biggest gap is on dvorak — the axis
+with a 5 pt measured seed spread — **most of that 2.24 pt dvorak difference is
+probably noise, and one seed cannot pick between them.** Rather than let the
+committed rule's val-only clause 2 decide a question it was not written for,
+`sw2345` s4321 was launched alongside, so the choice is made on paired seeds.
+Cost: a 6th concurrent arm (~17 % slower for everything). Recorded as a
+deliberate departure from the pre-written rule, with the reason.
 
 ## 6.5 `phaseJ-ru192` — the Cyrillic capacity rung is a NEGATIVE
 
