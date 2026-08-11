@@ -1,6 +1,8 @@
 # APP_INTEGRATION_PLAN — wiring the CTC swipe engine into CleverKeys (G3 + G5)
 
-**Date:** 2026-08-08
+**Date:** 2026-08-08 · **Updated:** 2026-08-11 (Phase J — see **§7**, which carries
+the post-Phase-J model menu, the Cyrillic λ finding, the fixture state, and the
+multi-script verdict; §7 supersedes D1, §1(d), §1(e) and O1 where they disagree).
 **Scope:** exact, apply-nearly-verbatim diffs for the app repo
 (`/home/will/git/swype/CleverKeys`, READ-ONLY for this session — nothing there was
 modified). All facts below were verified against app-repo HEAD `79ddfb0f` and this
@@ -31,6 +33,14 @@ sha256 `a18ea58cd662b0e18b6daadaf417361f93fd0b146ce6478d4d6a62e7e185fa8a`,
 | D6 | Routing | new `Mode.CTC`: QWERTY-Latin → `Engine.CTC`, every other layout → `Engine.GEOMETRIC` (same non-QWERTY coverage as HYBRID, so selecting CTC never silently kills swipe on other layouts) |
 | D7 | Default engine | stays `neural`; `ctc` is opt-in via the existing Prediction Engine dropdown (4th option) |
 | D8 | Runtime | existing `onnxruntime-android:1.20.0` through the existing `ModelLoader` (XNNPACK-first chain, `onnx_xnnpack_threads` pref respected). No new runtime, no new proguard rules needed |
+
+**D1 is stale as of 2026-08-11 and is left standing only as the record of what was
+decided on 2026-08-08.** Phase G added `resbn80g` (test-validated, 1.14 MB) and
+Phase J added `sw2345` (best measured accuracy, **not** test-validated). The
+current menu, with evidence tiers, is **§7.1**. D2's E1 preset still holds for the
+Phase-J finalist on the benchmark footing (§7.1), but the app-trie λ question
+(O3/§7.1) is open for it. Every other decision (D3–D8) is unaffected: the finalist
+is architecturally identical to what D1 assumed, same frozen I/O contract.
 
 ---
 
@@ -1800,6 +1810,99 @@ user-reachable at commit 4.
   than a decision.
 
 ---
+
+## 7. Phase J update (2026-08-11) — new candidate, and one free win that needs no model change
+
+Full record: `PHASE_J.md`. Two items here are actionable by the app; one is a
+model swap that needs an owner decision, the other is a decode constant that
+does not.
+
+### 7.1 The free win: the Cyrillic decode λ is mistuned — worth ≈ +1.2 t1 today
+
+**This requires no new model.** Every Cyrillic number this campaign ever
+published, including the 76.21 bar, was decoded at the English benchmark
+preset's `lambda = 1.1`. But the app's bundled **langpack-ru CKDT v2** lexicon
+stores `freq = 255 − rank` — the compressed CKDT scale that `PHASE_I.md` §7.4
+already showed wants a *larger* λ. Nobody had ever swept λ per language
+(`PHASE_I_DATA.md` disclosed the gap).
+
+Swept symmetrically over both ru models, tuned on ru val rows 0:4708 and
+confirmed on the untouched 4708:9416 (`PHASE_J.md` §6.9):
+
+| λ | shipped synth-only ru model, tune / confirm |
+|---|---|
+| 1.1 (what ships today) | 75.73 / 76.70 |
+| **2.0** | **76.91 / 77.92** |
+| 3.0 | 75.82 / — |
+| 4.0 | 73.88 / — |
+
+**+1.2 in-dict t1 on both halves. The correct expected Cyrillic accuracy is
+≈ 77.4, not the 76.21 currently documented.** The lever is model-independent
+(it lifted the joint challenger by the same amount), so it is a pure decode
+constant, available on the model already installed.
+
+**Where it has to live — this is a real code change, not a config edit.**
+`CtcScoringParams` (`src/main/kotlin/tribixbite/cleverkeys/swipe/ctc/CtcScoringParams.kt`)
+is keyed by **model signature**, not by language: the factories are
+`encoderOnly()`, `encoderDecoder()` and `fallback()`, each a fixed constant set
+ported from FUTO's `scoring.json`. **There is no per-language axis today.**
+Adopting this finding means adding one — the minimal shape being a λ override
+selected by the active langpack/script alongside the existing signature key, so
+Latin scripts keep their tuned λ and Cyrillic gets 2.0. Nothing else in the
+preset moves.
+
+**Caution, stated because it interacts:** no evaluation in this campaign
+included a **user dictionary**, and λ multiplies the frequency term, so a larger
+λ amplifies top-of-scale injected competitors (`PHASE_G.md` §6). The
+user-dictionary v1 fix (see §7.3) is unshipped; if it lands, λ = 2.0 should be
+re-confirmed with user-dictionary entries present rather than assumed to carry.
+
+### 7.2 The new model candidate: `sw2345` — better, and NOT test-validated
+
+| | value |
+|---|---|
+| ship artifact | `artifacts/sw2345_s1234_fp16w.onnx`, **3,052,318 B (2.91 MiB)** |
+| sha256 | `2e820c121fc69ae95a9b2e22444fe14c47f5c5253df4696a0d0a432e364fc7b8` |
+| fp32 reference | `artifacts/sw2345_s1234.onnx`, 6,068,519 B, sha256 `96dd27ece698fa981530639700e66e0689acd2d3f024ad214e8a79b3fa083a30` |
+| params / latency | 1,512,802 / 0.842 ms mean, 0.859 p90 (encoder only) |
+| architecture | **identical** to the `resbn192i` candidate — `resbn:192:1,2,4,8`, embed_hid 96, T′ = 32, the same frozen `[1,32,·]` I/O contract |
+| decode preset | **E1 unchanged** (`gamma 1.05, lambda 1.1, beta 0.2, gammaPrune 0.3734, betaPrune 0.9882`) |
+| 3-seed val-9918 | 88.51 / 92.67 / 93.37 / **91.20** / 87.11 |
+| alt-layouts (3-seed) | dvorak 89.87, dvorak-app 88.98, azerty 83.81, qwertz 83.01, german 80.64, spanish 88.45 — **all six bars beaten** |
+
+**Integration is a file swap: no code change.** The whole Phase-J gain is
+training data (two new FUTO pools, 126,549 extra rows); the graph, the contract
+and the preset are unchanged.
+
+**Evidence tier — read this before adopting.** `sw2345` is **val + alt-layout
+validated only. It is NOT test-validated.** Phase J's terminal condition was
+*not* met: the `≤3` val stratum missed its bar by 0.07, so under the campaign's
+own pre-registered rule **test-2400 was not unsealed** — no pre-registration was
+filed and no seal-ledger entry appended. **`resbn80g` remains the only
+test-validated model.** Adopting `sw2345` therefore means promoting a val-only
+model over a test-validated one; that is the owner's call, not a default.
+
+A **golden fixture regenerated from `sw2345` at the ship preset is required
+before adoption** (the `MODEL_COMPARISON.md` §5.1 rule). One has been generated
+as `artifacts/sw2345_s1234_golden_CANDIDATE.json` and deliberately does **not**
+replace `ctc_model_golden.json`, precisely because adoption is undecided.
+
+### 7.3 User-dictionary v1 fix — still unshipped
+
+`RESEARCH_SCAN.md`'s on-device personalization v1 remains the reference design
+and is **not implemented**. It matters twice over here: no campaign eval had a
+user dictionary at all, so every published number is a no-user-dictionary
+number, and §7.1's λ increase makes the frequency term stronger, which is
+exactly the axis injected user words sit on.
+
+### 7.4 Multi-script status — separate per-script models remain the plan
+
+A joint en+ru single model was built and measured (`PHASE_J.md` §6.8): one
+65-wide per-key-slot head serves both scripts, which works. It **ties** the
+Cyrillic bar at best (76.56 vs 76.21 at λ 1.1; 78.23 vs 77.92 on the confirm
+half at λ 2.0, inside one binomial SE) and costs **−0.42 en t1** against a
+stated 0.3 tolerance, with greedy collapsing 37.07 → 23.68. **Feasible, not
+adopted.** Per-script models stay the plan.
 
 ## Appendix A — this repo's supporting change (already committed alongside this plan)
 
