@@ -401,6 +401,56 @@ Consequence for the campaign: **the 3-seed stack runs must carry
 the t3/t5 giveback means the soup is a *candidate* for the final artifact, not
 an automatic win, and it must be re-measured on the winner rather than assumed.
 
+## 6.4 Round-3 partial — the val side (alt-layouts still decoding)
+
+Seed 1234, full val-9918 (E1/AOSP). `resbn192i` s1234 = 88.32/92.70/93.25/
+91.21/86.83 is the paired base.
+
+| arm | val t1/t3/t5/≤3/4+ | greedy | Δ vs base | Δ vs its own no-CR twin |
+|---|---|---|---|---|
+| `phaseJ-sw234` (round 2) | 88.69/92.66/93.30/91.32/87.32 | 72.5 | +0.37/−0.04/+0.05/+0.11/+0.49 | — |
+| `phaseJ-cr192` | 88.12/92.33/93.16/91.27/86.49 | 72.2 | −0.20/−0.37/−0.09/+0.06/−0.34 | (is the twin) |
+| `phaseJ-sw234-cr` | 87.81/92.32/93.03/90.71/86.31 | 72.5 | −0.51/−0.38/−0.22/−0.50/−0.52 | **−0.88/−0.34/−0.27/−0.61/−1.01** vs `sw234` |
+
+**CR-CTC's val cost reproduces at ch 192 (−0.20 t1, same as ch 80's −0.20) —
+but stacked on the sw234 data it costs four times that (−0.88 t1, −1.01 4+).**
+The two levers are not additive on the val axis; there is a negative
+data×consistency interaction. A plausible reading: the consistency term
+regularises toward geometry-invariance, and the extra 101,842 rows were already
+supplying part of that invariance, so the second dose of it is pure capacity
+tax. Whether the transfer side pays for it is what the alt-layout decode (still
+running) has to answer — under the §7 decision rule `sw234-cr` has already
+failed clause 1 (it must keep ≥ +0.2 t1 over base and it is −0.51), so it can
+only survive on an exceptional transfer result.
+
+## 6.5 `phaseJ-ru192` — the Cyrillic capacity rung is a NEGATIVE
+
+ch 192 / 188 k / synth-only vs the `phaseIB-ru-synth` bar (ch 80 / 94 k), both
+greedy-selected on the *synthetic* ru val, both decoded against the real
+Yandex val rows with the app ru-50k trie at E1 (Yandex is **eval-only**, no
+training rows, per `YANDEX_LICENSE`):
+
+| | in-dict t1 | t3 | t5 | greedy |
+|---|---|---|---|---|
+| `phaseIB-ru-synth` (ch 80, 94 k) — **the bar** | **76.21** | **88.53** | **91.42** | 37.07 |
+| `phaseJ-ru192` (ch 192, 188 k) | 73.53 | 86.80 | 90.17 | **40.18** |
+| Δ | **−2.68** | −1.73 | −1.25 | **+3.11** |
+
+**More capacity and twice the schedule made the emissions better and the
+answers worse.** The greedy number — which is measured against the same
+synthetic-generator distribution the model trained on — improves by 3.1 pt,
+while every real-data lexicon-beam metric falls. The natural reading is
+**overfitting to the synthetic generator**: with a purely synthetic training
+set *and* a purely synthetic selection set, nothing in the loop can see the
+real-data gap widening, and capacity spends itself on generator artefacts.
+(A `last.pt`-vs-`best.pt` probe is running to separate this from a pure
+checkpoint-selection failure; either way the rung does not ship.)
+
+**Consequence: 76.21 stands as the shippable Cyrillic number**, and the ru path
+does not scale by adding capacity to synthetic data. The remaining live route
+to beating it is `phaseJ-joint` (en+ru in one model, where the en half supplies
+real traces to the shared trunk) — running.
+
 ## 7. Continuity protocol (after the 2026-08-10 and 2026-08-11 orchestrator losses)
 
 Trainings are launched **detached** (`nohup setsid` + per-run
