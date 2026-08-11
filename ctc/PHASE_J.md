@@ -911,8 +911,19 @@ axis:
 | `artifacts/sw2345_s1234.onnx` | `96dd27ece698fa981530639700e66e0689acd2d3f024ad214e8a79b3fa083a30` |
 | `artifacts/sw2345_s1234_fp16w.onnx` | `2e820c121fc69ae95a9b2e22444fe14c47f5c5253df4696a0d0a432e364fc7b8` |
 
-<!-- TODO(fp16w-val): full val-9918 decode of the fp16w artifact is running;
-     the ship claim is not final until it lands within 0.02 of the fp32 row. -->
+**fp16w accuracy: measured, and free.** Full val-9918 (E1/AOSP) decoded through
+the fp16w artifact itself:
+
+| | t1 | t3 | t5 | ≤3 | 4+ | greedy |
+|---|---|---|---|---|---|---|
+| `sw2345_s1234` fp32 | 88.51 | 92.59 | 93.35 | 90.91 | 87.26 | 72.08 |
+| `sw2345_s1234_fp16w` | 88.51 | 92.58 | 93.35 | 90.91 | 87.26 | 72.08 |
+| Δ | 0.00 | −0.01 | 0.00 | 0.00 | 0.00 | 0.00 |
+
+So the 2.30e-02 weight-rounding residue above is real in the emissions and
+invisible after the lexicon beam — the fp16w halving is free on accuracy for
+this model too, now on its own measurement rather than inherited from
+`resbn192i`'s. The one honest asterisk stays the 3 % latency difference.
 
 ## 7. Continuity protocol (after the 2026-08-10 and 2026-08-11 orchestrator losses)
 
