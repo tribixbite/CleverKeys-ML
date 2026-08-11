@@ -894,7 +894,25 @@ int8-trunk free at ch256), latency <50ms (trivially met).
       ch80/94k bar's 76.21, while greedy improves +3.11. Synthetic train AND
       synthetic selection => generator overfitting; last.pt refutes the
       selector explanation. 76.21 stands.
-- [~] J8a 3 seeds of the leading candidate sw234 (s4321/s7777 running with
+- [x] PHASE J CLOSED 2026-08-11 — TERMINAL CONDITION **NOT MET** (10/11 bars).
+      Finalist sw2345 = resbn192i + tier_sw234 + tier_sw5q, 3 seeds:
+      val 88.51/92.67/93.37/91.20/87.11 (bars +0.21/+0.07/+0.11/**-0.07**/+0.34)
+      and ALL SIX alt-layouts beaten (+0.17..+1.00). The <=3 stratum misses by
+      0.07 (two rows of 3,389). Cyrillic bar 76.21 NOT beaten.
+      test-2400 NOT unsealed, no pre-registration filed, no seal entry —
+      the gate precondition never came true. resbn80g keeps the test tier.
+      Ship bytes: sw2345_s1234_fp16w.onnx 3,052,318 B (2.91 MiB), 0.842 ms.
+      FREE WIN FOR THE APP: ru decode lambda 1.1 -> 2.0 is worth ~+1.2 in-dict
+      t1 on the ALREADY-SHIPPED Cyrillic model (correct number ~77.4, not
+      76.21). Model-independent; costs nothing.
+      Negatives, all recorded with evidence: CR-CTC (ch80-only, reverses at
+      capacity), FUTO-parity augs, HWS y-fix, ch256 280k schedule, ru capacity
+      rung, checkpoint soup (does not generalise), layout-alt p0.8, joint en+ru
+      (-0.42 en), stratum-aware decode preset (+0.03).
+      Remaining routes for the <=3 stone are candidate-generation-side:
+      T'=64 (contract-breaking), length-conditioned beam width, <=3-weighted
+      training signal. See PHASE_J.md sections 8-9.
+- [x] J8a-done 3 seeds of the leading candidate sw234 (s4321/s7777 running with
       snapshots; s1234 already measured) + sw234-p80 dose repair, + futoaug
       and joint en+ru still in flight.
 - [ ] J6-old checkpoint soup (beam-t1-selected greedy soup + BN re-estimation
