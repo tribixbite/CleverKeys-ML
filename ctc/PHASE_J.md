@@ -700,6 +700,40 @@ worse (§6.5), and real cross-script data did not make it reliably better.**
 campaign's Cyrillic bar is **NOT beaten** — one of the two stones left standing
 (§9).
 
+## 6.9 Last stone, ru side: the per-language preset is real and model-independent
+
+`PHASE_I_DATA` disclosed that per-language preset sweeps were never run, so
+**every ru number in this campaign — the 76.21 bar included — was decoded at
+E1's λ = 1.1**, while the app ru lexicon stores `freq = 255 − rank`, the
+compressed CKDT scale that `PHASE_I` §7.4 showed wants a larger λ. Swept
+symmetrically over both ru models, tuned on val rows 0:4708, confirmed on the
+untouched 4708:9416 (`eval_cyrillic.py --rows`, commit `3ba69ab`):
+
+| λ | `phaseIB-ru-synth` tune / confirm | `phaseJ-joint` tune / confirm |
+|---|---|---|
+| 1.1 (as published) | 75.73 / 76.70 | 76.77 / 76.34 |
+| **2.0** | **76.91 / 77.92** | **77.83 / 78.23** |
+| 3.0 | 75.82 / — | 76.39 / — |
+| 4.0 | 73.88 / — | 74.50 / — |
+
+**The lever is real and it holds out of sample: λ = 2.0 is worth +1.2 to the
+bar-holder on both halves and +1.1 / +1.9 to the challenger.** The published
+Cyrillic figure was under-tuned; **the honest ru number for the shippable
+synth-only model is ≈ 77.4, not 76.21** — a full point of free accuracy for the
+app's Cyrillic path, and the most useful thing this stone turned up.
+
+**But it does not move the verdict, because it lifts both models.** Under
+symmetric optimisation at λ = 2.0 the challenger leads by **+0.92 (tune) and
++0.31 (confirm)** on t1 — inconsistent in magnitude and, on the confirm half,
+well inside one binomial SE (±0.64 at n = 4,240) — while **losing t3 and t5 on
+that same half** (88.94 / 91.49 vs 89.50 / 92.00). Add the en cost that has not
+changed (−0.42 t1, tolerance 0.3) and the conclusion is unchanged:
+
+> **The ru stone STANDS.** The per-language preset is a genuine, previously
+> unturned lever worth ~1 pt of absolute Cyrillic accuracy to *whatever* model
+> is shipped; it is not a lever that lets the joint model beat the bar-holder,
+> because the bar rises with it.
+
 ## 7. Continuity protocol (after the 2026-08-10 and 2026-08-11 orchestrator losses)
 
 Trainings are launched **detached** (`nohup setsid` + per-run
