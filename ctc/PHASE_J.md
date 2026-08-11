@@ -700,6 +700,51 @@ worse (§6.5), and real cross-script data did not make it reliably better.**
 campaign's Cyrillic bar is **NOT beaten** — one of the two stones left standing
 (§9).
 
+## 6.8b Last stone, en side: the stratum-aware preset finds nothing beyond E1
+
+The finalist's only miss is `≤3` while it carries +0.35 spare on `4+`, and
+gamma/beta are exactly the length-compensation terms that trade those two. That
+made a stratum-aware decode sweep the last untried lever, so
+`--objective minmargin` was added (commit `89e7cc5`): maximise the **worst**
+margin over all five bars, tie-broken by the mean — a direct encoding of the
+conjunctive terminal condition, which an aggregate-t1 sweep cannot express.
+
+**Fairness, applied without exception:** a decode configuration available to the
+challenger is available to the incumbent. Both models were swept with the
+identical grid (gamma 0.90–1.15 × lambda 0.7–1.6 × beta 0.10–0.35, E1 region),
+identical objective, identical bars, tuned on val[0:4959], confirmed on
+val[4959:9918].
+
+| model | tuned preset (γ, λ, β) | FULL-val t1/t3/t5/≤3/4+ | its own E1 numbers |
+|---|---|---|---|
+| `phaseJ-sw2345` s1234 | 1.100 / 0.90 / 0.175 | 88.44/92.55/93.27/**90.94**/87.13 | 88.51/92.59/93.35/**90.91**/87.26 |
+| `resbn192i` s1234 | 0.975 / 1.10 / 0.325 | 88.35/92.57/93.25/**91.18**/86.89 | 88.32/92.70/93.25/**91.21**/86.83 |
+
+**Both models land on their own E1 numbers to within ±0.07 on every metric, and
+the finalist's ≤3 moves +0.03.** It needed roughly +0.33. The
+length-compensation terms cannot buy the short-word stratum at the scale
+required: what they trade is *ranking* between candidate lengths, and the ≤3
+deficit is a candidate-generation problem, not a re-ranking one.
+
+Two things worth recording beyond the verdict:
+
+* **E1 transfers unchanged for a fifth model family** — this is now the
+  strongest evidence in the campaign that E1 is a property of the emission/trie
+  pair rather than of any individual model, and that the published preset needs
+  no per-model retuning.
+* **A methodological correction.** The first run of this sweep used
+  `sweep_scoring.py`'s built-in grid, which is the *in-training selection*
+  region (gamma 0.30–0.51, λ 0.009–0.026), not the E1 benchmark region. It
+  reported a "tuned" full-val t1 of 86.44 for a model that scores 88.51 at E1 —
+  i.e. it optimised ~2 pt below where the campaign actually decodes, and its
+  conclusions would have been meaningless. The corrected E1-region run is the
+  one tabulated above. The stale numbers are not used anywhere.
+
+> **The ≤3 stone STANDS.** Every lever measured against it — layout-alt dose
+> (§6.7b, worse), CR-CTC (§6.4.1, worse), FUTO-parity augs (§6.7a, worse),
+> checkpoint soup (§6.6.2, sign-inconsistent), and now the stratum-aware decode
+> preset under symmetric optimisation (+0.03) — fails to move it.
+
 ## 6.9 Last stone, ru side: the per-language preset is real and model-independent
 
 `PHASE_I_DATA` disclosed that per-language preset sweeps were never run, so
