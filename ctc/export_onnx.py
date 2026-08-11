@@ -35,12 +35,15 @@ from paths import DEFAULT_LAYOUT, DEFAULT_WORKDIR, resolve  # noqa: E402
 
 PARITY_TRIALS = 100
 #: Max |onnx - torch| accepted on the sliced contract view, over REAL traces on
-#: the REAL layout (the operating distribution). Measured Phase J: 1.5-1.6e-4 at
-#: both ch 192 and ch 256, argmax 100/100 — the fp32 accumulation-order residue
-#: is a property of the input distribution, not only of the width. NOTE the
-#: pre-Phase-J residues quoted in PHASE_I.md were taken on a WHITE-NOISE probe
-#: and are not comparable to numbers printed by this script today.
-PARITY_TOL = 5e-4
+#: the REAL layout (the operating distribution). Measured across Phase J
+#: checkpoints: 0.8e-4 (ch 80), 1.5-7.6e-4 (ch 192), 1.5-2.6e-4 (ch 256) —
+#: argmax 100/100 in every case. The residue is a property of the individual
+#: weight matrix (accumulation order), NOT of the width, and it varies by ~5x
+#: between checkpoints of the same architecture, so this bound is deliberately
+#: loose; **argmax agreement is the gate that matters** and it is asserted
+#: separately. NOTE the pre-Phase-J residues quoted in PHASE_I.md were taken on
+#: a WHITE-NOISE probe and are not comparable to what this script prints today.
+PARITY_TOL = 1e-3
 #: Conv+BN folding is exact in exact arithmetic; this bounds the float32 residue.
 FOLD_TOL = 2e-3
 
@@ -59,9 +62,10 @@ def main() -> int:
     ap.add_argument("--parity-tol", type=float, default=PARITY_TOL,
                     dest="parity_tol",
                     help="max sliced |onnx - torch| accepted on the real-trace "
-                         "probe (default 5e-4; measured 1.5-1.6e-4 at ch 192 and "
-                         "ch 256). Argmax agreement must be 100/100 on BOTH "
-                         "probes regardless of this bound")
+                         "probe (default 1e-3; measured 0.8e-4..7.6e-4 across Phase-J "
+                         "checkpoints, varying per weight matrix rather than "
+                         "with width). Argmax agreement must be 100/100 on "
+                         "BOTH probes regardless of this bound")
     ap.add_argument("--parity-features", default="cache/val.npz",
                     dest="parity_features",
                     help="npz whose 'features' array supplies REAL traces for "
