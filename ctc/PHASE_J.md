@@ -525,7 +525,10 @@ against `best.pt`'s 73.53 / 86.80 / 90.17. The entire last stretch of the
 schedule sits ~2.7 pt under a model a third its size, so this is the training
 distribution, not the selector.
 
-**Consequence: 76.21 stands as the shippable Cyrillic number**, and the ru path
+**Consequence: 76.21 stands as the shippable Cyrillic number** *(superseded by
+§6.9: the ru decode preset was never language-tuned, and at λ = 2.0 the same
+model scores ≈ 77.4. The comparison in this section is unaffected — both sides
+were measured at λ = 1.1 — but the absolute figure to quote is §6.9's.)*, and the ru path
 does not scale by adding capacity to synthetic data. The remaining live route
 to beating it is `phaseJ-joint` (en+ru in one model, where the en half supplies
 real traces to the shared trunk) — running.
@@ -878,6 +881,10 @@ val-9918 (E1/AOSP) and az26 in-dict alt-layouts (E1).
 | spanish | 88.00 | 89.48 | 87.88 | **88.45** | 88.28 | **+0.17** ✓ |
 | clearflow (zero-shot) | 91.44 | 89.64 | 92.10 | **91.06** | — floor | — |
 | kasroz (zero-shot) | 91.40 | 91.40 | 93.41 | **92.07** | — floor | — |
+
+*(This section supersedes the two-seed figures in §6.6.1, which had `≤3` at
+91.08 / −0.20 and dvorak at 90.26. The third seed moved every one of them; where
+the two disagree, these are the numbers.)*
 
 **Ten of eleven bars fall. `≤3` misses by 0.07 pt** — two rows out of 3,389,
 averaged over three seeds. Note it is *closer* than the two-seed estimate
