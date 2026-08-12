@@ -339,21 +339,32 @@ def endpoint_proximity(rows, centers: np.ndarray) -> Dict[str, float]:
 # ── encoder ─────────────────────────────────────────────────────────────────────
 
 class OnnxEncoder:
-    """The exported ONNX graph — the on-device path (same class as eval_beam.py)."""
+    """The exported ONNX graph — the on-device path (same class as eval_beam.py).
 
-    def __init__(self, onnx_path: Path) -> None:
+    ``onnx_path`` may name several comma-separated exports (Phase K1
+    seed-ensemble): log-emissions are averaged across models BEFORE the beam
+    (see ``eval_beam.ensemble_average`` for the two modes and why 'logprob'
+    renormalizes)."""
+
+    def __init__(self, onnx_path, avg: str = "logprob") -> None:
         import onnxruntime as ort
         so = ort.SessionOptions()
         so.intra_op_num_threads = 1
         so.inter_op_num_threads = 1
-        self.sess = ort.InferenceSession(str(onnx_path), so,
-                                         providers=["CPUExecutionProvider"])
+        paths = onnx_path if isinstance(onnx_path, list) else [onnx_path]
+        self.sessions = [ort.InferenceSession(str(p), so,
+                                              providers=["CPUExecutionProvider"])
+                         for p in paths]
+        self.avg = avg
 
     def forward(self, feats: np.ndarray, keys: np.ndarray, mask: np.ndarray):
-        out = self.sess.run(["log_emissions"],
-                            {"features": feats[None], "layout_keys": keys[None],
-                             "layout_mask": mask[None]})
-        return out[0][0]                                        # [32, 65]
+        feed = {"features": feats[None], "layout_keys": keys[None],
+                "layout_mask": mask[None]}
+        outs = [s.run(["log_emissions"], feed)[0][0] for s in self.sessions]
+        if len(outs) == 1:
+            return outs[0]                                      # [T', 65]
+        from eval_beam import ensemble_average
+        return ensemble_average(outs, self.avg)
 
 
 # ── decode ──────────────────────────────────────────────────────────────────────
@@ -439,7 +450,11 @@ def main() -> int:
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--workdir", type=Path, default=DEFAULT_WORKDIR)
     ap.add_argument("--onnx", default="artifacts/ch128_s1234.onnx",
-                    help="exported encoder; relative paths resolve against this script")
+                    help="exported encoder; relative paths resolve against this "
+                         "script; comma-separate several for a K1 ensemble")
+    ap.add_argument("--ens-avg", choices=["logprob", "prob"], default="logprob",
+                    dest="ens_avg",
+                    help="ensemble averaging mode when --onnx lists >1 model")
     ap.add_argument("--layouts", default="dvorak,azerty,qwertz,german,spanish")
     ap.add_argument("--arm", action="append", default=[], choices=["az26", "full"],
                     help="key-slot arm (repeatable); default az26")
@@ -563,7 +578,11 @@ def main() -> int:
               + ("" if st["records"] < 0 else
                  f"  (records={st['records']}, untypeable dropped={st['untypeable']})"))
 
-    enc = OnnxEncoder(resolve(SCRIPT_DIR, args.onnx))
+    enc = OnnxEncoder([resolve(SCRIPT_DIR, p) for p in str(args.onnx).split(",")],
+                      args.ens_avg)
+    if len(str(args.onnx).split(",")) > 1:
+        print(f"ENSEMBLE of {len(str(args.onnx).split(','))} models, "
+              f"avg={args.ens_avg}")
     dump_dir = Path(args.dump) if args.dump else None
     if dump_dir:
         dump_dir.mkdir(parents=True, exist_ok=True)

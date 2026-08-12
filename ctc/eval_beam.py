@@ -81,21 +81,56 @@ class TorchEncoder:
                 lam.cpu().numpy()[0].reshape(-1))
 
 
-class OnnxEncoder:
-    """Run the exported ONNX graph (the on-device path)."""
+def _logsumexp(a: np.ndarray, axis: int) -> np.ndarray:
+    m = a.max(axis=axis, keepdims=True)
+    return (m + np.log(np.exp(a - m).sum(axis=axis, keepdims=True))).squeeze(axis)
 
-    def __init__(self, onnx_path: Path) -> None:
+
+def ensemble_average(logs: list, avg: str) -> np.ndarray:
+    """Average per-frame log-emissions across N models (Phase K1, eval-only).
+
+    ``avg='prob'``  arithmetic mean of probabilities: logsumexp over models
+                    − log N; normalized by construction.
+    ``avg='logprob'`` geometric mean: plain mean of log-emissions, then a
+                    log-softmax renormalization per frame. The renorm is NOT
+                    optional: the beam divides the CTC path score by len^gamma,
+                    so a per-frame additive constant does not cancel between
+                    candidates of different lengths.
+    """
+    stack = np.stack(logs, axis=0)                        # [N, T', 65]
+    if avg == "prob":
+        return (_logsumexp(stack, axis=0) - np.log(stack.shape[0])).astype(np.float32)
+    m = stack.mean(axis=0)
+    return (m - _logsumexp(m, axis=-1)[..., None]).astype(np.float32)
+
+
+class OnnxEncoder:
+    """Run the exported ONNX graph(s) (the on-device path).
+
+    ``onnx_path`` may name several comma-separated exports (K1 seed-ensemble):
+    log-emissions are averaged across the models BEFORE the beam via
+    :func:`ensemble_average`. coefficients/lambda come from the FIRST model
+    (refine-head inputs only; no ensemble eval uses the refiner).
+    """
+
+    def __init__(self, onnx_paths: list, avg: str = "logprob") -> None:
         import onnxruntime as ort
-        self.sess = ort.InferenceSession(str(onnx_path),
-                                         providers=["CPUExecutionProvider"])
+        self.sessions = [ort.InferenceSession(str(p),
+                                              providers=["CPUExecutionProvider"])
+                         for p in onnx_paths]
+        self.avg = avg
 
     def forward(self, feats: np.ndarray, keys: np.ndarray, mask: np.ndarray):
-        """-> ``(log_emissions[32,65], coefficients[32,64], lambda[32])``."""
+        """-> ``(log_emissions[T',65], coefficients[T',64], lambda[T'])``."""
         kp, mp = _pad(keys, mask)
-        out = self.sess.run(["log_emissions", "coefficients", "lambda"],
-                            {"features": feats[None], "layout_keys": kp[None],
-                             "layout_mask": mp[None]})
-        return out[0][0], out[1][0], out[2][0].reshape(-1)
+        feed = {"features": feats[None], "layout_keys": kp[None],
+                "layout_mask": mp[None]}
+        outs = [s.run(["log_emissions", "coefficients", "lambda"], feed)
+                for s in self.sessions]
+        if len(outs) == 1:
+            return outs[0][0][0], outs[0][1][0], outs[0][2][0].reshape(-1)
+        log_e = ensemble_average([o[0][0] for o in outs], self.avg)
+        return log_e, outs[0][1][0], outs[0][2][0].reshape(-1)
 
 
 class TorchRefiner:
@@ -133,7 +168,12 @@ def main() -> int:
     ap.add_argument("--workdir", type=Path, default=DEFAULT_WORKDIR)
     ap.add_argument("--layout", type=Path, default=DEFAULT_LAYOUT)
     ap.add_argument("--ckpt", default="")
-    ap.add_argument("--onnx", default="")
+    ap.add_argument("--onnx", default="",
+                    help="exported graph; comma-separate several for a K1 "
+                         "emission-averaging ensemble")
+    ap.add_argument("--ens-avg", choices=["logprob", "prob"], default="logprob",
+                    dest="ens_avg",
+                    help="ensemble averaging mode when --onnx lists >1 model")
     ap.add_argument("--vocab", default="data/futo_en_wordlist.combined")
     lexicon.add_argument(ap)
     ap.add_argument("--test", default="data/val_hwsfuto.jsonl")
@@ -148,6 +188,14 @@ def main() -> int:
     ap.add_argument("--preset", default="",
                     help="override --scoring with explicit "
                          "'gamma,lambda,beta,gammaPrune,betaPrune'")
+    ap.add_argument("--ranker-onnx", default="", dest="ranker_onnx",
+                    help="K3 rescorer (train_ranker.py export); computes a "
+                         "ranker score per top-k candidate, stored in --out "
+                         "and blended as final' = final + w * ranker")
+    ap.add_argument("--rerank-weight", type=float, default=0.0,
+                    dest="rerank_weight",
+                    help="blend weight w for --ranker-onnx (0 = record ranker "
+                         "scores in the dump but keep the beam order)")
     ap.add_argument("--device", default="cpu", help="torch device for --ckpt")
     ap.add_argument("--beam-width", type=int, default=100, dest="beam_width")
     ap.add_argument("--top-k", type=int, default=8, dest="top_k")
@@ -165,7 +213,12 @@ def main() -> int:
     trie = lexicon.load_vocab(resolve(args.workdir, args.vocab), args.vocab_kind)
     print(f"trie: {trie.num_words} words  (kind '{args.vocab_kind}', {args.vocab})")
     enc = (TorchEncoder(resolve(args.workdir, args.ckpt), args.device) if args.ckpt
-           else OnnxEncoder(resolve(args.workdir, args.onnx)))
+           else OnnxEncoder([resolve(args.workdir, p)
+                             for p in args.onnx.split(",")], args.ens_avg))
+    if not args.ckpt and len(args.onnx.split(",")) > 1:
+        print(f"ENSEMBLE of {len(args.onnx.split(','))} models, avg={args.ens_avg}")
+        if args.refine_ckpt or args.refine_onnx:
+            raise SystemExit("refiner + ensemble is not a supported combination")
     refiner = None
     if args.refine_ckpt:
         refiner = TorchRefiner(resolve(args.workdir, args.refine_ckpt), args.device)
@@ -186,6 +239,13 @@ def main() -> int:
     print(f"scoring preset '{preset}': gamma={gamma} lambda={lam_w} beta={beta} "
           f"gammaPrune={gamma_prune} betaPrune={beta_prune}"
           + ("  [refined emissions]" if refiner else ""))
+    ranker = None
+    if args.ranker_onnx:
+        import onnxruntime as ort
+        from ranker_features import slate_features
+        ranker = ort.InferenceSession(str(resolve(args.workdir, args.ranker_onnx)),
+                                      providers=["CPUExecutionProvider"])
+        print(f"reranker: {args.ranker_onnx}  w={args.rerank_weight}")
     rows = load_test(resolve(args.workdir, args.test))
     seal.check(rows, args.unseal_test, what="eval_beam.py")
     if args.limit:
@@ -208,15 +268,29 @@ def main() -> int:
         beam = futo_viterbi_beam(lp, letters, num_letters, trie,
                                  args.beam_width, args.top_k,
                                  gamma, lam_w, beta, gamma_prune, beta_prune)
+        rk_scores = None
+        if ranker is not None and beam:
+            feats_k = slate_features(lp, beam, trie, letters, num_letters, gamma)
+            rk_scores = list(ranker.run(["score"], {"features": feats_k})[0][:, 0])
+            if args.rerank_weight != 0.0:
+                # dump stays coherent: ranker column re-sorted WITH the words
+                order = sorted(
+                    ((w, s + args.rerank_weight * float(rk), float(rk))
+                     for (w, s), rk in zip(beam, rk_scores)),
+                    key=lambda t: t[1], reverse=True)
+                beam = [(w, s) for w, s, _ in order]
+                rk_scores = [rk for _, _, rk in order]
         words = [w for w, _ in beam]
         g_tal.add(0 if greedy == target else -1)
         r = rank_of(target, words)
         b_tal.add(r)
         strat[len_stratum(target)].add(r)
         if out_f is not None:
-            out_f.write(json.dumps({"idx": i, "word": word, "greedy": greedy,
-                                    "topk": [[w, float(s)] for w, s in beam],
-                                    "rank": r}) + "\n")
+            rec = {"idx": i, "word": word, "greedy": greedy,
+                   "topk": [[w, float(s)] for w, s in beam], "rank": r}
+            if rk_scores is not None:
+                rec["ranker"] = [float(v) for v in rk_scores]
+            out_f.write(json.dumps(rec) + "\n")
         if (i + 1) % args.progress == 0:
             if out_f is not None:
                 out_f.flush()
