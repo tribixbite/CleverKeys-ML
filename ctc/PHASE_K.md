@@ -455,6 +455,32 @@ letters-where-both-emit 96.5 %, first 2,000 val traces, labels unused).
 the working band — val t1 ≥ 88.30 and ensemble val greedy ≥ 55 %.**
 Decode follows this commit.
 
+**OUTCOME — the prediction PASSED prospectively.** Decoded after the commit
+above (git `3156080`): the s5555 mix scores val **88.72** / 92.73 / 93.45 /
+91.18 / 87.44, ensemble greedy **68.40** — both locked bands satisfied
+(t1 88.72 ≥ 88.30 ✓, greedy 68.40 ≥ 55 ✓), nowhere near the broken band
+(≤ 87.5 / ≤ 30). Full battery of the fresh pair, for the record: dvorak
+91.58 (+2.45), dvorak-app 91.05 (+2.85), azerty 84.02 (+0.42), qwertz 83.15
+(+0.65), german 80.63 (+0.99), spanish 89.42 (+1.14) — **all six layout bars
+and four of five val bars clear; val ≤3 reads 91.18, a −0.09 miss on that
+one bar.** Member singles for attribution: `sw2345-s5555`
+88.65/92.64/93.38/91.47/87.18, `resbn192i-s5555` 88.52/92.67/93.42/91.00/
+87.23.
+
+**What this does and does not upgrade, stated exactly:**
+* It **confirms the pair-compatibility mechanism prospectively**: the
+  label-free ≥95 % per-frame-agreement gate, fixed in advance, predicted the
+  fresh never-evaluated pair's ensemble behaviour correctly. §8.2's
+  "gate derived post-hoc" caveat is **discharged** — the gate is now a
+  validated, pre-registerable selector.
+* It does **NOT** transfer the all-eleven claim to the mix *recipe*: the
+  fresh pair lands at **10/11** (≤3 −0.09). **All-eleven remains a property
+  of the specific s1234 configuration** (`mix2-i8f16`, §8.2), whose thin
+  ≤3 margin (+0.03) is evidently within the configuration-to-configuration
+  spread. The honest statement: gated cross-model mixing reliably clears
+  10–11 bars and beats every single model's tally; whether a given pair
+  clears the eleventh (≤3) varies by pair.
+
 ## 9. FINAL VERDICT (2026-08-12)
 
 * **No single model clears all eleven bars on the seed-mean footing.**
@@ -464,11 +490,13 @@ Decode follows this commit.
 * **The `mix2-i8f16` configuration clears ALL ELEVEN en bars** (val
   88.68/92.61/93.46/91.30/87.32; layouts +0.31…+3.33) at 4.45 MB / 1.79 ms —
   on the **single-deterministic-configuration footing**, with the §8.2
-  disclosures (bars are seed-means of a stochastic recipe; the mix recipe
-  itself does not clear bars; the label-free pair gate was derived post-hoc;
-  the thin margins are t3 +0.01 and ≤3 +0.03). A blind confirmation (fresh
-  seed pairs passed through the ≥95 % per-frame-agreement gate before any
-  eval) is the missing evidence rung and is registered, not run.
+  disclosures (bars are seed-means of a stochastic recipe; the thin margins
+  are t3 +0.01 and ≤3 +0.03). **The blind confirmation was run (§8.5): the
+  pre-registered label-free gate predicted the fresh s5555 pair correctly —
+  the mechanism is prospectively confirmed** — and the fresh pair itself
+  lands at 10/11 (≤3 −0.09), so the all-eleven tally remains specific to the
+  s1234 configuration while "gated mixing clears 10–11 and beats every
+  single model" is now a prospectively supported recipe-level claim.
 * **The ≤3 stone: broken twice, differently.** By configuration
   (mix2, +0.03) and by training signal (`--short-loss-weight`, +0.12
   seed-mean, every-seed) — the Phase-J "candidate-generation" diagnosis is

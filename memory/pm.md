@@ -1003,3 +1003,10 @@ Cyrillic stone stands. test-2400 SEALED (3 ledger entries, untouched).
 Unsealing decision handed to orchestrator/user with §8.2 disclosures.
 Registered not run: blind gate confirmation on fresh pairs, W∈(1,2)
 interpolation arm, slw2-as-mix-member, Tier-2 decode knobs.
+
+2026-08-12 — BLIND GATE CONFIRMATION (final measurement): pre-registered
+protocol executed in order (register 8f0c4fb -> gate 97.0% PASS + prediction
+committed 3156080 -> decode). Prediction PASSED prospectively: s5555 mix
+88.72 t1 / greedy 68.40 (bands were >=88.30 / >=55). Fresh pair = 10/11
+(<=3 91.18, -0.09); all six layout bars clear. Mechanism confirmed; all-11
+stays a property of the s1234 mix2-i8f16 configuration. PHASE K FULLY CLOSED.
