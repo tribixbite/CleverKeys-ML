@@ -83,7 +83,12 @@ def main() -> int:
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--workdir", type=Path, default=DEFAULT_WORKDIR)
     ap.add_argument("--layout", type=Path, default=DEFAULT_LAYOUT)
-    ap.add_argument("--onnx", default="ctc_swipe_encoder.onnx")
+    ap.add_argument("--onnx", default="ctc_swipe_encoder.onnx",
+                    help="exported encoder; comma-separate several to freeze "
+                         "an emission-averaging ensemble fixture (Phase K)")
+    ap.add_argument("--ens-avg", choices=["logprob", "prob"], default="prob",
+                    dest="ens_avg",
+                    help="averaging mode when --onnx lists >1 model")
     ap.add_argument("--out", default="ctc_model_golden.json")
     ap.add_argument("--preset", default="",
                     help="scoring preset the beam cases are generated at, as "
@@ -108,8 +113,14 @@ def main() -> int:
     letters, centers = load_layout(args.layout)
     num_letters = len(letters)
     by_letter = {l: centers[i] for i, l in enumerate(letters)}
-    sess = ort.InferenceSession(str(resolve(args.workdir, args.onnx)),
-                                providers=["CPUExecutionProvider"])
+    # Phase K: comma-separated --onnx freezes an emission-averaging ensemble's
+    # fixture — the emissions stored are the AVERAGED ones the app-side dual
+    # session must reproduce (see eval_beam.ensemble_average).
+    from eval_beam import ensemble_average
+    sessions = [ort.InferenceSession(str(resolve(args.workdir, p)),
+                                     providers=["CPUExecutionProvider"])
+                for p in str(args.onnx).split(",")]
+    ens_avg = getattr(args, "ens_avg", "prob")
 
     trie = LexTrie()
     for w, f in LEXICON:
@@ -137,16 +148,18 @@ def main() -> int:
     for word in WORDS:
         xs, ys, ts = ideal_path(by_letter, word)
         feats = featurize(xs, ys, ts)                                 # [2,64]
-        full = sess.run(["log_emissions"],
-                        {"features": feats[None], "layout_keys": keys[None],
-                         "layout_mask": mask[None]})[0][0]            # [32,65]
-        lp = slice_emissions(full, num_letters, MAX_KEYS)             # [32,27]
+        feed = {"features": feats[None], "layout_keys": keys[None],
+                "layout_mask": mask[None]}
+        fulls = [s.run(["log_emissions"], feed)[0][0] for s in sessions]
+        full = fulls[0] if len(fulls) == 1 else \
+            ensemble_average(fulls, ens_avg)                          # [T',65]
+        lp = slice_emissions(full, num_letters, MAX_KEYS)             # [T',27]
         greedy = greedy_ctc(lp, letters, num_letters)
         topk = futo_viterbi_beam(lp, letters, num_letters, trie, BEAM_WIDTH, TOP_K,
                                  gamma, lam, beta, gamma_prune, beta_prune)
         cases.append({
             "kind": "beam", "name": f"model_{word}",
-            "alphabet": "".join(letters), "frames": T_OUT,
+            "alphabet": "".join(letters), "frames": int(lp.shape[0]),
             "numClasses": num_letters + 1,
             "points": {"x": xs, "y": ys, "t": ts},
             "features": [float(v) for v in feats.reshape(-1)],        # [128] x-row then y-row
@@ -163,7 +176,8 @@ def main() -> int:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(
         {"source_onnx": str(resolve(args.workdir, args.onnx)),
-         "source_onnx_sha256": sha256_file(resolve(args.workdir, args.onnx)),
+         "source_onnx_sha256": [sha256_file(resolve(args.workdir, p))
+                                for p in str(args.onnx).split(",")],
          "preset": [gamma, lam, beta, gamma_prune, beta_prune],
          # The exact layout tensors the emissions were generated against, so an
          # app-side model-backed parity test can rebuild layout_keys/layout_mask
