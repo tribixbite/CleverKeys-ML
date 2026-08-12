@@ -89,6 +89,44 @@ averaged emissions are individually much blurrier; the lexicon beam absorbs
 it. This is the CTC-ensembling classic (emission averaging wants a shared
 alignment) reproduced at 1.5 M params.
 
+### 4.2 Round 1, full val-9918 (E1/AOSP) — seed-ensembles REFUTED, and a
+### cross-model surprise
+
+Single-model references are the committed Phase-J dumps (same rows, preset,
+trie).
+
+| config | t1 | t3 | t5 | ≤3 | 4+ | greedy |
+|---|---|---|---|---|---|---|
+| `sw2345` s1234 (single) | 88.51 | 92.59 | 93.35 | 90.91 | 87.26 | 72.08 |
+| `resbn192i` s1234 (single) | 88.32 | 92.70 | 93.25 | 91.21 | 86.83 | 72.75 |
+| `sw2345` ×3 seeds, logprob | 77.02 | 90.94 | 92.32 | 78.52 | 76.24 | 29.26 |
+| `sw2345` ×3 seeds, prob | 87.12 | 91.96 | 92.74 | 90.23 | 85.51 | 37.05 |
+| `resbn192i` ×3 seeds, prob | 87.39 | 91.76 | 92.73 | 90.73 | 85.65 | 64.11 |
+| **mix2 = `sw2345`+`resbn192i`, BOTH s1234, prob** | **88.66** | **92.63** | **93.42** | **91.41** | 87.23 | 68.12 |
+
+**K1 as specified — averaging a model's own 3 seeds — is a clean negative in
+both modes for both families** (−1.1 … −1.4 t1 prob-mode; logprob
+catastrophic). The seeds do not share an alignment, and emission-space
+averaging punishes that before the beam can help.
+
+**The surprise: the cross-MODEL, same-SEED 2-mix clears all five val bars at
+once, including ≤3** — Δ vs bars **+0.36 / +0.03 / +0.16 / +0.14 / +0.46**.
+No Phase-J single model or seed-mean ever cleared ≤3; this configuration does
+on its first measurement, with no tuning applied. Working mechanism
+hypothesis: alignment phase is largely set by the init (the seed), not the
+data mix — both members were seeded 1234 with the identical architecture, so
+their letter peaks coincide and averaging sharpens instead of blurring.
+Under test in round 2 (running): the s4321 and s7777 paired mixes (the
+configuration's honest "seed axis"), a cross-seed control
+(`sw2345` s1234 + `resbn192i` s7777 — the hypothesis predicts it fails), and
+a 3-family s1234 mix (+`ch256-p65`).
+
+Caveats registered up front: one measurement, and the mix2 artifact would be
+2 × fp16w ≈ **6.1 MB > the 5 MB bar** as-is (int8-trunk or weight sharing
+would be needed; unmeasured). Latency ≈ 2 × 0.84 ms encoder — trivially
+inside budget. And the greedy drop (72 → 68) says even the same-seed average
+blurs emissions slightly; the beam more than recovers it.
+
 ## 5. Continuity
 
 Same rules as `PHASE_J.md` §7: trainings `nohup setsid` + launch logs
