@@ -1,5 +1,23 @@
 # Model comparison — speed and accuracy, every candidate, every footing
 
+> **Phase-K addendum (2026-08-12).** Phase K adds one CONFIGURATION (not a
+> model) above every single-model row on the val + alt-layout footing:
+> **`mix2-i8f16`** = `sw2345_s1234` int8w + `resbn192i_s1234` fp16w with
+> per-frame probability averaging of the emission heads before the beam —
+> val 88.68/92.61/93.46/**91.30**/87.32 and all six layout bars
+> (+0.31…+3.33), **4.45 MB total, 1.79 ms encoder** — the only entry ever to
+> beat the val `≤3` bar. Footing caveat (do not drop it when quoting): it is
+> a **deterministic two-member configuration** scored against seed-mean bars;
+> the ensembling recipe itself does NOT clear bars (pair compatibility is a
+> per-frame-alignment property, gated label-free at ≥95 % agreement, and the
+> gate was derived post-hoc). NOT test-validated; nothing in Phase K touches
+> test-2400. Also from Phase K: same-recipe seed-ensembles are refuted; a
+> ≤3-weighted-loss single model (`phaseK-sw2345-slw2`) clears all five val
+> bars on one seed (paired seeds pending); T′=64 clears all six layout bars
+> at a val cost (contract-v2, documented not promoted); a 21.8 KB rescorer
+> is a small sign-consistent t1/t5/4+ lever for both families and not a ≤3
+> lever. Full record `PHASE_K.md`.
+
 **Date:** 2026-08-09 · **Phase-J addendum:** 2026-08-11 · **Status:** standalone
 reference; no new measurement was run for it. Every number below is quoted from
 a committed document and is traceable to a named section (the `source` column or

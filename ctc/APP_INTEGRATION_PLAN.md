@@ -2114,7 +2114,56 @@ Consequence for this plan: O5's en-only gate is unchanged, and the multi-languag
 route is a per-script model plus a per-language preset (§7.1), not one model for
 everything.
 
-## Appendix A — this repo's supporting change (already committed alongside this plan)
+## 8. Phase K update (2026-08-12) — the ensemble configuration, contract-v2, and the rescorer
+
+Full measurement record: `PHASE_K.md`. Three integration-relevant outcomes.
+
+### 8.1 The `mix2-i8f16` configuration (all 11 en bars, val+alt-layout footing)
+
+`phaseK_sw2345_s1234_int8w.onnx` (1,554,355 B) + `phaseK_resbn192i_s1234_fp16w.onnx`
+(3,052,318 B), total **4.45 MB**, encoder cost 0.930 + 0.858 ms sequential.
+App-side requirements, all inside `swipe/ctc/`:
+
+* `CtcEmissionModel` gains a **dual-session mode**: run both graphs on the same
+  `features`/`layout_keys`/`layout_mask` feed, then average **probabilities**
+  per frame over the 65 columns: `avg = logaddexp(a, b) − log 2` on the raw
+  log-emission heads, BEFORE `CtcEmissions.sliceFromHead`. (Do NOT average
+  log-probs without renormalizing — `len^γ` breaks the invariance; do NOT use
+  geometric mean at all: refuted, `PHASE_K.md` §4.1.)
+* Everything downstream (slice, beam, presets, tries) is unchanged — contract
+  v1 `[1,32,65]` holds for both members.
+* Fixture: `artifacts/phaseK_mix2i8f16_golden.json` (E1; the `emissions`
+  arrays are the AVERAGED head — the dual-session parity target;
+  `source_onnx_sha256` lists both members).
+* Pair validity is NOT generic: member pairs must pass the per-frame-agreement
+  gate (≥95 % argmax agreement on unlabeled traces, `PHASE_K.md` §4.3). The
+  shipped pair is fixed, so this is a build-time check, not a runtime one.
+* Evidence tier: val + alt-layout only, NOT test-validated; deterministic-
+  configuration footing with disclosures (`PHASE_K.md` §8.2).
+
+### 8.2 Contract-v2 (`[1,64,65]`, T′ = 64) — documented, NOT promoted
+
+`phaseK_t64_s1234_contractv2.onnx` + `phaseK_t64_golden_contractv2.json`
+(`frames: 64`). If ever adopted: `CtcEmissions.sliceFromHead` frame loop and
+any `[·,32,·]` assumption must read `frames` from the fixture/model; the
+refine-head `[T′,92]` input breaks (the refine head is dead code — Phase E
+kept it out); decode cost ≈ **2.1×** measured (29.0 vs 60.7 tr/s same box,
+same beam) — on-device that scales the 1.5–7 ms beam to ~3–14 ms, inside the
+50 ms bar but past the 10 ms preference at the high end. Val: −0.19 t1/−0.39
+4+ against its T′=32 twin (misses two val bars) while clearing all six layout
+bars — a transfer-biased option, on the shelf.
+
+### 8.3 The rescorer (optional, small, symmetric)
+
+`phaseK_ranker_sw2345_2seed.onnx` (21,782 B): 14 features per top-k candidate
+(`ranker_features.py` — forced-alignment replay of the beam's own Viterbi,
+trie log-freq, slate stats), blended `final += 0.05 · ranker`. Seed-mean
++0.08 t1 / +0.11 4+, sign-consistent; NOT a ≤3 lever; **flat when stacked on
+the ensemble** — so it is an option for a SINGLE-model ship only. Kotlin cost:
+a ~200-line feature port + a 5 k-param MLP session; the reserved `alpha` slot
+in `CtcScoringParams` is the natural blend hook. Recommendation: skip for v1
+(the ensemble subsumes it); revisit only if the app ships a single model and
+wants +0.1 t1 for 22 KB.
 
 > **Records the 2026-08-08 state.** The `make_golden.py` changes below still hold
 > (they are why the fixture carries `featurize` cases and a `layout` block at all),

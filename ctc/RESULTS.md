@@ -1,5 +1,37 @@
 # CTC Swipe Encoder — Training Results
 
+# Phase K (2026-08-12): a two-model configuration takes all 11 en bars (single-configuration footing); the ≤3 training lever works; the seed-mean stone still stands
+
+Full record: `ctc/PHASE_K.md`. Headlines, with footings stated:
+
+* **`mix2-i8f16` — `sw2345_s1234` (int8w) + `resbn192i_s1234` (fp16w),
+  per-frame probability averaging of the two emission heads before the one
+  beam — clears ALL ELEVEN en bars**: val 88.68 / 92.61 / 93.46 / **91.30** /
+  87.32 (≤3 **beaten +0.03** — the first time anything beat that stratum) and
+  every layout bar by +0.31…+3.33. **4.45 MB, 1.79 ms encoder.** Footing:
+  a deterministic single configuration against seed-mean bars; the mix
+  *recipe* does NOT clear bars (the s4321 pair fails — pair compatibility is
+  per-frame alignment agreement, measurable label-free at ≥95 %, a gate
+  derived post-hoc); disclosures in `PHASE_K.md` §8.2.
+* **Seed-ensemble averaging (same recipe, 3 seeds) is REFUTED** in both
+  averaging modes for both families — seeds do not share a CTC alignment.
+* **`--short-loss-weight 2.0`** (≤3-weighted CTC loss) is the first training
+  lever to move the ≤3 stratum: **+0.56** (91.47, clears all five val bars on
+  seed 1234) at 4+ −0.48; azerty/spanish miss; **paired seeds in flight**.
+* **T′ = 64 contract-v2 retrain**: the Phase-I transfer promise reproduces
+  (all six layout bars, german 82.40 — campaign best) but 4+ **flips sign**
+  (−0.39) and val t3/≤3 bars miss; ~2.1× decode cost measured. Documented,
+  not promoted (`artifacts/phaseK_t64_golden_contractv2.json`, frames=64).
+* **Self-mined discriminative rescorer** (21.8 KB second ONNX, top-k rerank):
+  sign-consistent +0.08 t1 / +0.02 t5 / +0.11 4+ seed-mean; **NOT a ≤3
+  lever** (sign-inconsistent); the incumbent, offered its own symmetric
+  rescorer, gains the same (+0.26 t1 s1234) — a field-shifting lever, not a
+  ranking-shifting one. Flat when stacked on the ensemble.
+* **Seed-mean footing: the ≤3 stone STANDS** (best seed-mean 91.24, −0.03).
+  **Cyrillic: untouched** (bar ≈77.4 full / 77.92 confirm-half at λ=2.0).
+  **test-2400 remains SEALED** (ledger at 3 entries; any unsealing is the
+  orchestrator's decision).
+
 # Phase J (2026-08-11): the convergence campaign closes 10 of 11 bars on the seed-mean footing (5 of 11 every-seed) — `sw2345`, and the two stones that stand
 
 **The campaign's terminal condition was NOT met.** Phase J was run under the
