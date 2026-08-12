@@ -1018,6 +1018,19 @@ insights; if justified, write PIPELINE_V2_PROPOSAL.md (+ train_v2.py skeleton)
 with losses, aug structure, data mix, selection protocol, expected gains,
 cost, success bars (headline: beat mix2-i8f16's numbers with a SINGLE model).
 Design/proposal only — NO training runs, NO test-2400 contact.
-- [ ] Part 1 retrospective review (docs + code read)
-- [ ] Part 2 decision: propose v2 or declare data ceiling
-- [ ] Commit + push
+- [x] Part 1 retrospective review (docs + code read — full A..K record,
+      audits, scout/scan docs, model/train/layout_aug/sweep/K3 code)
+- [x] Part 2 decision: v2 IS proposed — ctc/PIPELINE_V2_PROPOSAL.md +
+      ctc/train_v2.py (coupled-pair trainer E1+E3+E6, syntax/import-verified,
+      NOT executed). Core elements: alignment-coupled pair training (mutual
+      per-frame KL, trained-in >=95% agreement gate), targeted en
+      residual-transplant synthesis (short/tail words), slw W=1.5 as member
+      asymmetry, explicit 3-way aug mixture, layout-probe selection,
+      optional geo-alignment prior, pair->single distillation contingency.
+      Key new readings: Phase-G ensemble-teacher KD refutation is confounded
+      by K1 alignment incompatibility; T64 4+ flip-flop is single-seed noise
+      (transfer signal is the reproducible part); dose law = mixture
+      allocation, not a law. Success bars pre-stated (pair >= mix2-i8f16 on
+      2/3 seeds; single model 11/11 campaign bars; single-beats-mix2 judged
+      unlikely without E7). ~40 GPU-h estimate. test-2400 untouched.
+- [x] Commit + push
