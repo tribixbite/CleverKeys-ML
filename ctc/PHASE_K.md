@@ -318,9 +318,106 @@ identical args **plus `--workers 0`**, per the standing rule. Lesson
 recorded: on this box, any train.py run that must survive unattended should
 use `--workers 0` from launch; the throughput cost is the cheaper insurance.
 
-## 5. Continuity
+## 8. Convergence
+
+### 8.1 The lever table
+
+| lever | axis it moves | verdict |
+|---|---|---|
+| seed-ensemble averaging (K1 as spec'd) | — | **REFUTED** both modes, both families (−1.1…−1.4 t1 prob; logprob catastrophic) |
+| same-seed cross-model mix, prob (K1 surprise) | everything, transfer most (+1.3…+3.5 layouts) | **the campaign's best configuration** — gated by per-frame agreement ≥ ~95 % (§4.3) |
+| int8w weight storage on the pair | size ÷ 3.9 | val-free; qwertz −0.5 when BOTH members int8w → use int8w+fp16w (4.45 MB) |
+| T′ = 64 retrain (K2) | transfer (+0.4…+1.6 five of six; german +1.64) and ≤3 (+0.21) | val 4+ **flips sign vs the Phase-I probe** (−0.39); misses val t3/≤3 bars; 8/11 single-seed. A transfer lever with a val bill; contract-v2 documented, not promoted |
+| discriminative rescorer (K3) | t1/t5/4+, sign-consistent 3/3 seeds (+0.08/+0.02/+0.11 mean) | **NOT the ≤3 lever** (+0.30/0.00/−0.18, sign-inconsistent); symmetric — incumbent gains the same (+0.26 t1); 21.8 KB, optional |
+| ≤3-weighted CTC loss w = 2 (K4) | **≤3 +0.56** at 4+ −0.48 | clears all 5 val bars single-seed; misses azerty −0.16 / spanish −1.14; **paired seeds running — the phase's last open measurement** |
+| 280 k schedule + soup (K4) | — | wash again (−0.14 t1; soup +0.16 sel-t1, mirrors §6.6.2 of Phase J) |
+| rescorer stacked on mix2 | t3/t5 tenths | flat on t1/≤3 — the ensemble already harvests the ranker's signal |
+
+Not run for want of GPU/priority: beam-width 300 recheck, length-conditioned
+decode knobs, lr/wd micro-sweep (Tier 2, unstarted — recorded as such).
+
+### 8.2 Best-configuration card — `mix2-i8f16` (ALL ELEVEN BARS)
+
+**= `sw2345_s1234` (int8w, 1.55 MB) + `resbn192i_s1234` (fp16w, 2.91 MB),
+per-frame arithmetic probability averaging of the two [1,32,65] log-emission
+heads before the beam, E1 preset, AOSP/az26 tries.**
+
+| axis | bar | mix2-i8f16 | Δ |
+|---|---|---|---|
+| val t1 | 88.30 | 88.68 | +0.38 |
+| val t3 | 92.60 | 92.61 | +0.01 |
+| val t5 | 93.26 | 93.46 | +0.20 |
+| **val ≤3** | 91.27 | **91.30** | **+0.03** |
+| val 4+ | 86.77 | 87.32 | +0.55 |
+| dvorak | 89.13 | 91.94 | +2.81 |
+| dvorak app-98k | 88.20 | 91.53 | +3.33 |
+| azerty | 83.60 | 84.93 | +1.33 |
+| qwertz | 82.50 | 82.81 | +0.31 |
+| german | 79.64 | 81.22 | +1.58 |
+| spanish | 88.28 | 89.59 | +1.31 |
+| size | ≤ 5 MB | **4.45 MB** | ✓ |
+| encoder latency | — | 0.930 + 0.858 = **1.79 ms** (2 sequential sessions; beam unchanged) | ✓ |
+
+Sibling packagings: fp32 pair 12.1 MB (≤3 91.41 — the roomiest margins);
+int8w pair **3.11 MB** at 10/11 (qwertz −0.11). Fixture:
+`artifacts/phaseK_mix2i8f16_golden.json` (E1; emissions = the averaged head —
+the app-side parity target for a dual-session `CtcEmissionModel`).
+
+**Footing disclosures, in full:** (1) deterministic configuration vs
+seed-mean bars — the mix *recipe* does not clear bars (§4.3: s4321 pair
+fails); the *gated pair* does, and the per-frame-agreement gate (label-free,
+≥95 %) was derived after the round-2 outcomes; a blind confirmation (new
+seeds, gate applied before any eval) has not been run. (2) Every layout
+margin except qwertz (+0.31) exceeds the 1.5–3 pt seed-spread of its axis;
+the val margins t3 (+0.01) and ≤3 (+0.03) are thin. (3) ru/Cyrillic
+untouched. (4) both members are s1234 models already published in Phase I/J.
+
+### 8.3 Best-single-model card — PENDING the slw2 paired seeds
+
+`phaseK-sw2345-slw2` s1234 (= finalist recipe + `--short-loss-weight 2.0`,
+6.07 MB fp32 / 2.9 MB fp16w-equivalent, contract v1, drop-in):
+val **88.38/92.66/93.33/91.47/86.78** — all five val bars on one seed, the
+only single model in the campaign to do so — plus dvorak 90.92 ✓,
+dvorak-app 90.56 ✓, qwertz 82.98 ✓, german 80.17 ✓; azerty 83.44 ✗ (−0.16),
+spanish 87.14 ✗ (−1.14). **9/11 single-seed.** Seeds 4321/7777 are training
+(the campaign's last open measurement); if the val sweep survives the
+seed-mean and the two layout misses stay (they are the same two corpora
+`sw234` missed in Phase J §6.6.1 before its third seed moved them), the
+honest single-model verdict stays "val yes, azerty/spanish open".
+Until then **`sw2345` remains the single-model finalist** (10/11 seed-mean).
+
+### 8.4 K2 contract-v2 record (`phaseK-t64`, `[1,64,65]`)
+
+All six layout bars cleared single-seed (dvorak 90.96, app 90.27, azerty
+84.40, qwertz 83.07, german **82.40** — the best german of the campaign,
+spanish 88.51) while val pays −0.19 t1 / −0.39 4+ vs its T′=32 twin and
+misses the t3/≤3 bars. The Phase-I §6.1 probe's transfer promise
+**reproduces**; its 4+ promise **reverses** at the modern recipe.
+App implications, measured: encoder 1.588 ms (1.9×); whole decode ≈ 2.1×
+(29.0 vs 60.7 tr/s same-box A/B); `CtcEmissions.sliceFromHead` must read 64
+frames; the refine-head `[T′,92]` input and any `[·,32,·]` assert break;
+fixture `artifacts/phaseK_t64_golden_contractv2.json` (frames = 64).
+**Not promoted** (val bill), kept as the documented transfer option.
+
+## 9. Verdict (to be finalized when the slw2 seeds land)
+
+* **en-side: ALL ELEVEN bars fall for the `mix2-i8f16` configuration** on the
+  single-configuration footing, with the §8.2 disclosures — the first time
+  the ≤3 stratum has been beaten by anything in the campaign. On the
+  recipe/seed-mean footing the stone still stands (best seed-mean ≤3:
+  91.24 with rescorer, −0.03).
+* **Cyrillic (stone 2): untouched by Phase K** — 77.92 confirm-half
+  (λ = 2.0 footing) remains the bar; no K work targeted it.
+* **test-2400: SEALED.** Ledger at 3 entries throughout; nothing here reads
+  it. Whether the mix2 configuration's footing justifies a pre-registered
+  unsealing is explicitly **the parent orchestrator's decision**, with §8.2's
+  disclosures as the input.
+
+## 10. Continuity
 
 Same rules as `PHASE_J.md` §7: trainings `nohup setsid` + launch logs
 (`ckpt_phaseK-*.launch.log`), resumed runs use `--workers 0`, no waiter
 scripts, batteries run from a live orchestrator, state committed at every
-milestone. Eval outputs under `~/ctc-train/phaseK/`.
+milestone. Eval outputs under `~/ctc-train/phaseK/`. Box rebooted four times
+during the phase (see §4.5 for the deadlock pattern); every training was
+recovered from `last.pt` with ≤3 k steps lost.
