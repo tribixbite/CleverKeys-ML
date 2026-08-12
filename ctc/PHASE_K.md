@@ -206,6 +206,54 @@ layout-specific idiosyncrasies that single models trip on.
 4. Latency: 2–3 × 0.84 ms encoder — inside every budget; to be measured
    end-to-end for the record.
 
+### 4.6 Size-compliant packagings hold the mix2 result
+
+`quantize_onnx.py` weight-storage modes on both s1234 members, decoded through
+the ensemble beam (full val-9918, E1/AOSP):
+
+| packaging | bytes | t1 | t3 | t5 | ≤3 | 4+ |
+|---|---|---|---|---|---|---|
+| fp32 + fp32 (reference) | 12.14 MB | 88.66 | 92.63 | 93.42 | 91.41 | 87.23 |
+| **int8w + int8w** | **3.11 MB** | 88.65 | 92.64 | 93.45 | 91.30 | 87.27 |
+| int8w + fp16w | 4.45 MB | 88.68 | 92.61 | 93.46 | 91.30 | 87.32 |
+
+Both compliant packagings clear all five val bars; ≤3 gives back ~0.11 to
+weight rounding but stays over (+0.03). The int8w `resbn192i` member's rough
+random-probe parity (argmax 76/100, max|Δ| 21) is real in the emissions and
+almost invisible after the beam — same shape as the fp16w story in
+`PHASE_J.md` §10. **The ≤5 MB size bar is met by the 3.11 MB int8w pair**
+(alt-layout battery on this packaging: running).
+
+## 5. K3 — discriminative rescorer, v1 results
+
+Miner: 600,000 train rows (all len ≤ 4 + 35 % longer, seed 1234) through the
+E1 beam at k = 8 → 94.2 % gold@1, 3.6 % gold@2–8, 2.2 % absent. Ranker:
+5,185 params, listwise CE (err-weight 4, short-weight 2); dev pure-ranker
+top-1 94.0 % (≈ ties the beam) and **puts gold first on 50.8 % of dev error
+slates**. Blend `final' = beam + w·ranker`; w swept on val[0:4959], confirmed
+on val[4959:9918], per protocol.
+
+* **Tune half:** w = 0.05 wins min-margin (≤3 +0.29, t1 +0.10).
+* **Confirm half (untouched):** ≤3 **+0.36**, t1 +0.21, t3 −0.04, t5 0.00 —
+  the effect holds out of sample on the mined seed.
+* **Frozen w = 0.05 applied to all three finalist seeds (full val):**
+
+| seed | t1 Δ | ≤3 Δ | 4+ Δ |
+|---|---|---|---|
+| s1234 (mined) | +0.15 | **+0.33** | +0.06 |
+| s4321 | −0.02 | −0.03 | −0.02 |
+| s7777 | +0.12 | −0.17 | +0.28 |
+| **seed-mean** | **+0.08** (88.59) | **+0.04** (91.24) | +0.11 (87.22) |
+
+**Verdict v1: the ≤3 gain is sign-inconsistent across seeds** (the ranker was
+trained on s1234's own emission quirks) — under the campaign's
+sign-consistency rule it is NOT a promotable ≤3 lever as-is, and seed-mean ≤3
+(91.24) still misses the bar by 0.03. t1/4+ tilt positive (2–3 of 3 seeds).
+Registered next steps: (a) seed-general ranker (mine s4321 + s7777 emissions
+too, retrain, same frozen-w protocol), (b) the symmetric incumbent ranker
+(mining running), (c) rescorer × alt-layout interaction unmeasured — required
+before any stacked-configuration claim.
+
 ## 4.5 Ops incident — all three GPU arms deadlocked at ~22:00–22:12
 
 `phaseK-t64` froze at step 63 k, `280k` at 123 k, `slw2` at 54 k; GPU 0 %,
