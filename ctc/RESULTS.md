@@ -15,9 +15,13 @@ Full record: `ctc/PHASE_K.md`. Headlines, with footings stated:
   derived post-hoc); disclosures in `PHASE_K.md` §8.2.
 * **Seed-ensemble averaging (same recipe, 3 seeds) is REFUTED** in both
   averaging modes for both families — seeds do not share a CTC alignment.
-* **`--short-loss-weight 2.0`** (≤3-weighted CTC loss) is the first training
-  lever to move the ≤3 stratum: **+0.56** (91.47, clears all five val bars on
-  seed 1234) at 4+ −0.48; azerty/spanish miss; **paired seeds in flight**.
+* **`--short-loss-weight 2.0`** (≤3-weighted CTC loss) breaks the ≤3 stone
+  for a single model: seed-mean **91.39 (+0.12), clearing on EVERY seed**
+  (91.32–91.47) — the campaign's first every-seed ≤3 clear. The bill is the
+  designed trade: t1 −0.03, t3 −0.01, 4+ −0.13, spanish −0.66 seed-mean →
+  **7/11 overall**; `sw2345` (10/11, ≤3 −0.07) remains the single-model
+  finalist, with `slw2` the mirror-image counter-finalist. The s1234
+  all-five-val sweep did not survive the seeds (single-seed floor).
 * **T′ = 64 contract-v2 retrain**: the Phase-I transfer promise reproduces
   (all six layout bars, german 82.40 — campaign best) but 4+ **flips sign**
   (−0.39) and val t3/≤3 bars miss; ~2.1× decode cost measured. Documented,

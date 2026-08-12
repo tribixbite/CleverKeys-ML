@@ -372,19 +372,40 @@ margin except qwertz (+0.31) exceeds the 1.5–3 pt seed-spread of its axis;
 the val margins t3 (+0.01) and ≤3 (+0.03) are thin. (3) ru/Cyrillic
 untouched. (4) both members are s1234 models already published in Phase I/J.
 
-### 8.3 Best-single-model card — PENDING the slw2 paired seeds
+### 8.3 The slw2 3-seed verdict — the ≤3 stone falls for a single model, and
+### the sweep was seed luck
 
-`phaseK-sw2345-slw2` s1234 (= finalist recipe + `--short-loss-weight 2.0`,
-6.07 MB fp32 / 2.9 MB fp16w-equivalent, contract v1, drop-in):
-val **88.38/92.66/93.33/91.47/86.78** — all five val bars on one seed, the
-only single model in the campaign to do so — plus dvorak 90.92 ✓,
-dvorak-app 90.56 ✓, qwertz 82.98 ✓, german 80.17 ✓; azerty 83.44 ✗ (−0.16),
-spanish 87.14 ✗ (−1.14). **9/11 single-seed.** Seeds 4321/7777 are training
-(the campaign's last open measurement); if the val sweep survives the
-seed-mean and the two layout misses stay (they are the same two corpora
-`sw234` missed in Phase J §6.6.1 before its third seed moved them), the
-honest single-model verdict stays "val yes, azerty/spanish open".
-Until then **`sw2345` remains the single-model finalist** (10/11 seed-mean).
+`phaseK-sw2345-slw2` = finalist recipe + `--short-loss-weight 2.0`, seeds
+1234/4321/7777, full battery:
+
+| metric | s1234 | s4321 | s7777 | seed-mean | bar | Δ |
+|---|---|---|---|---|---|---|
+| val t1 | 88.38 | 88.10 | 88.31 | 88.27 | 88.30 | **−0.03 ✗** |
+| val t3 | 92.66 | 92.55 | 92.56 | 92.59 | 92.60 | **−0.01 ✗** |
+| val t5 | 93.33 | 93.28 | 93.32 | 93.31 | 93.26 | +0.05 ✓ |
+| **val ≤3** | **91.47** | **91.38** | **91.32** | **91.39** | 91.27 | **+0.12 ✓ EVERY seed** |
+| val 4+ | 86.78 | 86.40 | 86.75 | 86.64 | 86.77 | **−0.13 ✗** |
+| dvorak | 90.92 | 88.03 | 91.25 | 90.07 | 89.13 | +0.94 ✓ |
+| dvorak app-98k | 90.56 | 87.46 | 91.01 | 89.68 | 88.20 | +1.48 ✓ |
+| azerty | 83.44 | 84.55 | 83.78 | 83.92 | 83.60 | +0.32 ✓ |
+| qwertz | 82.98 | 82.73 | 82.90 | 82.87 | 82.50 | +0.37 ✓ |
+| german | 80.17 | 79.67 | 80.95 | 80.26 | 79.64 | +0.62 ✓ |
+| spanish | 87.14 | 88.28 | 87.43 | 87.62 | 88.28 | **−0.66 ✗** |
+
+**Tally: 7/11 seed-mean.** The s1234 all-five-val sweep (§6) does not
+survive the seeds — it was the single-seed floor doing what it does. What
+DOES survive, and strengthens: **≤3 clears the bar on the seed-mean (+0.12)
+and on every individual seed (91.32–91.47)** — the first every-seed ≤3 clear
+by anything in the campaign, and proof that the stratum responds to a
+training-side signal (the weighting sharpens short-word emissions at the
+source, i.e. it fixes candidate generation where the Phase-J diagnosis
+located the problem). The bill is exactly the designed trade: t1 −0.03,
+t3 −0.01, 4+ −0.13 (all inside two rows of their bars) and spanish −0.66.
+**`sw2345` remains the single-model finalist (10/11 seed-mean); `slw2` is
+the counter-finalist that holds the one bar `sw2345` cannot** — the two are
+mirror images, and no single model clears all eleven. Registered, not run
+(GPU budget closed): W between 1 and 2 as the interpolation arm, and
+`slw2_s1234` as a mix-member candidate.
 
 ### 8.4 K2 contract-v2 record (`phaseK-t64`, `[1,64,65]`)
 
@@ -399,19 +420,32 @@ frames; the refine-head `[T′,92]` input and any `[·,32,·]` assert break;
 fixture `artifacts/phaseK_t64_golden_contractv2.json` (frames = 64).
 **Not promoted** (val bill), kept as the documented transfer option.
 
-## 9. Verdict (to be finalized when the slw2 seeds land)
+## 9. FINAL VERDICT (2026-08-12)
 
-* **en-side: ALL ELEVEN bars fall for the `mix2-i8f16` configuration** on the
-  single-configuration footing, with the §8.2 disclosures — the first time
-  the ≤3 stratum has been beaten by anything in the campaign. On the
-  recipe/seed-mean footing the stone still stands (best seed-mean ≤3:
-  91.24 with rescorer, −0.03).
-* **Cyrillic (stone 2): untouched by Phase K** — 77.92 confirm-half
-  (λ = 2.0 footing) remains the bar; no K work targeted it.
-* **test-2400: SEALED.** Ledger at 3 entries throughout; nothing here reads
-  it. Whether the mix2 configuration's footing justifies a pre-registered
-  unsealing is explicitly **the parent orchestrator's decision**, with §8.2's
-  disclosures as the input.
+* **No single model clears all eleven bars on the seed-mean footing.**
+  `sw2345` keeps 10/11 (≤3 −0.07); `slw2` holds 7/11 but is the only model
+  ever to clear ≤3 — and it does so **every-seed** (+0.05 … +0.20 per seed).
+  The two are mirror images across the t1/4+ ↔ ≤3 trade.
+* **The `mix2-i8f16` configuration clears ALL ELEVEN en bars** (val
+  88.68/92.61/93.46/91.30/87.32; layouts +0.31…+3.33) at 4.45 MB / 1.79 ms —
+  on the **single-deterministic-configuration footing**, with the §8.2
+  disclosures (bars are seed-means of a stochastic recipe; the mix recipe
+  itself does not clear bars; the label-free pair gate was derived post-hoc;
+  the thin margins are t3 +0.01 and ≤3 +0.03). A blind confirmation (fresh
+  seed pairs passed through the ≥95 % per-frame-agreement gate before any
+  eval) is the missing evidence rung and is registered, not run.
+* **The ≤3 stone: broken twice, differently.** By configuration
+  (mix2, +0.03) and by training signal (`--short-loss-weight`, +0.12
+  seed-mean, every-seed) — the Phase-J "candidate-generation" diagnosis is
+  confirmed in the mechanism-specific sense: both fixes act on the emissions
+  the beam sees, not on re-ranking.
+* **Cyrillic (stone 2): untouched by Phase K** — the shippable bar stays
+  ≈77.4 full-set / 77.92 confirm-half at the λ = 2.0 footing (`PHASE_J` §6.9).
+* **test-2400: SEALED throughout.** Ledger at 3 entries; nothing in Phase K
+  read, loaded, or hashed it; no pre-registration was filed. Whether the
+  mix2 configuration's footing justifies a pre-registered unsealing is
+  **the parent orchestrator's / user's decision**, with §8.2's disclosures
+  as the input this document hands over.
 
 ## 10. Continuity
 

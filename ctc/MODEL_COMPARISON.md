@@ -11,12 +11,14 @@
 > the ensembling recipe itself does NOT clear bars (pair compatibility is a
 > per-frame-alignment property, gated label-free at ≥95 % agreement, and the
 > gate was derived post-hoc). NOT test-validated; nothing in Phase K touches
-> test-2400. Also from Phase K: same-recipe seed-ensembles are refuted; a
-> ≤3-weighted-loss single model (`phaseK-sw2345-slw2`) clears all five val
-> bars on one seed (paired seeds pending); T′=64 clears all six layout bars
-> at a val cost (contract-v2, documented not promoted); a 21.8 KB rescorer
-> is a small sign-consistent t1/t5/4+ lever for both families and not a ≤3
-> lever. Full record `PHASE_K.md`.
+> test-2400. Also from Phase K: same-recipe seed-ensembles are refuted; the
+> ≤3-weighted-loss single model (`phaseK-sw2345-slw2`, 3 seeds) is the only
+> model ever to clear the val ≤3 bar — seed-mean 91.39, **every seed** —
+> at a t1/t3/4+/spanish cost that leaves it 7/11 overall (`sw2345` stays the
+> 10/11 single-model finalist); T′=64 clears all six layout bars at a val
+> cost (contract-v2, documented not promoted); a 21.8 KB rescorer is a small
+> sign-consistent t1/t5/4+ lever for both families and not a ≤3 lever.
+> Full record `PHASE_K.md`.
 
 **Date:** 2026-08-09 · **Phase-J addendum:** 2026-08-11 · **Status:** standalone
 reference; no new measurement was run for it. Every number below is quoted from

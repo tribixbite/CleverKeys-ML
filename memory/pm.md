@@ -991,3 +991,15 @@ s1234, azerty/spanish miss; s4321+s7777 PAIRED SEEDS RUNNING (last open
 measurement). Box rebooted 4x; all runs recovered from last.pt, --workers 0.
 Docs: PHASE_K.md + RESULTS + MODEL_COMPARISON + APP_INTEGRATION_PLAN updated;
 artifacts + fixtures staged with sha256s. test-2400 SEALED throughout.
+
+2026-08-12 — PHASE K CLOSED. slw2 3-seed verdict: <=3 bar CLEARED seed-mean
+(91.39, +0.12) and EVERY seed — first ever; cost t1 -0.03 / t3 -0.01 /
+4+ -0.13 / spanish -0.66 => 7/11; sw2345 stays single-model finalist (10/11).
+No single model clears all 11. mix2-i8f16 configuration (sw2345_s1234 int8w +
+resbn192i_s1234 fp16w, prob-averaged emissions) clears ALL 11 en bars on the
+single-configuration footing, 4.45MB / 1.79ms, disclosures in PHASE_K.md §8.2
+(post-hoc gate, seed-mean-vs-deterministic footing, thin t3/<=3 margins).
+Cyrillic stone stands. test-2400 SEALED (3 ledger entries, untouched).
+Unsealing decision handed to orchestrator/user with §8.2 disclosures.
+Registered not run: blind gate confirmation on fresh pairs, W∈(1,2)
+interpolation arm, slw2-as-mix-member, Tier-2 decode knobs.
