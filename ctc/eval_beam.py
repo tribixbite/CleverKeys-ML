@@ -115,7 +115,13 @@ class OnnxEncoder:
 
     def __init__(self, onnx_paths: list, avg: str = "logprob") -> None:
         import onnxruntime as ort
-        self.sessions = [ort.InferenceSession(str(p),
+        so = ort.SessionOptions()
+        # The encoder is ~0.8 ms single-threaded; uncapped sessions spawn a
+        # thread per core EACH and stampede the box (measured load 114 with
+        # four concurrent evals). Same caps as eval_altlayout.py.
+        so.intra_op_num_threads = 1
+        so.inter_op_num_threads = 1
+        self.sessions = [ort.InferenceSession(str(p), so,
                                               providers=["CPUExecutionProvider"])
                          for p in onnx_paths]
         self.avg = avg
