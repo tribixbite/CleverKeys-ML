@@ -254,6 +254,58 @@ too, retrain, same frozen-w protocol), (b) the symmetric incumbent ranker
 (mining running), (c) rescorer × alt-layout interaction unmeasured — required
 before any stacked-configuration claim.
 
+### 5.1 K3 final verdict (seed-general ranker + the symmetric incumbent)
+
+A second ranker trained on slates mined from BOTH s1234 and s4321 emissions
+(1.2 M rows total), same frozen-w protocol (w* = 0.05 chosen on the s1234
+tune half; confirm half ≤3 +0.30 / t1 +0.18):
+
+| seed | t1 Δ | t3 Δ | t5 Δ | ≤3 Δ | 4+ Δ |
+|---|---|---|---|---|---|
+| s1234 | +0.15 | +0.05 | +0.02 | **+0.30** | +0.07 |
+| s4321 | +0.03 | +0.07 | +0.01 | **0.00** | +0.05 |
+| s7777 | +0.07 | 0.00 | +0.04 | **−0.18** | +0.20 |
+| seed-mean | **+0.08** | +0.04 | +0.02 | +0.04 | +0.11 |
+
+**≤3 stays sign-inconsistent (+0.30 / 0.00 / −0.18) → the rescorer is NOT the
+≤3 lever**, seed-general training does not fix it, and seed-mean ≤3 (91.24)
+still misses by 0.03. What the rescorer IS: a small, sign-consistent
+**t1 / t5 / 4+** lever (3 of 3 seeds each; t1 seed-mean 88.51 → 88.59) for a
+21.8 KB second ONNX and ~0.3 ms of feature work.
+
+**Symmetric application (the rule):** the incumbent got its own self-mined
+ranker (`ranker_resbn192i`, 600 k rows of its own emissions, same protocol,
+w* = 0.05 on its own tune half): full-val 88.32 → **88.58** (+0.26), ≤3
+91.21 → 91.35 (+0.14), confirm-half positive. **The rescorer helps both
+families about equally** — it shifts the playing field, not the ranking, and
+any bar comparison involving a rescorer must use rescored bars.
+
+## 6. K2 / K4 harvest — the three GPU arms
+
+Full battery, s1234, vs the `sw2345` s1234 twin (88.51/92.59/93.35/90.91/
+87.26):
+
+| arm | val t1/t3/t5/≤3/4+ | Δ | verdict |
+|---|---|---|---|
+| `phaseK-t64` (K2, T′=64) | 88.32/92.57/93.31/91.12/86.87 | −0.19/−0.02/−0.04/**+0.21**/**−0.39** | val: the PHASE_I §6.1 probe does NOT reproduce at the modern recipe — 4+ flips sign (ch-80 +0.33 → ch-192-modern −0.39); ≤3 +0.21 but still under its bar (91.12 < 91.27); t3/≤3 bars missed. NOT a val winner; transfer table below. |
+| `phaseK-sw2345-280k` (K4) | 88.37/92.44/93.27/91.18/86.92 | −0.14/−0.15/−0.08/+0.27/−0.34 | long schedule again a wash (mirrors `ch256-280k`, §6.1d of Phase J); soup harvested separately. |
+| **`phaseK-sw2345-slw2`** (K4, ≤3-weight 2.0) | 88.38/92.66/93.33/**91.47**/86.78 | −0.13/+0.07/−0.02/**+0.56**/**−0.48** | **the ≤3 lever works**: +0.56 on the target stratum — the largest single-model ≤3 movement of the campaign — at −0.48 4+, exactly the designed trade. **Clears ALL FIVE val bars on one seed** (+0.08/+0.06/+0.07/+0.20/+0.01). Margins are inside the single-seed floor → paired seeds s4321/s7777 LAUNCHED (running), verdict pending. |
+
+## 7. Artifacts staged (sha256)
+
+| file | bytes | sha256 |
+|---|---|---|
+| `artifacts/phaseK_sw2345_s1234_int8w.onnx` | 1,554,355 | `9a8edefa…437b7` |
+| `artifacts/phaseK_resbn192i_s1234_fp16w.onnx` | 3,052,318 | `d55624cc…84613` |
+| `artifacts/phaseK_resbn192i_s1234_int8w.onnx` | 1,554,355 | `ce225924…736a3` |
+| `artifacts/phaseK_ranker_sw2345_2seed.onnx` | 21,782 | `b8add752…fae71` |
+| `artifacts/phaseK_ranker_resbn192i.onnx` | 21,782 | `11775853…384da` |
+| `artifacts/phaseK_slw2_s1234.onnx` | 6,068,519 | `54ff81f0…387eb7` |
+| `artifacts/phaseK_t64_s1234_contractv2.onnx` | 6,076,715 | `74771841…70d7cf` |
+
+(Full hashes in `~/ctc-train/artifacts/`; abbreviated here, verified by
+`sha256sum` at staging.)
+
 ## 4.5 Ops incident — all three GPU arms deadlocked at ~22:00–22:12
 
 `phaseK-t64` froze at step 63 k, `280k` at 123 k, `slw2` at 54 k; GPU 0 %,
