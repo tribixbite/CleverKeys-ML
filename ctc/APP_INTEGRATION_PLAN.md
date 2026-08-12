@@ -1,6 +1,7 @@
 # APP_INTEGRATION_PLAN — wiring the CTC swipe engine into CleverKeys (G3 + G5)
 
-**Date:** 2026-08-08 · **Updated:** 2026-08-11 (Phase J — see **§7**, which carries
+**Date:** 2026-08-08 · **Updated:** 2026-08-12 (Phase K — see **§8**: the
+ensemble configuration, contract-v2, the rescorer) · 2026-08-11 (Phase J — see **§7**, which carries
 the Cyrillic λ finding (§7.1), the post-Phase-J model menu and fixture state
 (§7.2), the user-dictionary pointer (§7.3) and the multi-script verdict (§7.4);
 §7 supersedes D1, §1(d), §1(e) and O1 where they disagree).
