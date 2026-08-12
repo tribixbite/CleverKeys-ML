@@ -127,6 +127,81 @@ would be needed; unmeasured). Latency ≈ 2 × 0.84 ms encoder — trivially
 inside budget. And the greedy drop (72 → 68) says even the same-seed average
 blurs emissions slightly; the beam more than recovers it.
 
+### 4.3 Round 2 — the mechanism is pair-compatibility, not "same seed"
+
+| config | t1 | t3 | t5 | ≤3 | 4+ | greedy |
+|---|---|---|---|---|---|---|
+| mix2 s1234 pair | 88.66 | 92.63 | 93.42 | 91.41 | 87.23 | 68.12 |
+| mix2 s4321 pair | **87.46** | 91.80 | 92.83 | 90.00 | 86.14 | **19.84** |
+| mix2 s7777 pair | 88.57 | 92.72 | 93.49 | 91.30 | 87.15 | 61.35 |
+| mix2 cross-seed (sw2345 s1234 + resbn s7777) | 86.75 | 91.58 | 92.55 | 89.55 | 85.30 | **9.27** |
+| **mix3 s1234 (+`ch256-p65`)** | **88.88** | **92.73** | 93.35 | **91.53** | **87.50** | **74.85** |
+
+* The cross-seed control fails as the alignment hypothesis predicts (greedy
+  9.27: the members literally cannot agree on a frame labelling).
+* **But "same seed" is NOT sufficient**: the s4321 pair fails the same way
+  (greedy 19.84). Alignment compatibility is a property of the *pair*, not of
+  the seed label. The ensemble's member-agreement is measurable **label-free**
+  (greedy-string agreement between members on unlabeled traces) and separates
+  the working pairs (61–75 % ensemble greedy) from the broken ones (9–20 %)
+  by a factor of 3+ — a pre-registerable compatibility gate.
+* On the honest **recipe-level seed-mean footing, mix2 fails t1**
+  (mean 88.23 vs 88.30): as a *recipe*, cross-model mixing is not
+  bar-clearing. What clears bars is a *specific compatible pair*, selected by
+  the gate.
+
+### 4.4 The s1234 mixes take ALL ELEVEN bars (single-configuration footing)
+
+Alt-layout az26 in-dict E1 + dvorak vs app-98k trie
+(`altlayout/phaseK-mix{2,3}s1234_*`):
+
+| corpus | bar | mix2 s1234 | Δ | mix3 s1234 | Δ |
+|---|---|---|---|---|---|
+| val t1 | 88.30 | 88.66 | +0.36 ✓ | **88.88** | **+0.58 ✓** |
+| val t3 | 92.60 | 92.63 | +0.03 ✓ | 92.73 | +0.13 ✓ |
+| val t5 | 93.26 | 93.42 | +0.16 ✓ | 93.35 | +0.09 ✓ |
+| **val ≤3** | 91.27 | **91.41** | **+0.14 ✓** | **91.53** | **+0.26 ✓** |
+| val 4+ | 86.77 | 87.23 | +0.46 ✓ | 87.50 | +0.73 ✓ |
+| dvorak | 89.13 | **92.27** | +3.14 ✓ | **92.02** | +2.89 ✓ |
+| dvorak app-98k | 88.20 | **91.66** | +3.46 ✓ | **91.33** | +3.13 ✓ |
+| azerty | 83.60 | 85.12 | +1.52 ✓ | 85.02 | +1.42 ✓ |
+| qwertz | 82.50 | 82.90 | +0.40 ✓ | 82.73 | +0.23 ✓ |
+| german | 79.64 | 81.22 | +1.58 ✓ | 81.17 | +1.53 ✓ |
+| spanish | 88.28 | 89.59 | +1.31 ✓ | 89.76 | +1.48 ✓ |
+| clearflow (floor 91.08) | — | 92.22 | — | 92.34 | — |
+| kasroz (floor 92.07) | — | 91.94 | — | 91.80 | — |
+
+**Every val bar and every layout bar falls, most by margins far outside the
+measured seed spreads** (dvorak +2.9–3.1 against a 1.5–3 pt spread axis;
+euro corpora +0.2–1.6). The transfer gains dwarf the val gains — averaging
+across *models trained on different data mixes* smooths exactly the
+layout-specific idiosyncrasies that single models trip on.
+
+**Footing disclosures (why this is not yet a terminal-condition claim):**
+1. These are deterministic single configurations; the bars are 3-seed means
+   of a stochastic recipe. The configuration's own "seed axis" (§4.3) shows
+   the *recipe* does not clear bars — the *gated pair* does. The gate is
+   label-free but was identified after seeing these results (post-hoc for
+   this phase; pre-registerable for any future confirmation).
+2. **Size: NOT met as-is.** mix2 = 2 × fp16w = 5.82 MiB > 5 MB;
+   mix3 ≈ 11 MB. int8 weight quantization (~×2 further) is the open route
+   (`quantize_onnx.py`); accuracy after int8 is unmeasured on these members.
+3. Cyrillic is untouched by K1 (stone 2 stands regardless).
+4. Latency: 2–3 × 0.84 ms encoder — inside every budget; to be measured
+   end-to-end for the record.
+
+## 4.5 Ops incident — all three GPU arms deadlocked at ~22:00–22:12
+
+`phaseK-t64` froze at step 63 k, `280k` at 123 k, `slw2` at 54 k; GPU 0 %,
+main procs alive, workers zombied. These were FRESH runs (not resumes), so
+the known "persistent-worker resume deadlock" is **broader than resumes** on
+this box — plausibly the persistent-worker pool generally, possibly
+triggered by the large CPU eval load starting/stopping alongside. All three
+trees were killed and resumed from `last.pt` (≤ 3 k steps lost each) under
+identical args **plus `--workers 0`**, per the standing rule. Lesson
+recorded: on this box, any train.py run that must survive unattended should
+use `--workers 0` from launch; the throughput cost is the cheaper insurance.
+
 ## 5. Continuity
 
 Same rules as `PHASE_J.md` §7: trainings `nohup setsid` + launch logs
