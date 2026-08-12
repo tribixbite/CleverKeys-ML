@@ -977,3 +977,17 @@ seed-mean and every-seed.
       lever table, best-single-model card, best-configuration card, bars
       table both footings vs incumbent+finalist, honest verdict. Do NOT
       unseal; if bars fall, the unsealing decision goes up.
+
+2026-08-12 — Phase K close-out state (pre-final): K1 DONE (seed-ensembles
+refuted; mix2-i8f16 configuration = sw2345_s1234 int8w + resbn192i_s1234
+fp16w, prob-averaged, ALL 11 en bars on single-config footing, 4.45MB/1.79ms;
+per-frame agreement >=95% is the label-free pair gate, derived post-hoc).
+K2 DONE (t64: all 6 layout bars, val t3/<=3 miss + 4+ sign-flip vs probe;
+contract-v2 artifact + fixture committed; ~2.1x decode cost; not promoted).
+K3 DONE (rescorer: sign-consistent t1/t5/4+ ~ +0.1, NOT <=3; symmetric —
+incumbent gains same; flat stacked on ensemble; 21.8KB onnx committed).
+K4: 280k+soup wash; slw2 (<=3-weight 2.0) = +0.56 <=3, all 5 val bars on
+s1234, azerty/spanish miss; s4321+s7777 PAIRED SEEDS RUNNING (last open
+measurement). Box rebooted 4x; all runs recovered from last.pt, --workers 0.
+Docs: PHASE_K.md + RESULTS + MODEL_COMPARISON + APP_INTEGRATION_PLAN updated;
+artifacts + fixtures staged with sha256s. test-2400 SEALED throughout.
