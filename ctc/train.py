@@ -865,6 +865,14 @@ def main() -> int:
                          "contract (stride-2 stem); 64 = stride-1 stem, doubled "
                          "emission resolution. 64 is CONTRACT-BREAKING — "
                          "measurement only, the app decides any move")
+    ap.add_argument("--short-loss-weight", type=float, default=1.0,
+                    dest="short_loss_weight",
+                    help="Phase K4: multiply the per-sample CTC loss of short "
+                         "targets (len <= 3) by this factor before the batch "
+                         "mean (weighted mean, so 1.0 is EXACTLY the default "
+                         "reduction). Aims training capacity at the one val "
+                         "stratum the finalist misses. Incompatible with "
+                         "--cr-alpha.")
     ap.add_argument("--total-steps", type=int, default=0, dest="total_steps",
                     help="step-equalized budget: cosine horizon and stopping are "
                          "measured in optimizer steps, not epochs (0 = use --epochs)")
@@ -1173,6 +1181,12 @@ def main() -> int:
         return kl / (student_log_e.shape[0] * student_log_e.shape[1]) * (t * t)
 
     ctc = torch.nn.CTCLoss(blank=BLANK, zero_infinity=True)
+    if args.short_loss_weight != 1.0 and args.cr_alpha > 0:
+        raise SystemExit("--short-loss-weight is not plumbed through the CR "
+                         "dual-view branch; run one lever at a time")
+    ctc_none = (torch.nn.CTCLoss(blank=BLANK, zero_infinity=True,
+                                 reduction="none")
+                if args.short_loss_weight != 1.0 else None)
     opt = torch.optim.AdamW(model.parameters(), lr=args.lr,
                             weight_decay=args.weight_decay)
     # Step-equalized mode lets tiers of very different sizes share one budget.
@@ -1269,10 +1283,23 @@ def main() -> int:
                     kd = kd_loss(log_e, t_log_e)
                 log_e = log_e.permute(1, 0, 2)                  # [T',B,65] for CTCLoss
                 in_lens = torch.full((log_e.shape[1],), args.t_out, dtype=torch.long)
-                loss = ctc(log_e, targets, in_lens, tlens)
+                if ctc_none is not None:
+                    # K4 short-word emphasis: weighted mean of the per-sample
+                    # length-normalized losses ('mean' reduction == weights 1).
+                    per = ctc_none(log_e, targets, in_lens, tlens) / \
+                        tlens.to(log_e.device).clamp(min=1)
+                    w = torch.where(tlens.to(log_e.device) <= 3,
+                                    torch.as_tensor(args.short_loss_weight,
+                                                    device=log_e.device), 1.0)
+                    loss = (per * w).sum() / w.sum()
+                    # logged ctc_loss stays the UNWEIGHTED mean -> comparable
+                    # across arms.
+                    ctc_val = float(per.detach().mean())
+                else:
+                    loss = ctc(log_e, targets, in_lens, tlens)
+                    ctc_val = float(loss.detach())
                 # `running` stays the CTC term alone, so the logged `ctc_loss`
                 # remains comparable across every arm whether KD/CR is on or off.
-                ctc_val = float(loss.detach())
                 if kd is not None:
                     running_kd += float(kd.detach())
                     loss = loss + args.kd_weight * kd
