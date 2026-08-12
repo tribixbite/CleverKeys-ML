@@ -937,3 +937,43 @@ int8-trunk free at ch256), latency <50ms (trivially met).
       gate + multi-script notes); regenerate golden fixture at ship preset;
       artifacts + sha256s. Adversarial audit commissioned by orchestrator
       AFTER report — not run here.
+
+2026-08-11 — Phase K (candidate-generation campaign; orchestrator directive of
+2026-08-11). Target: the two standing stones — val <=3 (-0.07 vs bar) via
+candidate generation, plus best-configuration convergence. test-2400 STAYS
+SEALED (ledger stays at 3 entries; any unsealing is the parent orchestrator's
+call). Incumbent resbn192i (all-bars-every-seed footing); finalist sw2345
+(10/11 seed-mean, <=3 -0.07). Bars = PHASE_J.md §8 footing, report BOTH
+seed-mean and every-seed.
+
+- [ ] K1 seed-ensemble emission averaging (eval-only, Tier 1): average
+      log-emissions AND probs across sw2345's 3 seeds before the beam; also
+      resbn192i's 3 seeds and 2-model mixes. Full battery (val + 6 layouts)
+      for the winner. Report N×-encoder latency honestly; check 3×fp16w <=5MB.
+      Discuss what "every-seed" means for a deterministic ensemble-of-3.
+- [ ] K2 T'=64 contract-v2 retrain (Tier 1): sw2345 recipe (ch192, p0.65,
+      sw2345 tier, 188k, no KD, coupled sampler) with --t-out 64. Seed 1234
+      first -> full battery incl. per-stratum; if <=3 and/or transfer confirm
+      the PHASE_I §6.1 probe, 3 seeds. Export contract-v2 ONNX ([1,64,65])
+      + document ALL app-side implications (CtcEmissions slice, beam frames,
+      fixture format, ~2x beam latency — measure). Pre-authorized contract
+      change per user directive.
+- [ ] K3 discriminative candidate rescorer (Tier 1): mine (trace, gold,
+      confusables) triples by running the sw2345 beam over TRAIN-set
+      emissions (self-mined, license-clean — never FUTO decoder outputs);
+      features = beam score components, forced-alignment score, length,
+      per-letter emission mass, rank; tiny pairwise ranker (<100k params)
+      -> second ONNX; top-k rerank after beam; blend weight swept on
+      val[0:half], confirmed on holdout half. Target rank-2 confusions
+      (2/3 of errors, worst on <=3). SYMMETRIC: offer to incumbent too.
+- [ ] K4 Tier 2 riders: beam width 300 recheck on current models;
+      length-conditioned decode knobs (short-trace width / blank handling);
+      <=3-weighted CTC loss arm; sw2345 at 280k + soup; lr/wd micro-sweep.
+- [ ] K5 convergence: stack survivors (T64 + rescorer + ensemble are
+      composable — measure the stack), full battery both footings,
+      size/latency, PHASE_K.md + RESULTS.md + MODEL_COMPARISON.md +
+      APP_INTEGRATION_PLAN.md, artifacts + sha256s, fixtures regenerated
+      (contract-v2 needs its own fixture format — flag it). Final report:
+      lever table, best-single-model card, best-configuration card, bars
+      table both footings vs incumbent+finalist, honest verdict. Do NOT
+      unseal; if bars fall, the unsealing decision goes up.
