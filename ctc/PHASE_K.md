@@ -420,6 +420,34 @@ frames; the refine-head `[T′,92]` input and any `[·,32,·]` assert break;
 fixture `artifacts/phaseK_t64_golden_contractv2.json` (frames = 64).
 **Not promoted** (val bill), kept as the documented transfer option.
 
+### 8.5 PRE-REGISTRATION — the blind gate confirmation (committed BEFORE any
+### training or decode of the pair)
+
+The §8.2 claim's missing evidence rung. Protocol, fixed in advance:
+
+1. Train ONE fresh pair at a seed never used in this campaign — **s5555**:
+   `phaseK-sw2345-s5555` (the finalist recipe) and `phaseK-resbn192i-s5555`
+   (the incumbent recipe, i.e. the base data mix), 188 k each, otherwise the
+   §1 recipes verbatim, `--workers 0`.
+2. When both land: export, then compute **only** the label-free gate — per-
+   frame argmax agreement of the two members on the first 2,000 val traces
+   (labels unused) — and COMMIT the prediction before any beam decode of the
+   mixed configuration:
+   * agreement ≥ 95 % → predict the s5555 mix2 (prob averaging, E1) lands in
+     the working band: **val t1 ≥ 88.30 (the bar) and ensemble val greedy
+     ≥ 55 %**;
+   * agreement < 95 % → predict the broken band: **val t1 ≤ 87.5 and
+     ensemble greedy ≤ 30 %**.
+3. Then decode the mix's full val battery once and compare. Gate correct →
+   the pair-compatibility mechanism is confirmed **prospectively** and §8.2's
+   "post-hoc gate" caveat is discharged. Gate wrong → §8.2 is hardened to
+   "post-hoc single-configuration observation, mechanism unconfirmed".
+
+No part of this touches test-2400. The two new single models also get the
+standard val decode for the record (their own bars are not at issue).
+Registered 2026-08-12 before either training was launched; the git history
+of this block is the timestamp.
+
 ## 9. FINAL VERDICT (2026-08-12)
 
 * **No single model clears all eleven bars on the seed-mean footing.**
