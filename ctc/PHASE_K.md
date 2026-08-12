@@ -448,6 +448,13 @@ standard val decode for the record (their own bars are not at issue).
 Registered 2026-08-12 before either training was launched; the git history
 of this block is the timestamp.
 
+**GATE MEASURED (before any decode — this commit precedes every s5555 beam
+run): per-frame argmax agreement = 97.0 %** (blank-pattern 97.6 %,
+letters-where-both-emit 96.5 %, first 2,000 val traces, labels unused).
+**Gate verdict: PASS (≥ 95 %). Committed prediction: the s5555 mix lands in
+the working band — val t1 ≥ 88.30 and ensemble val greedy ≥ 55 %.**
+Decode follows this commit.
+
 ## 9. FINAL VERDICT (2026-08-12)
 
 * **No single model clears all eleven bars on the seed-mean footing.**
