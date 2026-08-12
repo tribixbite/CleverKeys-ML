@@ -141,10 +141,26 @@ blurs emissions slightly; the beam more than recovers it.
   9.27: the members literally cannot agree on a frame labelling).
 * **But "same seed" is NOT sufficient**: the s4321 pair fails the same way
   (greedy 19.84). Alignment compatibility is a property of the *pair*, not of
-  the seed label. The ensemble's member-agreement is measurable **label-free**
-  (greedy-string agreement between members on unlabeled traces) and separates
-  the working pairs (61–75 % ensemble greedy) from the broken ones (9–20 %)
-  by a factor of 3+ — a pre-registerable compatibility gate.
+  the seed label.
+* **The compatibility metric is per-FRAME, not per-string.** Whole-string
+  greedy agreement is flat across all 21 member pairs (76.7–78.7 %) and
+  predicts nothing. Per-frame argmax agreement (2,000 unlabeled val traces)
+  separates perfectly, and the letter-identity agreement where both models
+  emit is ~96 % for every pair — the disagreement is *where* letters and
+  blanks sit, i.e. alignment phase:
+
+  | pair | frame agreement | ensemble val t1 |
+  |---|---|---|
+  | s1234 pair | **96.9 %** | 88.66 ✓ |
+  | s7777 pair | **96.1 %** | 88.57 ✓ |
+  | s1234 + `ch256-p65` (mix3 edges 95.5 / 96.2 / 96.9 %) | | 88.88 ✓ |
+  | s4321 pair | 88.8 % | 87.46 ✗ |
+  | cross-seed control | 83.3 % | 86.75 ✗ |
+
+  A label-free gate — *pair per-frame agreement ≥ ~95 %* — costs seconds,
+  needs no val labels, and cleanly picks the working ensembles. (Registered
+  as derived AFTER the round-2 outcomes were seen; any bar-claim built on it
+  needs a fresh confirmation, e.g. new seeds gated blind.)
 * On the honest **recipe-level seed-mean footing, mix2 fails t1**
   (mean 88.23 vs 88.30): as a *recipe*, cross-model mixing is not
   bar-clearing. What clears bars is a *specific compatible pair*, selected by
