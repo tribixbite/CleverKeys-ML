@@ -1010,3 +1010,14 @@ committed 3156080 -> decode). Prediction PASSED prospectively: s5555 mix
 88.72 t1 / greedy 68.40 (bands were >=88.30 / >=55). Fresh pair = 10/11
 (<=3 91.18, -0.09); all six layout bars clear. Mechanism confirmed; all-11
 stays a property of the s1234 mix2-i8f16 configuration. PHASE K FULLY CLOSED.
+
+2026-08-12 — FINAL ARCHITECT REVIEW (in progress): full-campaign retrospective
+(PHASE_A..K, RESULTS, MODEL_COMPARISON, FAIR_REMATCH, ALT_LAYOUT_EVAL,
+DATASET_SCOUT, RESEARCH_SCAN, PHASE_I_DATA, audits, code) -> extract general
+insights; if justified, write PIPELINE_V2_PROPOSAL.md (+ train_v2.py skeleton)
+with losses, aug structure, data mix, selection protocol, expected gains,
+cost, success bars (headline: beat mix2-i8f16's numbers with a SINGLE model).
+Design/proposal only — NO training runs, NO test-2400 contact.
+- [ ] Part 1 retrospective review (docs + code read)
+- [ ] Part 2 decision: propose v2 or declare data ceiling
+- [ ] Commit + push
