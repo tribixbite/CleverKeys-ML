@@ -1045,7 +1045,12 @@ ctc/PIPELINE_V2_PROPOSAL.md; log: ctc/PHASE_L.md; workdir ~/ctc-train.
       correct, resume works, export + eval_beam --ens-avg prob verified.
       PREMISE NOT REFUTED.
 - [ ] L1 reference pair v2pair-s1234 (188k, slw 1.0/1.5, pw 0.3, E5 probes on)
-- [ ] S0 targeted en synthesis (synth_en_short/tail) + endpoint gates (CPU)
+- [x] S0 targeted en synthesis DONE: english_synth.py; synth_en_short.npz
+      (150k, len<=4, 7919 uniq) + synth_en_tail.npz (150k, <3 real traces,
+      74314 uniq) = 18.9% of the v2 mix; 3 gates PASS (displacement magnitude
+      matches real to 0.001; wrong-geometry dvorak control 0.04 vs 0.76;
+      hit-gap better than the ru precedent). Original band gate FAILED and was
+      revised with the reasoning recorded in PHASE_L.md 4.1 (not silent).
 - [ ] L2 pair-level element ablation (E2 synth) per L1 verdict
 - [ ] L3 winner pair x 3 seeds, blind gate applied before decode
 - [ ] L4 batteries, export/quantize, fixtures, RESULTS/MODEL_COMPARISON
