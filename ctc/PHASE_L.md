@@ -678,3 +678,21 @@ t1 ≥ 88.30 and ensemble greedy ≥ 55 %; < 95 % → t1 ≤ 87.5 and greedy ≤
 committed in its original form anyway, and scored the same way).
 
 **Nothing else launches after this stage without new instruction.**
+
+### 14.2 GATES MEASURED — committed before any decode of these two pairs
+
+Both arms reached 188 k. Label-free, from the exported ONNX, 2,000 val traces,
+no beam run yet; this commit precedes their decodes.
+
+| pair | training-final agreement | ONNX gate | blank | letters | gate-pass evals | verdict |
+|---|---|---|---|---|---|---|
+| `v2pair-s4321` | 98.18 % | **98.05 %** | 98.60 | 96.52 | 38 of 47 | **PASS** |
+| `v2pair-s7777` | 98.15 % | **98.15 %** | 98.64 | 96.93 | 37 of 47 | **PASS** |
+
+**Six of six coupled pairs in this phase have now passed the gate**
+(98.05–98.33 %), across three data seeds and two data mixes.
+
+**COMMITTED PREDICTIONS (before decoding):** both pairs → **working band, val
+t1 ≥ 88.30 and ensemble val greedy ≥ 55 %.** Held alongside the §14.1
+forecast, which stands unmodified: **I expect at least one of these two pairs
+to miss the card's azerty bar (84.93), and therefore bar 1 to fail.**
