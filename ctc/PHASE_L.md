@@ -385,3 +385,247 @@ configuration including the failing one — the members agree on letter identity
 wherever both emit. The entire difference is in **`blank_pattern`** (98.8 % vs
 91.8 %), i.e. in *where* the emissions sit. That is precisely the alignment
 gauge, isolated.
+
+## 9. Decode results (full battery: val-9918 AOSP/E1 + six layout bars)
+
+All fp32 unless marked. Pairs are per-frame arithmetic probability averaging
+of the two selected members (the mix2 contract), `--ens-avg prob`.
+
+### 9.1 Pairs vs the `mix2-i8f16` card (the PRIMARY bar)
+
+| config | t1 | t3 | t5 | ≤3 | 4+ | dvorak | dv-app | azerty | qwertz | german | spanish | tally |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| **card** | 88.68 | 92.61 | 93.46 | 91.30 | 87.32 | 91.94 | 91.53 | 84.93 | 82.81 | 81.22 | 89.59 | — |
+| L1 pair (no E2) | **88.90** | **92.86** | **93.58** | **91.53** | **87.53** | **93.04** | **92.76** | 84.16 ✗ | 83.91 | 82.08 | 89.87 | **10/11** |
+| L2 pair (E2) s1234 | 88.85 | 92.79 | 93.42 ✗ | **91.59** | 87.43 | 92.76 | 92.35 | **85.02** | **84.84** | **82.22** | **90.44** | **10/11** |
+| E2 pair s4321 | 88.52 ✗ | 92.71 | 93.35 ✗ | 91.15 ✗ | 87.15 ✗ | 92.88 | 92.35 | 84.35 ✗ | 83.91 | 82.08 | 88.51 ✗ | 5/11 |
+| E2 pair s7777 | 88.49 ✗ | 92.72 | 93.35 ✗ | 91.12 ✗ | 87.12 ✗ | 89.82 ✗ | 89.21 ✗ | 84.98 | 85.09 | 81.95 | 89.76 | 5/11 |
+| pw0 pair (control) | 88.09 ✗ | 92.59 ✗ | 93.32 ✗ | 91.12 ✗ | 86.52 ✗ | 89.34 ✗ | 88.81 ✗ | 84.35 ✗ | 84.41 | 80.99 ✗ | 88.96 ✗ | 1/11 |
+
+### 9.2 The same configurations against the ELEVEN CAMPAIGN BARS
+
+| config | tally | misses |
+|---|---|---|
+| **L1 pair (no E2)** | **11/11** | — |
+| **L2 pair (E2) s1234** | **11/11** | — |
+| E2 pair s4321 | 10/11 | ≤3 91.15 (−0.12) |
+| E2 pair s7777 | 10/11 | ≤3 91.12 (−0.15) |
+| pw0 pair (control) | 7/11 | t1, t3, ≤3, 4+ |
+
+### 9.3 Members solo — the SECONDARY (single-model) bar, eleven campaign bars
+
+| member | t1 | ≤3 | dvorak | spanish | tally |
+|---|---|---|---|---|---|
+| **L1 member A (slw 1.0)** | 88.60 | **91.32** | 91.17 | 89.02 | **11/11** |
+| L1 member B (slw 1.5) | 88.47 | **91.53** | 92.80 | 89.42 | 9/11 (azerty, qwertz) |
+| L2 member A | 88.35 | 91.30 | 91.58 | 88.62 | 10/11 (t5 −0.02) |
+| **L2 member B (slw 1.5)** | 88.66 | **91.44** | 92.27 | 88.96 | **11/11** |
+| s4321 member A / B | 88.40 / 88.10 | 91.03 / 91.12 | 92.47 / 90.35 | 87.83 / 88.34 | 8/11, 6/11 |
+| s7777 member A / B | 88.14 / 88.38 | 90.85 / 91.38 | 89.54 / 88.93 | 88.79 / 88.68 | 7/11, 8/11 |
+| pw0 member A / B (control) | 88.56 / 88.28 | 91.12 / 91.35 | 89.09 / 91.33 | 87.83 / 89.08 | 6/11, 7/11 |
+
+**`L1 member A` and `L2 member B` each clear all eleven campaign bars as a
+SINGLE 1.5 M-parameter model** — a thing no single model did in Phases A–K
+(`sw2345` held 10/11 and `slw2` held ≤3 at the cost of four others). Both are
+single-seed results and the campaign's own lesson applies: PHASE_K §8.3
+watched an all-five-val s1234 sweep evaporate across seeds. The s4321/s7777
+members here (6–8/11) are exactly that warning being right again — with the
+caveat that those seeds ran the *E2* recipe, so "seed luck" and "recipe" are
+not separated at the member level.
+
+## 10. THE COMMITTED PREDICTIONS, SCORED
+
+| configuration | agreement | prediction | outcome | verdict |
+|---|---|---|---|---|
+| L1 pair | 98.33 % | working: t1 ≥ 88.30, greedy ≥ 55 | 88.90 / 72.92 | **PASS** |
+| L2 pair | 98.23 % | working | 88.85 / 72.03 | **PASS** |
+| E2 s4321 pair | 98.20 % | working | 88.52 / 71.71 | **PASS** |
+| E2 s7777 pair | 98.18 % | working | 88.49 / 71.84 | **PASS** |
+| pw0 *selected* pair | 95.32 % | working | 88.09 / 53.12 | **MISS both** (−0.21 t1, −1.88 greedy) |
+| pw0 *own-best* mix | 91.30 % | broken: t1 ≤ 87.5, greedy ≤ 30 | 87.64 / **29.10** | **greedy PASS, t1 MISS** (+0.14) |
+
+**Four of four clean predictions above 98 % agreement. Both marginal cases
+missed part of their band.** Stated as the qualification it is:
+
+* The gate remains an excellent **ordinal** predictor. Agreement 98 % → mix
+  greedy 71.7–72.9 and 10–11 bars; 95.3 % → greedy 53.1; 91.3 % → greedy
+  **29.10**, a collapse from members that individually greedy at 72.6/71.8.
+  The mechanism is confirmed harder than ever.
+* But the PHASE_K §8.5 **numeric bands are calibrated for the extremes and do
+  not describe the 91–96 % middle zone.** This phase is the **first time the
+  broken half of those bands has ever been exercised** — Phase K's gate
+  passed at 97 %, so its "< 95 % → t1 ≤ 87.5 / greedy ≤ 30" arm was a
+  counterfactual that was never run. Run here, it is **half right**: the
+  greedy collapse lands exactly as predicted (29.10 ≤ 30) while top-1
+  degrades only to 87.64, not ≤ 87.5. The beam plus a 147 k-word trie
+  recovers most of what a broken alignment costs greedy decoding.
+* **This qualifies PHASE_K §8.5 without retracting it.** What was validated
+  there (≥ 95 % predicts a working mix) held 4/4 again. What is newly
+  measured is that "< 95 %" is a graded degradation, not a cliff, and that a
+  *marginal* pass (95.32 %) does not guarantee the working band.
+
+## 11. VERDICTS against the pre-stated bars
+
+### 11.1 E1 (coupled-pair training) — CONFIRMED as the mechanism
+
+The pre-registered attribution reading (§5) resolves cleanly in the
+"E1 confirmed" branch. On **identical batches, identical data seed, identical
+members-by-construction, differing only in `--pair-weight`**:
+
+| quantity | coupled (L1) | uncoupled (L3) | Δ |
+|---|---|---|---|
+| final per-frame agreement | **98.34 %** | 92.09 % | +6.25 |
+| evals above the 0.95 gate | 46 of 47 | **2 of 47** | — |
+| mix val t1 | **88.90** | 87.64 (own-best) / 88.09 (selected) | **+1.26 / +0.81** |
+| mix val greedy | **72.92** | **29.10** (own-best) | **+43.82** |
+| mix tally, campaign bars | **11/11** | 7/11 | +4 |
+| member A / B val t1 | 88.60 / 88.47 | 88.56 / 88.28 | +0.04 / +0.19 |
+| member A dvorak | **91.17** | 89.09 | +2.08 |
+
+**The coupling is the active ingredient, not batch sharing.** Sharing a batch
+stream leaves the gauge unpinned — the control oscillates 89–94 % for 188 k
+steps and never establishes itself over the gate. The KL pins it by step ~8 k
+and holds it there. And the secondary, honestly-uncertain hypothesis (mutual
+learning helps the *members*) is **weakly supported, not established**: +0.04
+and +0.19 t1 are inside noise, but the transfer deltas (+2.08 dvorak on
+member A) are larger than the axis's seed spread. One seed; not promoted.
+
+The proposal's central claim — *make the campaign's best configuration a
+reproducible recipe instead of a lucky draw* — is met: **4 of 4 coupled pairs
+passed the gate (98.18–98.34 %), versus the campaign's historical 3-in-4**,
+and the one pair that started furthest apart in campaign history (76.7 % at
+4 k) was pulled to 98.19 %.
+
+### 11.2 E2 (targeted English synthesis) — MISSES its gate by 0.01; NOT promoted
+
+Pre-registered rule (§5): *L2 ≥ L1 on ≤3 with no other val bar losing more
+than 0.15.*
+
+| val bar | L1 | L2 | Δ | rule |
+|---|---|---|---|---|
+| ≤3 | 91.53 | **91.59** | +0.06 | ✓ required direction |
+| t1 | 88.90 | 88.85 | −0.05 | ✓ |
+| t3 | 92.86 | 92.79 | −0.07 | ✓ |
+| **t5** | 93.58 | 93.42 | **−0.16** | **✗ (limit 0.15)** |
+| 4+ | 87.53 | 87.43 | −0.10 | ✓ |
+
+**Applied as written, E2 fails, and per the proposal's failure rule ("dropped,
+not tuned-until-it-passes") it is NOT promoted.** The full disclosure, because
+the margin is 0.01 and the gate was val-only:
+
+* E2's measured effect is a **val wash with a euro-layout gain**: azerty
+  **+0.86**, qwertz **+0.93**, spanish **+0.57**, german +0.14, against
+  dvorak −0.28 and dvorak-app −0.41. On the full eleven-bar card comparison
+  the E2 pair is *closer* to the card than L1 (its single miss is t5 by 0.04;
+  L1's is azerty by 0.77).
+* That gain is mechanistically coherent — 74 k unseen lexicon-tail word shapes
+  and 8 k short-word shapes buy lexicon coverage, which is what the euro
+  corpora stress — and it was **outside the scope the gate was written in**.
+* I am not re-scoring E2 against a bar invented after seeing the numbers. The
+  recorded verdict is: **fails its pre-registered gate; the layout evidence
+  is a registered, unresolved question needing three seeds of the L1 recipe
+  to answer.** Both facts stand in the record together.
+
+### 11.3 Bar 1 (primary, the pair bar) — NOT MET
+
+Requires: gated pair ≥ every number on the `mix2-i8f16` card, on ≥ 2 of 3
+seeds, with ≤3 margin > +0.10.
+
+* The three-seed stage ran the **E2 recipe** (registered in §6 as the
+  presumptive configuration, with the cost of being wrong accepted in
+  advance). Tally: s1234 10/11, s4321 5/11, s7777 5/11. **1 of 3 seeds.**
+* The ≤3 sub-condition *is* met at s1234 (91.59, +0.29) and by L1 (91.53,
+  +0.23) — both well past the +0.10 requirement — but fails at the other two
+  seeds (91.15, 91.12).
+* The L1 recipe, which produced the best single configuration in the phase
+  (10/11 vs the card, 11/11 vs campaign bars), **has one seed**. Its
+  three-seed stage is the registered-not-run measurement this phase ends on.
+
+**Honest statement: the primary bar is not met.** The campaign-bar footing
+tells the softer true story — *every* coupled pair cleared 10 or 11 of the
+eleven campaign bars (11, 11, 10, 10), which matches and slightly exceeds
+Phase K's recipe-level claim ("gated mixing clears 10–11 and beats every
+single model") while now being **reliable by construction** rather than
+gated-and-retried.
+
+### 11.4 Bar 2 (secondary, single model, all eleven campaign bars) — MET AT ONE SEED, not on the stated seed-mean footing
+
+`L1 member A` (11/11) and `L2 member B` (11/11) are the first single models in
+the campaign to clear all eleven. The bar as written says *seed-mean*, and one
+seed is not a seed-mean; the s4321/s7777 members (6–8/11) say plainly that
+this can be seed luck. **Not promoted. Recorded as the strongest single-model
+result the campaign has produced, pending three seeds.**
+
+### 11.5 Bar 3 (stretch) and the E7 trigger — DOES NOT TRIGGER
+
+The stretch (a single model beating the full `mix2-i8f16` card) did not fall:
+`L1 member A` reads 88.60/91.32/91.17/83.97 against card numbers
+88.68/91.30/91.94/84.93 — it beats the card's ≤3 but not its t1 or transfer,
+exactly as the proposal predicted ("not expected to fall in v2's base
+stages"). E7 was specified to run **only if bars 1–2 fall**; bar 1 is not met
+and bar 2 is met only at one seed, so **E7 does not trigger and no
+distillation was run.** The proposal's own fallback conclusion applies
+verbatim: *the pair IS the product.*
+
+## 12. The shippable candidate — `v2pair-s1234` at int8w + fp16w
+
+Quantized exactly as the incumbent's packaging (member A int8w, member B
+fp16w), then re-decoded in full:
+
+| axis | card | **v2pair-s1234 i8f16** | Δ | campaign bar | Δ |
+|---|---|---|---|---|---|
+| val t1 | 88.68 | **88.86** | +0.18 | 88.30 | +0.56 |
+| val t3 | 92.61 | **92.82** | +0.21 | 92.60 | +0.22 |
+| val t5 | 93.46 | **93.59** | +0.13 | 93.26 | +0.33 |
+| **val ≤3** | 91.30 | **91.56** | **+0.26** | 91.27 | **+0.29** |
+| val 4+ | 87.32 | **87.46** | +0.14 | 86.77 | +0.69 |
+| dvorak | 91.94 | **92.88** | +0.94 | 89.13 | +3.75 |
+| dvorak app-98k | 91.53 | **92.59** | +1.06 | 88.20 | +4.39 |
+| **azerty** | 84.93 | 84.11 | **−0.82 ✗** | 83.60 | +0.51 |
+| qwertz | 82.81 | **84.41** | +1.60 | 82.50 | +1.91 |
+| german | 81.22 | **82.26** | +1.04 | 79.64 | +2.62 |
+| spanish | 89.59 | **89.76** | +0.17 | 88.28 | +1.48 |
+| size | ≤ 5 MB | **4.39 MB** | −0.06 vs incumbent | ≤ 5 MB | ✓ |
+| val greedy | — | 72.71 | — | — | — |
+
+**10/11 against the card (azerty only), 11/11 against the campaign bars, at
+4.39 MB** — 60 KB smaller than the incumbent `mix2-i8f16` packaging.
+Quantization was free to three decimal places on val (fp32 88.90 → 88.86 t1,
+≤3 91.53 → 91.56) and *helped* qwertz (83.91 → 84.41), consistent with
+PHASE_K §4.6's finding that int8w+fp16w is the val-free packaging.
+
+### 12.1 Artifacts (sha256, staged in `ctc/artifacts/`)
+
+| file | bytes | sha256 |
+|---|---|---|
+| `phaseL_v2pair_s1234_a_int8w.onnx` | 1,554,355 | `01580189…8bead7c4` |
+| `phaseL_v2pair_s1234_b_fp16w.onnx` | 3,052,318 | `59f40d95…c71b2db7` |
+| `phaseL_v2pair_s1234_memberA.onnx` (the 11/11 single model, fp32) | 6,068,519 | `4b9d1ef2…36f3f6a7` |
+| `phaseL_v2pair_i8f16_golden.json` (averaged-emission fixture, E1, 10 cases) | 140,476 | `7440873a…dc8dc749` |
+
+Training-data provenance: `cache/synth_en_short.npz`
+`78e0984e…8102d1`, `cache/synth_en_tail.npz` `92b89a56…c403b11b` (used by the
+E2 arms only — the candidate above is the **L1** recipe and contains no
+synthetic rows).
+
+## 13. Registered, NOT run (the honest ledger of what would settle this)
+
+1. **Three seeds of the L1 recipe** (no E2). The single most valuable missing
+   measurement: the phase's best configuration has one seed, and bar 1 is
+   unanswerable without it. ~10 GPU-h (two arms, concurrent).
+2. **E2 at three seeds of its own**, to resolve the val-wash-vs-euro-gain
+   question §11.2 leaves open.
+3. `--pair-weight` sweep {0.1, 1.0}: the proposal's S2 knob was never swept —
+   0.3 was used throughout and worked, so the shape of the
+   coupling-strength/diversity trade is unmeasured.
+4. E6 (geometric alignment prior) — implemented behind `--geo-align-weight`,
+   default off, **never run**. E1 pinned the gauge well enough that its
+   motivation weakened, but the "all models mutually mixable" prize is
+   untested.
+5. E4 (`w_real` 0.20/0.25/0.30) — not run; L1/L2 used the audited
+   `synth_frac 0.667`.
+6. E7 distillation — trigger not met, correctly not run.
+
+**test-2400: SEALED throughout Phase L. Ledger stays at 3 entries. No script
+in this phase opened it; `train_v2.py`, `english_synth.py` and
+`pair_agreement.py` each refuse test features by name.**
