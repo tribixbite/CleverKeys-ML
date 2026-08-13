@@ -334,3 +334,54 @@ is: train → export → `pair_agreement.py` (label-free, no beam) → commit th
 gate number and the band prediction → decode. The bands are the PHASE_K §8.5
 bands, fixed here: agreement ≥ 95 % predicts val t1 ≥ 88.30 and ensemble val
 greedy ≥ 55 %; agreement < 95 % predicts val t1 ≤ 87.5 and greedy ≤ 30 %.
+
+## 7. All five arms completed 188 k — training-time record
+
+| arm | final agreement | greedy A/B | selection-score A/B | gate-passing evals |
+|---|---|---|---|---|
+| `v2pair-s1234` (L1) | **98.34 %** | 72.70 / 71.33 | 82.07 / 82.00 | **46 of 47** |
+| `v2pair-e2-s1234` (L2) | 98.23 % | 71.18 / 70.53 | 82.12 / 81.82 | — |
+| `v2pair-e2-s4321` | 98.30 % | 71.48 / 70.58 | 81.81 / 82.14 | — |
+| `v2pair-e2-s7777` | 98.19 % | 71.31 / 70.83 | 81.97 / 82.08 | 31 of 47 (from 76.7 % at 4 k) |
+| `v2pair-pw0-s1234` (L3 control) | **92.09 %** | 72.62 / 71.79 | 81.66 / 81.89 | **2 of 47** |
+
+Agreement trajectories tell the mechanism story on their own. Coupled arms
+climb monotonically (L1: 93.5 → 97.7 → 98.3) and sit above the gate for
+essentially the whole run. The uncoupled control **oscillates in a band that
+never establishes itself above the gate** (89.1 → 92.8 → 93.7 → 89.9 → 91.8 →
+92.09 final) and clears 0.95 at only two of 47 evaluations — *on identical
+batches, identical data seed, identical everything but the KL*. And `s7777`,
+which began at 76.7 % agreement — further apart than any pair the campaign has
+recorded — was pulled over the gate by step 68 k and finished at 98.19 %.
+
+## 8. THE GATE, MEASURED AND COMMITTED BEFORE ANY DECODE
+
+Computed with `pair_agreement.py` from the exported ONNX graphs, 2,000 val
+traces, **labels unused, no beam run yet**. This commit precedes every Phase-L
+decode.
+
+| configuration | agreement | blank-pattern | letters-both | verdict |
+|---|---|---|---|---|
+| `v2pair-s1234` selected pair | **98.33 %** | 98.83 | 96.85 | PASS |
+| `v2pair-e2-s1234` selected pair | **98.23 %** | 98.75 | 96.73 | PASS |
+| `v2pair-e2-s4321` selected pair | **98.20 %** | 98.74 | 96.65 | PASS |
+| `v2pair-e2-s7777` selected pair | **98.18 %** | 98.70 | 96.71 | PASS |
+| `v2pair-pw0` selected pair (its 136 k gate-passing eval) | 95.32 % | 95.86 | 96.22 | PASS (marginal) |
+| **`v2pair-pw0` own-best members** (a@172 k + b@164 k) | **91.30 %** | 91.80 | 96.29 | **FAIL** |
+| `v2pair-s1234` own-best members (reference) | 98.10 % | 98.60 | 96.80 | PASS |
+
+**COMMITTED PREDICTIONS (before decoding), using the PHASE_K §8.5 bands:**
+
+1. The four coupled pairs and the pw0 *selected* pair → **working band: val
+   t1 ≥ 88.30 and ensemble val greedy ≥ 55 %.**
+2. The **pw0 own-best mix → broken band: val t1 ≤ 87.5 and ensemble greedy
+   ≤ 30 %.** This is the sharpest test in the phase: the same two members
+   whose *solo* selection scores (81.66 / 81.89) are within a tenth of the
+   coupled arms', predicted to fail catastrophically when averaged, purely
+   because their alignment gauges never converged.
+
+Note the diagnostic split: `letters_both` is ~96.2–96.9 % for *every*
+configuration including the failing one — the members agree on letter identity
+wherever both emit. The entire difference is in **`blank_pattern`** (98.8 % vs
+91.8 %), i.e. in *where* the emissions sit. That is precisely the alignment
+gauge, isolated.
