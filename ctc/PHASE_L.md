@@ -260,3 +260,43 @@ the proposal always specified.
 The falsification control is decisive: the same traces scored against dvorak
 key centers hit 4 % of the time. The traces are geometrically anchored to
 QWERTY, which is the only thing the endpoint check can establish.
+
+## 5. PRE-REGISTRATION — two concurrent arms (committed BEFORE launch)
+
+**Why concurrent.** Measured on this box while L1 runs: GPU utilization
+**14–23 %**, 828 MiB of 16 GB, load 1.8 of 24 cores, 55 GB RAM free. The
+coupled-pair loop is **CPU-bound in its single `--workers 0` feeder**, not
+GPU-bound, so additional arms cost wall-clock only if they contend for cores.
+Three arms need 3 feeder cores plus staggered beam pools. The Phase-K deadlock
+(§4.5 there) was a persistent-worker failure; `--workers 0` from launch is the
+standing mitigation and is used here. If L1's steps/s degrades more than 20 %
+after a co-launch, the co-launched arm is killed and re-run serially — stated
+now so the decision is not made after seeing results.
+
+**L2 — `v2pair-e2-s1234`: L1 + the E2 pools, nothing else changed.** Identical
+args to L1 except `--train-npz` gains `synth_en_short.npz,synth_en_tail.npz`.
+Same data seed, same init seeds, same slw/pair weights, same selection. This
+is the proposal's E2 ablation lifted to the pair level (the footing the
+product ships on), and being paired with L1 it is a clean A/B of E2.
+
+**L3 — `v2pair-pw0-s1234`: L1 with `--pair-weight 0`, the attribution
+control.** Two differently-initialized members trained on *identical batches*
+with no mutual KL. This is the arm that decides whether the coupling term —
+rather than merely sharing a batch stream — is what pins the gauge. It is the
+control the primary claim needs and it did not exist in the proposal's stage
+list; it is added here because concurrency made it free in wall-clock.
+
+**Pre-stated readings (fixed before any of the three finishes):**
+
+* **E1 attribution (L1 vs L3).** If L3's final per-frame agreement is ≥ 0.95
+  and its gated mix matches L1's, then the KL is *not* the active ingredient
+  and E1 must be reported as "same-batch training suffices" — a negative for
+  the proposal's central mechanism claim, to be written up as such.
+  If L3 lands below the gate while L1 clears it, E1 is confirmed as the
+  mechanism at scale.
+* **E2 verdict (L1 vs L2).** Promotion requires L2 ≥ L1 on the ≤3 bar with no
+  other val bar losing more than 0.15, at one seed, and is confirmed only at
+  L4's three seeds. The `short` pool is the ≤3 lever; the `tail` pool is a
+  4+/t1 lever (§4). A wash is a wash and will be recorded as one.
+* **Seed footing.** All three arms are seed 1234. Nothing from this round is
+  promotable on its own; the primary bar needs the three-seed stage.
