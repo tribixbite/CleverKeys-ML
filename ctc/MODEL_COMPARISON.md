@@ -1,5 +1,35 @@
 # Model comparison — speed and accuracy, every candidate, every footing
 
+> **Phase-L addendum (2026-08-13).** Phase L replaces the Phase-K
+> configuration below with one that is a **recipe rather than a draw**, and
+> adds the campaign's first all-eleven single models. Quote with the footings.
+>
+> **`v2pair-s1234` (int8w + fp16w, 4.39 MB)** = the two members of one
+> *coupled-pair* training run (`train_v2.py`: two encoders, identical
+> batches, ramped mutual per-frame KL, member-asymmetric ≤3 loss weights
+> 1.0/1.5), probability-averaged before the beam. Val
+> **88.86 / 92.82 / 93.59 / 91.56 / 87.46**, dvorak 92.88, dvorak-app 92.59,
+> azerty 84.11, qwertz 84.41, german 82.26, spanish 89.76 →
+> **11/11 campaign bars**, 10/11 vs the `mix2-i8f16` card (azerty −0.82), at
+> **60 KB less** than that card's packaging. Its **≤3 = 91.56** is the
+> largest margin over that stratum's bar (+0.29) in the campaign.
+> Footing: **one seed**, and the primary bar (≥ card on 2/3 seeds) was **NOT
+> met** — the three-seed stage ran a different (E2) recipe and returned
+> 10/11, 5/11, 5/11. Not test-validated; Phase L never opened test-2400.
+>
+> **What is now a recipe, not luck:** 4 of 4 coupled pairs passed the
+> label-free ≥95 % agreement gate (98.18–98.34 %), against the historical
+> 3-in-4. The paired `--pair-weight 0` control — identical batches, identical
+> everything but the KL — finished at 92.09 % and its mix collapsed to greedy
+> **29.10** (members 72.6/71.8). Pair compatibility is therefore **trainable**,
+> which is what makes the two-model configuration shippable as a recipe.
+>
+> **Single models (campaign first):** `L1 member A` and `L2 member B` each
+> clear ALL ELEVEN campaign bars (member A: 88.60 t1, **91.32 ≤3**, dvorak
+> 91.17, spanish 89.02). One seed each; sibling seeds read 6–8/11, so this is
+> **not promoted** over `sw2345` (10/11 seed-mean) yet.
+> Full record `PHASE_L.md`; artifacts + sha256s in `PHASE_L.md` §12.1.
+
 > **Phase-K addendum (2026-08-12).** Phase K adds one CONFIGURATION (not a
 > model) above every single-model row on the val + alt-layout footing:
 > **`mix2-i8f16`** = `sw2345_s1234` int8w + `resbn192i_s1234` fp16w with

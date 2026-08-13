@@ -1,5 +1,51 @@
 # CTC Swipe Encoder — Training Results
 
+# Phase L (2026-08-13): pipeline v2 — the mixable pair becomes a RECIPE (coupled training), and two single models clear all eleven campaign bars for the first time
+
+Full record: `ctc/PHASE_L.md`; plan of record `ctc/PIPELINE_V2_PROPOSAL.md`.
+Five 188 k arms, all pre-registered before launch. Headlines with footings:
+
+* **Coupled-pair training (E1) works, and the coupling — not batch sharing —
+  is what does it.** Two encoders trained on identical batches with a ramped
+  mutual per-frame KL land at **98.18–98.34 % per-frame agreement, 4 of 4
+  pairs over the gate** (the campaign's historical rate was 3-in-4, by luck).
+  The paired `--pair-weight 0` control, *identical in every other respect*,
+  finishes at **92.09 %** and clears the gate at only **2 of 47** evaluations;
+  its own-best mix collapses to **greedy 29.10** (its members greedy
+  72.6/71.8) at t1 87.64, while the coupled mix reads **greedy 72.92 / t1
+  88.90**. The proposal's central claim — make the best configuration a
+  recipe rather than a lucky draw — is met.
+* **Candidate `v2pair-s1234` (int8w + fp16w, 4.39 MB)**: val **88.86 / 92.82 /
+  93.59 / 91.56 / 87.46**, dvorak 92.88, dvorak-app 92.59, azerty 84.11,
+  qwertz 84.41, german 82.26, spanish 89.76 — **11/11 campaign bars**, and
+  10/11 against the `mix2-i8f16` card (azerty −0.82) at 60 KB *less* size.
+  The ≤3 stratum reads **91.56 (+0.29 over the campaign bar, +0.26 over the
+  card)** — the largest ≤3 margin the campaign has recorded.
+* **Two single models clear ALL ELEVEN campaign bars** (`L1 member A`,
+  `L2 member B`) — no single model had ever done this (`sw2345` held 10/11;
+  `slw2` held ≤3 at the cost of four). **Footing: one seed.** The s4321/s7777
+  members read 6–8/11, so seed luck is not excluded; **not promoted**.
+* **The primary bar is NOT met.** It required the gated pair to beat every
+  `mix2-i8f16` number on ≥ 2 of 3 seeds; the three-seed stage ran the E2
+  recipe and returned 10/11, 5/11, 5/11. Every coupled pair cleared 10 or 11
+  *campaign* bars (11, 11, 10, 10), which matches Phase K's recipe-level
+  claim while now being reliable by construction.
+* **Targeted English synthesis (E2) misses its pre-registered gate by 0.01**
+  (t5 −0.16 against a 0.15 limit) and is **not promoted**. Disclosed with it:
+  its measured effect is a val wash (t1 −0.05) plus a euro-layout gain
+  (azerty +0.86, qwertz +0.93, spanish +0.57) that the val-only gate did not
+  scope. Generator, pools and endpoint gates are committed
+  (`english_synth.py`).
+* **A qualification of PHASE_K §8.5, not a retraction.** Phase L is the first
+  time the *broken* half of that pre-registration's bands has been exercised
+  (K's gate passed, so it was counterfactual). At 91.30 % agreement the
+  greedy prediction holds exactly (29.10 ≤ 30) but t1 lands at 87.64, not
+  ≤ 87.5; and a *marginal* 95.32 % pass missed both working-band thresholds
+  (88.09 / 53.12). The gate is a reliable **ordinal** predictor; the numeric
+  bands describe the extremes, not the 91–96 % middle.
+* **test-2400 remains SEALED** (ledger at 3 entries; nothing in Phase L
+  opened it).
+
 # Phase K (2026-08-12): a two-model configuration takes all 11 en bars (single-configuration footing); the ≤3 training lever works; the seed-mean stone still stands
 
 Full record: `ctc/PHASE_K.md`. Headlines, with footings stated:

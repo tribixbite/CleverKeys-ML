@@ -1062,3 +1062,32 @@ ctc/PIPELINE_V2_PROPOSAL.md; log: ctc/PHASE_L.md; workdir ~/ctc-train.
 - [ ] L4 batteries, export/quantize, fixtures, RESULTS/MODEL_COMPARISON
 - [ ] E7 distillation contingency only if bars 1-2 fall
 test-2400 SEALED throughout (ledger stays at 3).
+
+2026-08-13 — PHASE L CLOSED (pipeline v2 executed). Five 188k arms, all
+pre-registered before launch; gates measured and predictions committed before
+every decode; test-2400 SEALED (ledger 3).
+- [x] L0 verify + smoke (+ paired pw0 control) — premise not refuted
+- [x] S0 english_synth.py: synth_en_short/tail, 3 gates pass (one gate revised
+      with the reasoning disclosed, PHASE_L 4.1)
+- [x] L1 v2pair-s1234 / L2 v2pair-e2-s1234 / L3 v2pair-pw0-s1234 /
+      v2pair-e2-s4321 / v2pair-e2-s7777 — all 188k, all decoded full battery
+- [x] E1 CONFIRMED: coupled 98.18-98.34% agreement 4/4 over the gate vs the
+      pw0 control 92.09% (2/47 evals); control mix greedy 29.10 vs coupled
+      72.92. Coupling, not batch sharing, pins the gauge.
+- [x] E2 NOT PROMOTED: misses its pre-registered gate by 0.01 (t5 -0.16 vs
+      0.15 limit); measured effect = val wash + euro-layout gain (azerty
+      +0.86, qwertz +0.93, spanish +0.57) outside the gate's scope.
+- [x] BAR 1 (pair >= mix2-i8f16 card on 2/3 seeds): NOT MET (E2 recipe 1/3).
+      BAR 2 (single model 11/11): met at ONE seed by two members (campaign
+      first), not the seed-mean footing, not promoted. BAR 3 / E7: trigger not
+      met, no distillation run.
+- [x] Candidate staged: v2pair-s1234 int8w+fp16w 4.39MB, 11/11 campaign bars,
+      10/11 vs card (azerty -0.82), val 88.86/92.82/93.59/91.56/87.46;
+      artifacts + golden fixture + sha256s in PHASE_L 12.1; RESULTS +
+      MODEL_COMPARISON updated.
+- [x] PHASE_K 8.5 QUALIFIED (not retracted): first exercise of its broken-band
+      arm — greedy prediction exact (29.10<=30), t1 87.64 misses <=87.5; a
+      marginal 95.32% pass missed both working-band thresholds.
+REGISTERED NOT RUN: 3 seeds of the L1 recipe (the measurement that would
+settle bar 1, ~10 GPU-h), E2 at 3 seeds, --pair-weight sweep, E6 geo prior,
+E4 w_real sweep.
