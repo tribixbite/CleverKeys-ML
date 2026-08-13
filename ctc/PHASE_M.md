@@ -73,5 +73,22 @@ band prediction → decode); both footings on every claim; sign-consistency for
 promotion; negatives committed in place; retractions written where the
 original claim lives. test-2400 sealed.
 
+## 3. Stage-1 launch state (for a successor — the box reboots randomly)
+
+Launched 2026-08-13, five arms, all detached, `--workers 0`, 188 k steps:
+`v2pair-s5555`, `v2pair-s9999`, `v2kd-initA-w1`, `v2kd-fresh-w1`,
+`v2kd-initA-w4`. **Resume = the identical launch command plus
+`--resume ckpt/<run>/last.pt`** (pair arms use `train_v2.py`, KD arms
+`train.py`); the exact argv of every arm is recorded in
+`~/ctc-train/ckpt_<run>.launch.log` and in each checkpoint's `args`.
+Harvest with `phaseL_eval.sh <run> {gate,pair,members}` for pairs; KD arms are
+single models — export `best.pt` and run the val + layout battery
+(`phaseJ_eval.sh <run>` does exactly that).
+
+**`--init-from` verified at first eval** (the E7 correctness check): the
+warm-started arms open at beam t1 **85.20 / 84.96** with CTC 0.617 / 0.601,
+against the fresh arm's **80.80** and CTC 1.077 — i.e. the student really does
+start inside member A's weights, and the KD arms are all training.
+
 *(Stage-1 results land below. Stage 2 is pre-registered separately when slots
 free.)*
