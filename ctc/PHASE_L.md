@@ -300,3 +300,30 @@ list; it is added here because concurrency made it free in wall-clock.
   4+/t1 lever (§4). A wash is a wash and will be recorded as one.
 * **Seed footing.** All three arms are seed 1234. Nothing from this round is
   promotable on its own; the primary bar needs the three-seed stage.
+
+## 6. PRE-REGISTRATION — the three-seed stage, launched speculatively
+
+Measured: L1 runs at **18.4 steps/s with three arms up** (4,000 steps in 217 s
+at step 12 k, vs 11.8 steps/s when it was alone and paying full eval cost),
+i.e. the co-launch did not degrade it. Two further arms are therefore started
+**before** the s1234 verdict, to buy wall-clock:
+
+| arm | recipe | `--seed` | `--init-seed-a/b` |
+|---|---|---|---|
+| `v2pair-e2-s4321` | the L2 (E2) recipe | 4321 | 3333 / 4444 |
+| `v2pair-e2-s7777` | the L2 (E2) recipe | 7777 | 5555 / 6666 |
+
+**Why the E2 recipe and not L1's.** The proposal's §2.2 data mix *includes*
+the synthesis pools, and its failure rule is "any element that misses its
+ablation gate is dropped" — so the E2 recipe is the presumptive v2
+configuration and L1 is its ablation, not the other way round. Stated as a
+falsifiable commitment: **if E2 misses its gate at s1234 (§5), these two arms
+become the recorded negative evidence for E2 at three seeds, and the
+three-seed stage is re-run on the L1 recipe.** That is a real cost of being
+wrong and it is accepted here rather than resolved by hindsight.
+
+**Blind-gate commitment for the three-seed stage.** For every seed, the order
+is: train → export → `pair_agreement.py` (label-free, no beam) → commit the
+gate number and the band prediction → decode. The bands are the PHASE_K §8.5
+bands, fixed here: agreement ≥ 95 % predicts val t1 ≥ 88.30 and ensemble val
+greedy ≥ 55 %; agreement < 95 % predicts val t1 ≤ 87.5 and greedy ≤ 30 %.
