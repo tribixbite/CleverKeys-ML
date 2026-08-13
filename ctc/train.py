@@ -979,6 +979,11 @@ def main() -> int:
                     help="AOSP lexicon for the selection beam")
     ap.add_argument("--val-jsonl", default="data/val_hwsfuto.jsonl", dest="val_jsonl",
                     help="canonical val split; supplies the beam targets")
+    ap.add_argument("--init-from", default="", dest="init_from",
+                    help="warm-start the model WEIGHTS from this checkpoint "
+                         "(weights only — no optimizer/step/RNG, unlike "
+                         "--resume). E7 uses it to place the student in its "
+                         "teacher's alignment gauge before distilling.")
     ap.add_argument("--kd-teacher", default="", dest="kd_teacher",
                     help="checkpoint whose log_emissions the student is distilled "
                          "towards (Phase F). Must be one of OUR OWN checkpoints — "
@@ -1101,6 +1106,25 @@ def main() -> int:
     model = CtcSwipeEncoder(ch=args.ch, embed_hid=args.embed_hid,
                             dilations=dilations, feat_version=args.feat_version,
                             block=args.block, t_out=args.t_out).to(device)
+    # Phase M/E7: warm-start the WEIGHTS ONLY from another of our checkpoints
+    # (no optimizer, no step, no RNG — unlike --resume). The E7 contingency
+    # needs a student that already sits in its teacher's CTC alignment gauge;
+    # PIPELINE_V2_PROPOSAL.md §2.3-E7 calls this "gauge-matched by
+    # construction", and it is the one thing the Phase-G KD refutation never
+    # tested. Architecture must match exactly — a silent shape mismatch would
+    # otherwise be masked by strict=False.
+    if args.init_from:
+        ipath = resolve(args.workdir, args.init_from)
+        ick = torch.load(ipath, map_location=device, weights_only=True)
+        for k in ("ch", "embed_hid", "feat_version", "block", "t_out"):
+            if k in ick and str(ick[k]) != str(getattr(args, k)):
+                raise SystemExit(f"--init-from {ipath}: arch mismatch on '{k}' "
+                                 f"({ick[k]} != {getattr(args, k)})")
+        model.load_state_dict(ick["model"])
+        args.init_from_sha256 = sha256_file(ipath)
+        print(f"init-from: {ipath} (step {ick.get('step')}, "
+              f"sha {args.init_from_sha256[:12]}) — weights only")
+
     n_params = sum(p.numel() for p in model.parameters())
     print(f"run {args.run_name}  params: {n_params / 1e6:.3f}M ({n_params})  "
           f"device: {device}  feat_v{args.feat_version} block={args.block} "
