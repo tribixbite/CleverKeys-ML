@@ -1034,3 +1034,20 @@ Design/proposal only — NO training runs, NO test-2400 contact.
       2/3 seeds; single model 11/11 campaign bars; single-beats-mix2 judged
       unlikely without E7). ~40 GPU-h estimate. test-2400 untouched.
 - [x] Commit + push
+
+2026-08-12 — PHASE L OPENED (execute pipeline v2). Plan of record:
+ctc/PIPELINE_V2_PROPOSAL.md; log: ctc/PHASE_L.md; workdir ~/ctc-train.
+- [x] L0 verify train_v2.py vs proposal + train.py APIs (no code change
+      needed; MASK_NEG finite => KL pad-column safe; fork-before-CUDA ok;
+      member ckpts export-compatible)
+- [x] L0 smoke 800 steps + paired pw0 control: coupling raises per-frame
+      agreement +5..+9.5pt (96.5% vs 91.4%), CTC not harmed, gate logic
+      correct, resume works, export + eval_beam --ens-avg prob verified.
+      PREMISE NOT REFUTED.
+- [ ] L1 reference pair v2pair-s1234 (188k, slw 1.0/1.5, pw 0.3, E5 probes on)
+- [ ] S0 targeted en synthesis (synth_en_short/tail) + endpoint gates (CPU)
+- [ ] L2 pair-level element ablation (E2 synth) per L1 verdict
+- [ ] L3 winner pair x 3 seeds, blind gate applied before decode
+- [ ] L4 batteries, export/quantize, fixtures, RESULTS/MODEL_COMPARISON
+- [ ] E7 distillation contingency only if bars 1-2 fall
+test-2400 SEALED throughout (ledger stays at 3).
