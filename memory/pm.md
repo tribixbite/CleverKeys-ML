@@ -1044,7 +1044,13 @@ ctc/PIPELINE_V2_PROPOSAL.md; log: ctc/PHASE_L.md; workdir ~/ctc-train.
       agreement +5..+9.5pt (96.5% vs 91.4%), CTC not harmed, gate logic
       correct, resume works, export + eval_beam --ens-avg prob verified.
       PREMISE NOT REFUTED.
-- [ ] L1 reference pair v2pair-s1234 (188k, slw 1.0/1.5, pw 0.3, E5 probes on)
+- [~] FIVE ARMS IN FLIGHT (all detached, --workers 0, 188k, ch192 resbn,
+      slw A/B 1.0/1.5, pw 0.3 ramp 5000+15000, E5 probes on, val-every 4000):
+      v2pair-s1234 (L1 reference), v2pair-e2-s1234 (L2 = +synth pools),
+      v2pair-pw0-s1234 (L3 = pair-weight 0 attribution control),
+      v2pair-e2-s4321, v2pair-e2-s7777 (speculative 3-seed stage on the E2
+      recipe). Resume = identical args + --resume ckpt/<run>/last.pt.
+      Eval after each: ctc/phaseL_eval.sh <run>  (gate BEFORE decode).
 - [x] S0 targeted en synthesis DONE: english_synth.py; synth_en_short.npz
       (150k, len<=4, 7919 uniq) + synth_en_tail.npz (150k, <3 real traces,
       74314 uniq) = 18.9% of the v2 mix; 3 gates PASS (displacement magnitude

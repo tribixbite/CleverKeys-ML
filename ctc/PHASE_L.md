@@ -237,7 +237,14 @@ human motor deviation transfers; its local-neighbourhood direction does not.
 The gate was therefore **replaced, and the replacement is stated in the code**
 (`gate_report`): (a) displacement magnitude within 0.02 of the measured donor
 pool; (b) wrong-geometry falsification ≥ 0.30 start-hit drop; (c) hit-rate gap
-no worse than the ru precedent. This is a loosening, and it is disclosed as
+no worse than the ru precedent. **Precision about (c):** the 0.21 *start*-hit
+ceiling is the audited ru number; the 0.15 *end*-hit ceiling is **not** a
+precedent — the ru generator's end-hit slightly exceeded its real corpus
+(0.656 vs 0.6465), so nothing measured bounds that axis and 0.15 is a chosen
+tolerance of the same order. This matters concretely: `synth_en_tail`'s
+end-hit gap is 0.126, so it passes the chosen tolerance and would *fail* a
+"no worse than ru" reading of the end axis. Recorded rather than smoothed
+over. This is a loosening, and it is disclosed as
 one; the mitigating facts are that the original threshold was written before
 either measurement above, that (a) is a *stricter* test of the thing that
 matters (is the deviation human-sized?), and that **the decisive gate is not

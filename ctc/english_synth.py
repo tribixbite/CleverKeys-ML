@@ -78,10 +78,14 @@ HERE = Path(__file__).resolve().parent
 DIST_TOL = 0.02
 #: Gate (b): the wrong-geometry control must lose at least this much start-hit.
 WRONG_GEOM_MIN_DROP = 0.30
-#: Gate (c): the audited ru generator's nearest-key hit gap vs its real corpus
-#: (synth 0.7095/0.656 vs real 0.917/0.6465 — PHASE_I_DATA §6). That generator
-#: produced the campaign's proven synthesis win, so its realism gap is the
-#: precedent ceiling for an en→en transplant, which is strictly easier.
+#: Gate (c): nearest-key hit-rate gap ceiling. ``start_hit`` 0.21 IS the
+#: audited ru precedent (synth 0.7095 vs real 0.917 — PHASE_I_DATA §6 — on the
+#: generator that produced the campaign's proven synthesis win, and an en→en
+#: transplant is strictly easier). ``end_hit`` 0.15 is NOT a precedent: the ru
+#: generator's end-hit was slightly *better* than its real corpus (0.656 vs
+#: 0.6465), so there is no measured ceiling on that axis and 0.15 is a chosen
+#: tolerance of the same order as the start-hit one. Stated so the gate is not
+#: read as more evidence-backed than it is.
 RU_PRECEDENT_GAP = {"start_hit": 0.21, "end_hit": 0.15}
 
 
