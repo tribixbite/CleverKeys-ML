@@ -1,34 +1,45 @@
 # Model comparison — speed and accuracy, every candidate, every footing
 
-> **Phase-L addendum (2026-08-13).** Phase L replaces the Phase-K
-> configuration below with one that is a **recipe rather than a draw**, and
-> adds the campaign's first all-eleven single models. Quote with the footings.
+> **Phase-L addendum (2026-08-13, settled at three seeds).** Phase L changes
+> the **single-model finalist** and adds a pair configuration that is a
+> *recipe* rather than a draw. Quote with the footings.
 >
-> **`v2pair-s1234` (int8w + fp16w, 4.39 MB)** = the two members of one
-> *coupled-pair* training run (`train_v2.py`: two encoders, identical
+> **NEW SINGLE-MODEL FINALIST — `phaseL_memberA_s1234_fp16w` (2.91 MB)**, the
+> slw-1.0 member of a coupled pair (`train_v2.py`: two encoders, identical
 > batches, ramped mutual per-frame KL, member-asymmetric ≤3 loss weights
-> 1.0/1.5), probability-averaged before the beam. Val
-> **88.86 / 92.82 / 93.59 / 91.56 / 87.46**, dvorak 92.88, dvorak-app 92.59,
-> azerty 84.11, qwertz 84.41, german 82.26, spanish 89.76 →
-> **11/11 campaign bars**, 10/11 vs the `mix2-i8f16` card (azerty −0.82), at
-> **60 KB less** than that card's packaging. Its **≤3 = 91.56** is the
-> largest margin over that stratum's bar (+0.29) in the campaign.
-> Footing: **one seed**, and the primary bar (≥ card on 2/3 seeds) was **NOT
-> met** — the three-seed stage ran a different (E2) recipe and returned
-> 10/11, 5/11, 5/11. Not test-validated; Phase L never opened test-2400.
+> 1.0/1.5). **Clears ALL ELEVEN campaign bars on the SEED-MEAN footing over
+> three seeds**: 88.54 / 92.60 / 93.33 / **91.35** / 87.08 · dvorak 89.84 ·
+> dvorak-app 89.51 · azerty 83.78 · qwertz 82.507 · german 80.72 · spanish
+> 88.43. It **supersedes `sw2345`** (10/11 seed-mean, ≤3 −0.07) as the
+> single-model finalist — the first model in the campaign to hold the ten
+> *and* the ≤3 stratum. Footings, all of them: two margins are ties (t3
+> **+0.000**, qwertz +0.007); the **every-seed** tally is 8/11; not
+> test-validated (Phase L never opened test-2400). **Ship fp16w, not int8w**
+> — int8w costs this model the ≤3 bar (91.24) and −0.78 dvorak, unlike the
+> averaged pair where PHASE_K §4.6 measured int8w free.
 >
-> **What is now a recipe, not luck:** 4 of 4 coupled pairs passed the
-> label-free ≥95 % agreement gate (98.18–98.34 %), against the historical
-> 3-in-4. The paired `--pair-weight 0` control — identical batches, identical
-> everything but the KL — finished at 92.09 % and its mix collapsed to greedy
-> **29.10** (members 72.6/71.8). Pair compatibility is therefore **trainable**,
-> which is what makes the two-model configuration shippable as a recipe.
+> **`v2pair-s1234` (int8w + fp16w, 4.39 MB)** — the same run's two members
+> probability-averaged before the beam: val 88.86 / 92.82 / 93.59 / **91.56**
+> / 87.46, dvorak 92.88, dvorak-app 92.59, azerty 84.11, qwertz 84.41,
+> german 82.26, spanish 89.76. **All three seeds of this recipe clear all
+> eleven campaign bars — 11/11 EVERY SEED**, which nothing in Phases A–K
+> achieved (Phase J: 5/11 every-seed). Against the `mix2-i8f16` card it is
+> 10/11 at s1234 and 7/11 at the seed-mean (card keeps dvorak/dvorak-app/
+> spanish by 0.3–0.4), so the pre-registered bar 1 was **NOT met** and the
+> recorded ship configuration is unchanged pending an orchestrator decision.
 >
-> **Single models (campaign first):** `L1 member A` and `L2 member B` each
-> clear ALL ELEVEN campaign bars (member A: 88.60 t1, **91.32 ≤3**, dvorak
-> 91.17, spanish 89.02). One seed each; sibling seeds read 6–8/11, so this is
-> **not promoted** over `sw2345` (10/11 seed-mean) yet.
-> Full record `PHASE_L.md`; artifacts + sha256s in `PHASE_L.md` §12.1.
+> **Why the pair is nonetheless the better-founded configuration:** pair
+> compatibility is now **trained in, not gated for**. Six of six coupled
+> pairs passed the label-free ≥95 % agreement gate (98.05–98.33 %); the
+> paired `--pair-weight 0` control, identical but for the KL, finished at
+> 92.09 % and its mix collapsed to **greedy 29.10** (its members greedy
+> 72.6/71.8). `mix2-i8f16` was explicitly a configuration whose recipe did
+> not reproduce; this one reproduces by construction.
+>
+> **Refuted in Phase L:** targeted English residual-transplant synthesis
+> (`english_synth.py`, 300 k rows) — sign-consistently −0.21 t1 / −0.12 t5 /
+> −0.22 4+ across three paired seeds.
+> Full record `PHASE_L.md`; artifacts + sha256s §16.1.
 
 > **Phase-K addendum (2026-08-12).** Phase K adds one CONFIGURATION (not a
 > model) above every single-model row on the val + alt-layout footing:

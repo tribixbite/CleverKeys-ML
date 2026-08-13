@@ -1,6 +1,46 @@
 # CTC Swipe Encoder — Training Results
 
-# Phase L (2026-08-13): pipeline v2 — the mixable pair becomes a RECIPE (coupled training), and two single models clear all eleven campaign bars for the first time
+# Phase L (2026-08-13): pipeline v2 — the alignment gauge is TRAINABLE, the ≤3 stone falls to a single model on the seed-mean, and English synthesis is refuted
+
+**Settled at three seeds.** Seven 188 k arms, every one pre-registered before
+launch, every gate committed before its decode. Full record `ctc/PHASE_L.md`.
+
+* **BAR 2 MET — `L1 member A` clears ALL ELEVEN campaign bars on the
+  SEED-MEAN footing** (3 seeds): 88.54 / 92.60 / 93.33 / **91.35** / 87.08,
+  dvorak 89.84, dvorak-app 89.51, azerty 83.78, qwertz 82.507, german 80.72,
+  spanish 88.43. **The first single model in the campaign to do this** —
+  `sw2345` held 10/11 (≤3 −0.07), `slw2` bought ≤3 by losing four. Ships
+  **fp16w at 2.91 MB**. Disclosures that travel with it: t3 is an **exact
+  tie** (+0.000) and qwertz is +0.007; the **every-seed** footing is 8/11.
+* **BAR 1 NOT MET.** The gated pair had to beat every `mix2-i8f16` card
+  number on ≥2/3 seeds; per-seed tallies were 10/11, 8/11, 6/11.
+* **But all three L1 pairs clear all eleven CAMPAIGN bars on EVERY SEED**
+  (11/11 × 3) — a footing nothing in Phases A–K reached (Phase J: 5/11
+  every-seed). The pair seed-mean beats all five card val numbers
+  (t1 +0.15, ≤3 **+0.19**) at 4.39 MB; the card keeps a 0.3–0.4 edge on
+  dvorak/dvorak-app/spanish. Ship standing unchanged pending an orchestrator
+  decision; the single-model finalist changes.
+* **The CTC alignment gauge is trainable.** Coupled pairs (mutual per-frame
+  KL, identical batches) reach **98.05–98.33 % agreement, 6 of 6 over the
+  gate**; the paired `--pair-weight 0` control — identical in every other
+  respect — sits at **92.09 %** (2 of 47 evals) and its mix collapses to
+  **greedy 29.10** against the coupled pair's 72.92. Pair mixability stops
+  being a lucky draw and becomes a recipe.
+* **Targeted English synthesis (E2) is REFUTED** at three paired seeds:
+  sign-consistently **−0.21 t1 / −0.12 t5 / −0.22 4+**. Its single-seed ≤3
+  (+0.06) and euro-layout gains (azerty +0.86, qwertz +0.93) **did not
+  reproduce**. 300 k license-clean endpoint-validated rows bought a negative;
+  `english_synth.py` and the pools stay committed as the documented negative.
+* **`int8w` is not free for a single model** (≤3 91.32 → 91.24, below bar;
+  dvorak −0.78) — only for the averaged pair, correcting a natural
+  generalization of PHASE_K §4.6.
+* **PHASE_K §8.5 qualified, not retracted:** its working band held 6/6 above
+  98 % agreement, but this phase is the first to exercise the *broken* band
+  and both marginal cases (95.32 %, 91.30 %) missed part of it. The gate is a
+  reliable **ordinal** predictor; the numeric bands describe the extremes.
+* **test-2400 remains SEALED** (ledger at 3; nothing in Phase L opened it).
+
+## Superseded Phase-L interim entry (single-seed, kept for the record)
 
 Full record: `ctc/PHASE_L.md`; plan of record `ctc/PIPELINE_V2_PROPOSAL.md`.
 Five 188 k arms, all pre-registered before launch. Headlines with footings:

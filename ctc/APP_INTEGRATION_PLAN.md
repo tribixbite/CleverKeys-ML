@@ -1,6 +1,7 @@
 # APP_INTEGRATION_PLAN — wiring the CTC swipe engine into CleverKeys (G3 + G5)
 
-**Date:** 2026-08-08 · **Updated:** 2026-08-12 (Phase K — see **§8**: the
+**Date:** 2026-08-08 · **Updated:** 2026-08-13 (Phase L — see **§9**: the new
+single-model finalist and the coupled-pair recipe) · 2026-08-12 (Phase K — see **§8**: the
 ensemble configuration, contract-v2, the rescorer) · 2026-08-11 (Phase J — see **§7**, which carries
 the Cyrillic λ finding (§7.1), the post-Phase-J model menu and fixture state
 (§7.2), the user-dictionary pointer (§7.3) and the multi-script verdict (§7.4);
@@ -2187,3 +2188,53 @@ previous fixture; 140,204 bytes; sha256
 
 `RESULTS.md`: artifacts-table fixture row updated (bytes + sha) + one regeneration
 note. No accuracy number, seal statement, or claim wording was touched.
+
+---
+
+## 9. Phase L update (2026-08-13) — new single-model finalist, and a pair that is a recipe
+
+Full record `PHASE_L.md`. **Nothing in the app repo changed**; this section
+states what the app should carry when it next syncs models.
+
+### 9.1 The model menu changes at the single-model slot
+
+| slot | was (Phase J/K) | **now** | why |
+|---|---|---|---|
+| single-model finalist | `sw2345_s1234` (10/11 seed-mean, ≤3 −0.07) | **`phaseL_memberA_s1234_fp16w.onnx`, 2.91 MB** | **11/11 campaign bars on the seed-mean over 3 seeds** — the first model to hold the ten *and* the ≤3 stratum (91.35, +0.08) |
+| two-model configuration | `mix2-i8f16` (4.45 MB, 11/11 single-config) | `v2pair-s1234` i8f16, **4.39 MB**, 11/11 campaign bars **every seed** (3/3) | reproducible by construction (6/6 gate passes) rather than a draw; pre-registered bar 1 vs the mix2 card was **not** met, so the recorded ship configuration is unchanged pending an orchestrator decision |
+
+**Contract is unchanged**: `[1,32,65]` log-emission head, E1 preset, AOSP/az26
+tries, same `CtcEmissionModel` seam, same dual-session averaging path §8
+already describes. No app-side code change is required to adopt either — only
+the asset swap and the fixture swap.
+
+### 9.2 Packaging rule, corrected by measurement
+
+**Ship the single model `fp16w`, not `int8w`.** §8 recorded int8w as val-free
+*for the pair*; that does **not** generalize. Decoded, not inferred:
+
+| packaging | size | ≤3 | dvorak | verdict |
+|---|---|---|---|---|
+| fp16w | 2.91 MB | **91.32** | 91.17 | free vs fp32 — **ship this** |
+| int8w | 1.55 MB | **91.24 (below the 91.27 bar)** | 90.39 (−0.78) | costs the ≤3 bar |
+
+For the *pair*, int8w + fp16w remains free and is the 4.39 MB packaging.
+
+### 9.3 Fixtures to swap
+
+| configuration | fixture | sha256 |
+|---|---|---|
+| single model fp16w | `artifacts/phaseL_memberA_fp16w_golden.json` | `7c3948c6…e7a184c2` |
+| pair int8w+fp16w (averaged emissions) | `artifacts/phaseL_v2pair_i8f16_golden.json` | `7440873a…dc8dc749` |
+
+Both are E1-preset, 10 cases, same schema `make_golden.py` has emitted since
+Phase K — the averaged-emission fixture is the parity target for the
+dual-session path, exactly as §8.4 specifies.
+
+### 9.4 What did NOT change, and one thing to stop planning for
+
+* Preset, beam, trie, λ-per-lexicon, rescorer (still the optional 21.8 KB
+  add-on), contract-v2/T′=64 (still documented, still not promoted).
+* **Stop planning around targeted English synthesis.** Phase L built it,
+  gated it, and **refuted it** at three paired seeds (−0.21 t1). It is not a
+  data source the app or any future collection should assume.

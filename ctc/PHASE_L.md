@@ -696,3 +696,212 @@ no beam run yet; this commit precedes their decodes.
 t1 ≥ 88.30 and ensemble val greedy ≥ 55 %.** Held alongside the §14.1
 forecast, which stands unmodified: **I expect at least one of these two pairs
 to miss the card's azerty bar (84.93), and therefore bar 1 to fail.**
+
+## 15. SETTLEMENT RESULTS — the L1 recipe at three seeds
+
+### 15.1 Predictions scored
+
+| pair | agreement | prediction | outcome | verdict |
+|---|---|---|---|---|
+| `v2pair-s4321` | 98.05 % | working: t1 ≥ 88.30, greedy ≥ 55 | **88.82 / 73.14** | **PASS** |
+| `v2pair-s7777` | 98.15 % | working | **88.78 / 72.84** | **PASS** |
+
+Running total for the gate's working-band prediction: **6 of 6.**
+
+**My §14.1 forecast was right on the conclusion and WRONG on the mechanism,
+and that is worth more than being right.** I predicted bar 1 would fail *on
+azerty*. Azerty **passed at both new seeds** (85.02, 85.45 vs the 84.93 card
+bar) — the recipe's supposed weak axis was seed noise at s1234, not a
+property. Bar 1 failed anyway, on axes I did not name: **dvorak, dvorak-app
+and spanish**. Recorded as a miss.
+
+### 15.2 The three L1 pairs
+
+| config | t1 | t3 | t5 | ≤3 | 4+ | dvorak | dv-app | azerty | qwertz | german | spanish | vs card | vs campaign |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| card | 88.68 | 92.61 | 93.46 | 91.30 | 87.32 | 91.94 | 91.53 | 84.93 | 82.81 | 81.22 | 89.59 | — | — |
+| s1234 | 88.90 | 92.86 | 93.58 | 91.53 | 87.53 | 93.04 | 92.76 | 84.16 ✗ | 83.91 | 82.08 | 89.87 | 10/11 | **11/11** |
+| s4321 | 88.82 | 92.80 | 93.48 | 91.47 | 87.44 | 90.44 ✗ | 90.07 ✗ | 85.02 | 84.25 | 81.49 | 88.96 ✗ | 8/11 | **11/11** |
+| s7777 | 88.78 | 92.60 ✗ | 93.42 ✗ | 91.47 | 87.38 | 91.33 ✗ | 90.80 ✗ | 85.45 | 84.33 | 82.08 | 88.74 ✗ | 6/11 | **11/11** |
+| **seed-mean** | **88.83** | **92.75** | **93.49** | **91.49** | **87.45** | 91.60 | 91.21 | 84.88 | **84.16** | **81.89** | 89.19 | 7/11 | **11/11** |
+
+### 15.3 BAR 1 — NOT MET (the pre-stated verdict, applied as written)
+
+Bar 1 required the gated pair to meet **every** card number on ≥ 2 of 3 seeds.
+Per-seed tallies are **10/11, 8/11, 6/11 — zero seeds at 11/11.** Bar 1 fails,
+and it fails wider than §14.1 expected: the seed-mean also misses four card
+numbers (dvorak −0.34, dvorak-app −0.32, azerty −0.05, spanish −0.40).
+
+**The result the settlement actually produced, on a footing the campaign has
+never reached:**
+
+> **All three L1 pairs clear ALL ELEVEN CAMPAIGN BARS — 11/11 on EVERY SEED.**
+
+Nothing in Phases A–K did this. Phase J closed at 10/11 seed-mean and **5/11
+every-seed**; Phase K's `mix2-i8f16` reached 11/11 as one deterministic
+configuration whose recipe did not reproduce (its s4321 pair failed the gate
+outright), and its fresh-seed confirmation pair landed 10/11. Here, three
+independent seeds each produce a pair that clears every campaign bar, and the
+seed-mean beats **all five** card val numbers too (t1 +0.15, t3 +0.14,
+t5 +0.03, ≤3 **+0.19**, 4+ +0.13).
+
+The card's residual edge is confined to **transfer**: dvorak, dvorak-app and
+spanish, by 0.3–0.4 at the seed-mean. Stated without spin: comparing a
+three-seed recipe mean against a single lucky configuration's numbers is a
+comparison the single configuration is favoured to win, and it wins it on
+three of eleven axes.
+
+### 15.4 BAR 2 — **MET**, on the seed-mean footing it was written on
+
+`L1 member A` (slw 1.0), three seeds:
+
+| bar | s1234 | s4321 | s7777 | **seed-mean** | campaign bar | Δ |
+|---|---|---|---|---|---|---|
+| val t1 | 88.60 | 88.65 | 88.37 | **88.54** | 88.30 | +0.24 |
+| val t3 | 92.62 | 92.64 | 92.54 | **92.600** | 92.60 | **+0.000 (exact tie)** |
+| val t5 | 93.36 | 93.31 | 93.32 | **93.33** | 93.26 | +0.07 |
+| **val ≤3** | 91.32 | 91.41 | 91.32 | **91.35** | 91.27 | **+0.08** |
+| val 4+ | 87.18 | 87.21 | 86.84 | **87.08** | 86.77 | +0.31 |
+| dvorak | 91.17 | 87.71 | 90.64 | **89.84** | 89.13 | +0.71 |
+| dvorak app-98k | 91.01 | 87.51 | 90.03 | **89.51** | 88.20 | +1.31 |
+| azerty | 83.97 | 83.59 | 83.78 | **83.78** | 83.60 | +0.18 |
+| qwertz | 82.56 | 82.90 | 82.06 | **82.507** | 82.50 | **+0.007** |
+| german | 81.26 | 79.99 | 80.90 | **80.72** | 79.64 | +1.08 |
+| spanish | 89.02 | 88.62 | 87.66 | **88.43** | 88.28 | +0.15 |
+| | | | | | | **11/11** |
+
+**This is the campaign's first single model to clear all eleven bars on the
+seed-mean footing** — `sw2345` held 10/11 (≤3 −0.07) and `slw2` bought ≤3 by
+losing four others. `L1 member A` holds the ten *and* the ≤3 stratum
+(91.35, +0.08). The proposal's secondary bar is met exactly as written.
+
+**Disclosures that travel with the claim, none of them optional:**
+
+1. **Two of the eleven margins are ties, not wins:** t3 is +0.000 (92.600 vs
+   92.60) and qwertz is +0.007. Six of eleven bars are cleared by less than
+   0.25. The claim is "clears", not "dominates".
+2. **The every-seed footing is 8/11**, not 11/11 — per-seed tallies are
+   [11, 8, 8]. The seed-mean clears because the individual misses are small
+   and offset; s4321's dvorak (87.71) is 1.42 under its bar. Both footings
+   are reported, as the campaign requires, and the every-seed footing does
+   **not** support the claim.
+3. `L1 member B` (slw 1.5) is 10/11 seed-mean, missing t3 by 0.007 — also a
+   tie. The two members are again near-mirror-images, member B holding the
+   better ≤3 (91.43) and dvorak (91.33), member A the better t1/4+.
+
+### 15.5 E2 — REFUTED at three paired seeds (the by-product)
+
+Seeds and inits were matched to the E2 arms, so this is a fully paired
+three-seed comparison. Δ = E2 − L1:
+
+| bar | s1234 | s4321 | s7777 | mean | sign-consistent? |
+|---|---|---|---|---|---|
+| t1 | −0.05 | −0.30 | −0.29 | **−0.21** | **YES (negative)** |
+| t5 | −0.16 | −0.13 | −0.07 | **−0.12** | **YES (negative)** |
+| 4+ | −0.10 | −0.29 | −0.26 | **−0.22** | **YES (negative)** |
+| ≤3 | **+0.06** | −0.32 | −0.35 | −0.20 | no |
+| t3 | −0.07 | −0.09 | +0.12 | −0.01 | no |
+| dvorak | −0.28 | +2.44 | −1.51 | +0.22 | no |
+| azerty | **+0.86** | −0.67 | −0.48 | −0.10 | no |
+| qwertz | **+0.93** | −0.34 | +0.76 | +0.45 | no |
+| spanish | **+0.57** | −0.46 | +1.02 | +0.38 | no |
+| tally vs campaign bars | 11 vs 11 | **10 vs 11** | **10 vs 11** | — | — |
+
+**Both open questions from §11.2 are now closed, against E2.**
+
+* The ≤3 gain that motivated the whole element (+0.06 at s1234) **does not
+  reproduce** — it is −0.32 and −0.35 at the other two seeds. E2's ≤3 effect
+  is a *negative* at the seed-mean.
+* The euro-layout gain I explicitly flagged as "a registered, unresolved
+  question" (azerty +0.86, qwertz +0.93, spanish +0.57 at s1234) **does not
+  reproduce either**: azerty −0.10 mean, and every layout axis is
+  sign-inconsistent across seeds.
+* What *does* reproduce is the harm: t1, t5 and 4+ are **sign-consistently
+  negative on all three seeds**.
+
+The pre-registered gate that E2 missed by 0.01 was therefore **right**, and
+the hedge I recorded around it was wrong. Under the campaign's own
+sign-consistency promotion rule, **E2 is refuted**: 300 k rows of
+license-clean targeted synthesis, endpoint-validated and cap-respecting, buy
+−0.21 t1. The proposal's §1.6 hope that synthesis was "the one scalable data
+lever left" for English is **not supported**. The generator and pools stay
+committed as a documented negative.
+
+## 16. Packaging the promoted configuration
+
+Bar 2 is the bar that fell, so the promoted artifact is the **single model**
+`L1 member A`. Measured packagings of `v2pair-s1234` member A:
+
+| packaging | bytes | t1 | t3 | t5 | ≤3 | 4+ | dvorak | azerty | qwertz | german | spanish | verdict |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| fp32 | 6,068,519 | 88.60 | 92.62 | 93.36 | 91.32 | 87.18 | 91.17 | 83.97 | 82.56 | 81.26 | 89.02 | reference |
+| **fp16w** | **3,052,318** | **88.60** | **92.62** | **93.37** | **91.32** | **87.18** | **91.17** | 84.02 | **82.56** | **81.26** | **89.02** | **free — SHIP** |
+| int8w | 1,554,355 | 88.42 | 92.61 | 93.35 | **91.24 ✗** | 86.95 | 90.39 | 84.16 | 82.90 | 81.31 | 89.02 | **costs the ≤3 bar** |
+
+**New packaging finding, and it is a correction to a natural generalization
+of PHASE_K §4.6.** Phase K measured int8w as val-free *for the pair* (where
+one member is fp16w and averaging absorbs the noise). For a **single** model
+int8w is **not** free: it takes ≤3 from 91.32 to **91.24, below the 91.27
+bar**, and dvorak from 91.17 to 90.39 (−0.78). The single-model finalist must
+ship **fp16w at 2.91 MB**. This is a measurement, not an inference — the
+int8w numbers above are decoded, not predicted.
+
+### 16.1 Artifacts (sha256, `ctc/artifacts/`)
+
+| file | bytes | sha256 |
+|---|---|---|
+| **`phaseL_memberA_s1234_fp16w.onnx`** (promoted single model) | 3,052,318 | `127874dd…10116a16` |
+| `phaseL_memberA_fp16w_golden.json` (E1 fixture, 10 cases) | 140,225 | `7c3948c6…e7a184c2` |
+| `phaseL_v2pair_s1234_a_int8w.onnx` (pair member A) | 1,554,355 | `01580189…8bead7c4` |
+| `phaseL_v2pair_s1234_b_fp16w.onnx` (pair member B) | 3,052,318 | `59f40d95…c71b2db7` |
+| `phaseL_v2pair_i8f16_golden.json` (averaged-emission fixture) | 140,476 | `7440873a…dc8dc749` |
+
+## 17. FINAL VERDICT — Phase L
+
+| bar | as written | outcome |
+|---|---|---|
+| **1. pair ≥ `mix2-i8f16` card, ≥2/3 seeds, every bar** | primary | **NOT MET** (per-seed 10/11, 8/11, 6/11) |
+| **2. one member clears all 11 campaign bars, seed-mean** | secondary | **MET** — `L1 member A`, 11/11 seed-mean (2 margins are ties; every-seed footing 8/11) |
+| **3. single model beats the full card** | stretch | not met, as the proposal predicted |
+| **E7 distillation** | contingent on 1 **and** 2 falling | **not triggered** (bar 1 stands) |
+
+**Ship standing, per the coordinator's rule (bar 1 did not fall → standing
+holds):** `mix2-i8f16` remains the recorded ship configuration. What changes
+is the **single-model finalist**: `L1 member A` (11/11 seed-mean, fp16w,
+2.91 MB) **supersedes `sw2345`** (10/11 seed-mean, ≤3 −0.07) under the
+campaign's own seed-mean promotion rule.
+
+**The evidence a supersede decision would rest on — the orchestrator's call,
+not mine:** all three L1 pairs clear all eleven campaign bars **every seed**
+(a footing nothing in Phases A–K reached; Phase J was 5/11 every-seed), the
+pair seed-mean beats all five of the card's val numbers including ≤3 (+0.19),
+the packaging is 4.39 MB vs 4.45 MB, and the configuration is **reproducible
+by construction** (6/6 gate passes) where `mix2-i8f16` was explicitly a draw
+that did not reproduce. Against it: the card is higher on dvorak, dvorak-app
+and spanish by 0.3–0.4 at the seed-mean, and bar 1 as written is the bar that
+was supposed to settle this. I am not promoting past a bar I pre-registered.
+
+### 17.1 What Phase L established, in one line each
+
+1. **CTC alignment gauge is trainable.** A ramped mutual per-frame KL between
+   two encoders on identical batches drives per-frame agreement to 98 % (6/6
+   pairs); the identical recipe without the KL sits at 92 % and its mix's
+   greedy collapses to 29.10. Pair mixability stops being luck.
+2. **The ≤3 stone is broken on the seed-mean by a single model** — 91.35,
+   +0.08, while holding the other ten bars. First time in the campaign.
+3. **The gate is ordinal, its bands are not.** 4/4 then 6/6 working-band
+   predictions above 98 %; both marginal cases (95.32 %, 91.30 %) missed part
+   of their band. PHASE_K §8.5 qualified, not retracted.
+4. **Targeted English synthesis is refuted** at three paired seeds
+   (sign-consistent −0.21 t1 / −0.12 t5 / −0.22 4+); its s1234 ≤3 and euro
+   gains did not reproduce.
+5. **int8w is not free for a single model** (≤3 −0.08, below bar), only for
+   the averaged pair.
+
+### 17.2 Registered, not run (unchanged ledger for a successor)
+
+`--pair-weight` sweep {0.1, 1.0}; E6 geometric alignment prior (implemented,
+default off, never run); E4 `w_real` sweep; E7 distillation (trigger unmet);
+a fourth/fifth seed to firm the two tie margins in §15.4.
+
+**test-2400: SEALED for the whole of Phase L. Ledger stays at 3 entries.**

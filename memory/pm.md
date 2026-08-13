@@ -1091,3 +1091,27 @@ every decode; test-2400 SEALED (ledger 3).
 REGISTERED NOT RUN: 3 seeds of the L1 recipe (the measurement that would
 settle bar 1, ~10 GPU-h), E2 at 3 seeds, --pair-weight sweep, E6 geo prior,
 E4 w_real sweep.
+
+2026-08-13 — PHASE L SETTLED at three seeds (v2pair-s4321 + v2pair-s7777, L1
+recipe verbatim; gate-first blind order as always).
+- [x] BAR 2 **MET**: L1 member A clears ALL 11 campaign bars SEED-MEAN
+      (88.54/92.60/93.33/91.35/87.08 + 6 layouts) — campaign first; supersedes
+      sw2345 as single-model finalist. Ships fp16w 2.91MB. Disclosures: t3 is
+      an exact tie (+0.000), qwertz +0.007, every-seed footing 8/11.
+- [x] BAR 1 NOT MET: per-seed vs mix2 card 10/11, 8/11, 6/11. BUT all three L1
+      pairs clear all 11 CAMPAIGN bars EVERY SEED (nothing in A..K did this;
+      Phase J was 5/11 every-seed). Ship standing unchanged per directive;
+      supersede evidence handed up.
+- [x] Gate now 6/6 pairs (98.05-98.33%); working-band prediction 6/6.
+      My pre-stated azerty-failure forecast was WRONG (azerty passed both new
+      seeds 85.02/85.45); bar 1 failed on dvorak/dv-app/spanish instead.
+- [x] E2 REFUTED at 3 paired seeds: sign-consistent -0.21 t1 / -0.12 t5 /
+      -0.22 4+; its s1234 <=3 (+0.06) and euro gains did NOT reproduce.
+- [x] int8w NOT free for a single model (<=3 91.24 < 91.27 bar, dvorak -0.78);
+      free only for the averaged pair. Corrects a generalization of K 4.6.
+- [x] Artifacts + fixtures + sha256s (PHASE_L 16.1); RESULTS, MODEL_COMPARISON,
+      APP_INTEGRATION_PLAN 9 updated; pushed.
+E7 not triggered (bar 1 stands). test-2400 SEALED (ledger 3, untouched).
+REGISTERED NOT RUN: pair-weight sweep {0.1,1.0}, E6 geo prior, E4 w_real,
+E7 distillation, a 4th/5th seed to firm the two tie margins.
+PHASE L CLOSED. Nothing else launches without new instruction.
