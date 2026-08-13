@@ -629,3 +629,52 @@ synthetic rows).
 **test-2400: SEALED throughout Phase L. Ledger stays at 3 entries. No script
 in this phase opened it; `train_v2.py`, `english_synth.py` and
 `pair_agreement.py` each refuse test features by name.**
+
+## 14. PRE-REGISTRATION — the settlement measurement (committed BEFORE launch)
+
+**Authority:** coordinator directive of 2026-08-13 releasing §13 item 1 (the
+user's standing "no stones unturned" directive). Two arms, the **L1 recipe
+verbatim** — no synthesis pools, `--layout-synth-frac 0.667`, slw 1.0/1.5,
+`--pair-weight 0.3`, ramp 5000+15000, 188 k, `--val-every 4000`, E5 probes on,
+`--workers 0`:
+
+| arm | `--seed` | `--init-seed-a/b` | pairs with |
+|---|---|---|---|
+| `v2pair-s4321` | 4321 | 3333 / 4444 | `v2pair-e2-s4321` |
+| `v2pair-s7777` | 7777 | 5555 / 6666 | `v2pair-e2-s7777` |
+
+Seeds and inits deliberately match the E2 arms, so this stage **also** yields a
+paired L1-vs-E2 comparison at all three seeds — which is the three-seed E2
+measurement §13 item 2 asked for, obtained for free. (`--beam-jobs 6` vs L1's
+8: infrastructure, not recipe; it changes no training math.)
+
+### 14.1 What can and cannot happen — stated before the runs exist
+
+**Bar 1 now has a sharp, asymmetric form, and it is worth being explicit that
+it is stacked against a pass.** The already-decoded `v2pair-s1234` pair is
+**10/11 against the card** — it misses azerty (84.16 vs 84.93). Bar 1 requires
+≥ 2 of 3 seeds to meet **every** card number. Seed 1234 has therefore already
+spent its chance. **Bar 1 can only be met if BOTH new seeds come in 11/11
+against the card**, azerty included.
+
+That is a demanding ask on precisely the axis where this recipe is weakest:
+azerty is the one bar E2 fixed (+0.86) and L1 does not. A pre-stated
+expectation, recorded so it can be wrong: **I expect bar 1 to fail on azerty
+and the phase to close at "the coupled pair is a reliable 10–11-bar recipe
+that does not dominate the s1234 mix2 configuration on every axis."** If
+instead both seeds clear azerty ≥ 84.93, bar 1 falls and the v2 pair
+supersedes `mix2-i8f16` as the ship configuration.
+
+**Bar 2 gets its proper footing here too.** With three L1-recipe seeds, the
+members' eleven-bar tally is computed **seed-mean** (the footing the bar
+actually names), not just per-seed. `L1 member A`'s single-seed 11/11 either
+survives averaging with two fresh seeds or it does not; PHASE_K §8.3's lesson
+says to expect it may not.
+
+**Protocol, unchanged:** train → export → `pair_agreement.py` (label-free, no
+beam) → commit gate + band prediction → decode. Bands as always: ≥ 95 % →
+t1 ≥ 88.30 and ensemble greedy ≥ 55 %; < 95 % → t1 ≤ 87.5 and greedy ≤ 30 %
+(now known to be only half-calibrated below the gate, §10 — the prediction is
+committed in its original form anyway, and scored the same way).
+
+**Nothing else launches after this stage without new instruction.**
