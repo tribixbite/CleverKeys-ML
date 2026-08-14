@@ -138,3 +138,58 @@ The three E7 students finished at 188 k with selection-prefix canonical t1
 **86.38 (initA-w1) / 86.04 (fresh-w1) / 86.04 (initA-w4)** against member A's
 **85.60** on the same 5,000-row prefix — so on the selection metric the
 gauge-matched student is ahead of its own teacher's member. Full battery next.
+
+## 6. STAGE 1 RESULTS
+
+### 6.1 E7 — the crown attempt FAILS; and the gauge-matched *init* is unnecessary
+
+Single seed (1234), full battery, fp32. Teacher = the s1234 pair (98.33 %).
+
+| model | t1 | t3 | t5 | ≤3 | 4+ | dvorak | dv-app | azerty | qwertz | german | spanish | vs card | vs campaign |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| card | 88.68 | 92.61 | 93.46 | 91.30 | 87.32 | 91.94 | 91.53 | 84.93 | 82.81 | 81.22 | 89.59 | — | — |
+| `memberA` (teacher's member) | 88.60 | 92.62 | 93.36 | 91.32 | 87.18 | 91.17 | 91.01 | 83.97 | 82.56 | 81.26 | 89.02 | 3/11 | 11/11 |
+| **`v2kd-fresh-w1`** | **88.62** | 92.69 | **93.46** | 91.38 | 87.18 | **92.23** | **91.90** | 84.45 | **83.74** | 81.22 | 89.36 | **6/11** | **11/11** |
+| `v2kd-initA-w1` | 88.59 | 92.72 | 93.43 | **91.41** | 87.12 | 91.86 | **91.53** | 84.21 | 83.24 | **81.63** | 88.17 | 5/11 | 10/11 |
+| `v2kd-initA-w4` | 88.52 | 92.74 | **93.56** | 91.09 | 87.18 | **92.35** | **92.19** | 84.21 | 83.66 | 81.58 | 88.51 | 6/11 | 10/11 |
+
+**CROWN: NOT WON.** No student meets every card number; the best is 6/11.
+The residual gap is exactly where the proposal said it would be — **transfer**
+(azerty −0.48, spanish −0.23) plus t1 −0.06.
+
+**My committed forecast, scored — 1 right, 2 wrong:**
+
+1. *"E7 beats member A on val t1 by a small margin"* — **WRONG.** It is a
+   wash: 88.62 / 88.59 / 88.52 against 88.60. Distillation from the pair
+   bought **nothing** on canonical val t1.
+2. *"…and fails the crown on transfer"* — **RIGHT** on the outcome, but my
+   mechanism was too strong. I argued a single student "has no second point
+   to average with" and therefore could not inherit the pair's transfer edge.
+   It inherited **most** of it: dvorak 91.17 → **92.23** (+1.06), dvorak-app
+   +0.89, qwertz +1.18, azerty +0.48 over member A, at equal val. The pair's
+   transfer advantage is **largely distillable**; it just stops ~0.5 short of
+   the card on two axes.
+3. *"initA > fresh if the gauge-matching argument is real"* — **WRONG, and
+   this is the phase's most interesting negative.** The **fresh-init** student
+   is the best of the three (11/11 campaign bars vs 10/11 for both warm
+   starts). Gauge-matching the *student's initialization* is **unnecessary**;
+   what matters is that the **teacher** is alignment-consistent. That is the
+   cleaner form of the PHASE_L §1.3 corollary and it sharpens the Phase-G
+   reinterpretation: the old KD refutation failed because its teacher was
+   gauge-*inconsistent* (a cross-seed average), not because students need
+   special initialization.
+
+**Pre-registered gate applied as written** (`≥ member A on val t1 AND ≤3`):
+`fresh-w1` **passes** (88.62 ≥ 88.60, 91.38 ≥ 91.32); `initA-w1` fails by
+**0.01** on t1; `initA-w4` fails. → **`v2kd-fresh-w1` promoted to three
+seeds** (`s4321`, `s7777` launched); the two `initA` arms are dropped, not
+retuned.
+
+### 6.2 Stage-1 pair predictions scored
+
+| pair | agreement | prediction | outcome | verdict |
+|---|---|---|---|---|
+| `v2pair-s5555` | 98.14 % | working band | **88.65 / greedy ✓** | PASS |
+| `v2pair-s9999` | 98.25 % | working band | **88.73 / greedy ✓** | PASS |
+
+**8 of 8 gate predictions correct** across five seeds.
