@@ -385,7 +385,21 @@ model the ≤3 bar, and this model's ≤3 margin (+0.103 seed-mean) has no room.
 | file | bytes | sha256 |
 |---|---|---|
 | `phaseM_kd_fresh_w1_s1234_fp16w.onnx` | 3,052,318 | `84718e6e…549e88e5` |
-| `phaseM_kd_fresh_w1_fp16w_golden.json` | 140,480 | `3788697f…495f058c` |
+| ~~`phaseM_kd_fresh_w1_fp16w_golden.json` (at **E1**)~~ | ~~140,480~~ | ~~`3788697f…495f058c`~~ |
+| **`phaseM_kd_fresh_w1_fp16w_golden.json`** (regenerated 2026-08-14 at the **ship preset** `0.9,4.0,0.25,0.25,0.9882`) | **140,462** | **`2a449c4f2de19505131b396655ae01d3e3c325e40249446ff6e7a40c2b27559c`** |
+
+**Fixture correction.** The first fixture was generated at **E1**, the
+benchmark preset. `MODEL_COMPARISON.md` §5.1 requires the fixture to be
+generated at the preset the app *ships*, which for this model is the app preset
+(now test-validated as config B of the fourth unsealing, §12). It was
+regenerated at that preset; the E1 row above is struck, not deleted. The
+regeneration changes no measurement — only which configuration `CtcParityTest`
+asserts against.
+
+The three fp32 seed exports are also frozen in `artifacts/` (they are what the
+fourth unsealing decoded), 6,068,519 B each:
+`phaseM_kd_fresh_w1_s1234.onnx` `b71911da…`, `_s4321.onnx` `f7cb72c0…`,
+`_s7777.onnx` `c55cc3b0…`.
 
 ### 11.2 THE SHIP MENU (all evidence, all footings)
 
@@ -453,6 +467,34 @@ and stays val-only.
 
 The pre-registration — authority, exact configs, frozen artifact sha256s,
 numeric expectations with bands, the hard cap and the claim rules — is
-`UNSEALING_4.md` §1–§7, **committed before any decode**. Results and the
-scored expectations are `UNSEALING_4.md` §8, and are summarised into
-`RESULTS.md`. Ledger goes 3 → 4; there is no fifth.
+`UNSEALING_4.md` §1–§7, **committed and pushed at `b91f179` before any
+decode**. Results and the scored expectations are `UNSEALING_4.md` §8. Ledger
+3 → 4; there is no fifth.
+
+### 12.1 Outcome — the ship candidate is test-validated on both footings
+
+Six decodes, one per (config, seed), no retries, no crash.
+
+| footing | seed-mean | bar | Δ | every seed? |
+|---|---|---|---|---|
+| **A** — AOSP STRIP 146,964, E1 | **88.931 / 92.681 / 93.361 / 92.597 / 87.045** | published `84.83/91.04/92.08/89.57/82.40` | **+4.10 / +1.64 / +1.28 / +3.03 / +4.64** | **yes, all five** |
+| **B** — app trie 98,081, shipping app preset | **89.306 / 93.792 / 94.500 / 93.701 / 87.045** | trie-matched `84.92/91.54/92.96/89.57/82.52` | **+4.39 / +2.25 / +1.54 / +4.13 / +4.53** | **yes, all five**; worst-seed t5 **+1.50** |
+| **A vs equal footing** | same as A | val-tuned `87.12/92.29/92.96/89.94/85.68` | **+1.81 / +0.39 / +0.40 / +2.66 / +1.36** | **yes, all five**; McNemar **3/3, p < 0.001** |
+
+**`phaseM_kd_fresh_w1` is TEST-VALIDATED**, and holds a **qualified
+equal-footing win** — the second in the campaign after ch 192, resolved on 3 of
+3 seeds instead of 2, at 2.91 MB instead of 6.14 MB.
+
+Pre-registered expectations: **7 of 7 verdicts right**, band coverage **9 of
+10**. The single band miss is config-A ≤3 (92.597 against a band top of 92.593,
+an overshoot of 0.004 pt — a thirtieth of one row), and it is recorded as a
+miss. §5.3's registered guess that ≤3 would be the one to miss was **right**:
+its val→test shift is **+1.22 (A) / +1.14 (B)**, the largest ever measured on
+this split, against ±0.35 for every other metric here.
+
+Two limitations that must travel with the numbers: the equal-footing lead is
+bought **entirely on the HWS corpus half** (FUTO's engine is +0.38 ahead on its
+own half — `UNSEALING_4.md` §8.4), and **ch 192 keeps t5 by 0.14**. The pair
+(option A) was **not** decoded and stays val-only, permanently.
+
+§11.2's recommendation stands, now on test evidence: **ship B.**

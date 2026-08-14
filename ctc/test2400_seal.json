@@ -2440,6 +2440,16 @@
     "preset": "config A: 1.05,1.1,0.2,0.3734,0.9882 (E1); config B: 0.9,4.0,0.25,0.25,0.9882 (app-tuned, PHASE_G.md sec 6)",
     "published_in": "PHASE_G.md sec 7.5; RESULTS.md 'The third unsealing'",
     "trie": "config A: AOSP STRIP 146964; config B: app en_enhanced.json STRIP 98081"
+   },
+   {
+    "authorised_by": "the user (benchmark owner), directive of 2026-08-13/14 approving ONE final pre-registered unsealing plus an adversarial audit, for whichever model ships; subject fixed by the PHASE_M.md sec 11.2 ship recommendation (option B, the distilled single model). This is the FINAL unsealing: no fifth read is authorised.",
+    "date": "2026-08-14",
+    "decoded": "v2kd-fresh-w1 / v2kd-fresh-w1-s4321 / v2kd-fresh-w1-s7777 (phaseM_kd_fresh_w1, the E7 pair-distilled single model, fp32 exports), 2 configs x 3 seeds = 6 decodes. The coupled pair (option A) was NOT decoded.",
+    "n": 4,
+    "note": "pre-registered in UNSEALING_4.md sec 1-7, committed and pushed at b91f179 BEFORE any decode; artifact sha256s frozen in sec 2.3; hard cap 6 decodes, one each, no retries \u2014 honoured, no crash. Outcome: all five published bars clear on both footings on the seed-mean and every seed (test-validated); all five equal-footing numbers clear with exact paired McNemar resolved 3/3 at p<0.001 (qualified equal-footing win, the registered ceiling). fp32 graphs decoded; the fp16w ship artifact is bridged by a measured 0.00 val delta at the app footing.",
+    "preset": "config A: 1.05,1.1,0.2,0.3734,0.9882 (E1); config B: 0.9,4.0,0.25,0.25,0.9882 (the CURRENT SHIPPING app preset, fitted on resbn80g in PHASE_G.md sec 6 and never swept for this model family \u2014 declared in UNSEALING_4.md sec 2.1 before the decode)",
+    "published_in": "UNSEALING_4.md sec 8; PHASE_M.md sec 12; RESULTS.md 'The fourth unsealing'",
+    "trie": "config A: AOSP STRIP 146964; config B: app en_enhanced.json STRIP 98081"
    }
   ],
   "words_sha256": "f6053959aab98353337c0b9cbcf65497bdf76a1598c444db70d35bf03318b5d3"

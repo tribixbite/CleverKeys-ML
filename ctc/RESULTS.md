@@ -1,5 +1,91 @@
 # CTC Swipe Encoder — Training Results
 
+# The fourth unsealing (2026-08-14) — the shipped model is test-validated on both footings, and takes a qualified equal-footing win at 2.91 MB
+
+**The final read of test-2400. The ledger closes at 4 and there is no fifth.**
+Pre-registered in `ctc/UNSEALING_4.md` §1–§7 and **pushed at `b91f179` before
+any decode**; executed exactly as registered — six decodes, one per (config,
+seed), no warm-up, no retry, no crash. Authority: the user's directive of
+2026-08-13/14 (one final pre-registered unsealing plus an adversarial audit,
+for whichever model ships) applied to the `PHASE_M.md` §11.2 recommendation,
+**option B — the pair-distilled single model** `phaseM_kd_fresh_w1_s1234_fp16w`
+(2.91 MB, 1.5 M params, one ONNX session).
+
+| footing | seed-mean (1234/4321/7777) | bar | Δ | worst-seed status |
+|---|---|---|---|---|
+| val, AOSP, E1 | 88.750 / 92.773 / 93.473 / 91.373 / 87.387 | campaign 88.30/92.60/93.26/91.27/86.77 | +0.45/+0.17/+0.21/+0.10/+0.62 | all five, every seed |
+| **test, AOSP, E1 (config A)** | **88.931 / 92.681 / 93.361 / 92.597 / 87.045** | published `84.83/91.04/92.08/89.57/82.40` | **+4.10 / +1.64 / +1.28 / +3.03 / +4.64** | **all five clear, every seed** |
+| **test, app trie, app preset (config B)** | **89.306 / 93.792 / 94.500 / 93.701 / 87.045** | trie-matched `84.92/91.54/92.96/89.57/82.52` | **+4.39 / +2.25 / +1.54 / +4.13 / +4.53** | **all five clear, every seed; worst-seed t5 +1.50** |
+| **test, equal footing (config A)** | same as config A | val-tuned `87.12/92.29/92.96/89.94/85.68` | **+1.81 / +0.39 / +0.40 / +2.66 / +1.36** | **all five clear, every seed** |
+
+**Evidence tier: `phaseM_kd_fresh_w1` moves from val-only to TEST-VALIDATED**,
+on both footings, on the seed-mean and on every individual seed — the
+pre-registered rule, unchanged from all three prior unsealings.
+
+**Equal footing — a qualified win, and what it is not.** Exact paired two-sided
+McNemar on top-1 against FUTO's val-tuned per-row output resolves on **3 of 3
+seeds**: +45 (p 3.5e-05), +46 (p 1.4e-04), +39 (p 5.0e-04). Under the rule
+registered in `UNSEALING_4.md` §6.3 the permitted claim is a **qualified
+equal-footing win** — the same tier ch 192 holds and no stronger — now held at
+**2.91 MB instead of 6.14 MB** and resolved on three seeds instead of two.
+**Two limitations travel with it, and must be quoted with it:**
+
+* **The entire lead is bought on the HWS corpus half.** Per-source top-1:
+  FUTO's val-tuned engine **95.89 futo / 78.11 hws**; ours **95.51 / 82.16**
+  (config A) and **95.21 / 83.24** (config B). *On FUTO's own corpus half
+  FUTO's engine beats us by +0.38.* What is demonstrated is better coverage
+  across two corpora, not better decoding per se. (The internal spread does
+  narrow to **11.97** at the shipping footing — the smallest ever recorded on
+  this split, against 13.0–14.9 for every prior read.)
+* **ch 192 keeps top-5** (93.50 vs 93.361, −0.14). On the other four config-A
+  metrics this model is the best the campaign has ever measured on test-2400.
+
+**The ≤3 stratum, at last, and a methodological finding.** ≤3 lands at
+**92.597** (config A) / **93.701** (config B) — 1.2–1.9 pt above any prior
+model's test ≤3, and the stone Phases J–M chased is emphatically cleared on the
+sealed split. It is also the campaign's most badly predicted metric for the
+third unsealing running: its val→test shift is **+1.22 / +1.14** here against
+±0.35 for every other metric, and four unsealings now say short words are
+systematically easier on test-2400 than on val-9918. A ≤3 prediction wants a
+±1.3 band, not ±0.8.
+
+**Pre-registered expectations: 7 of 7 verdicts right; band coverage 9 of 10.**
+The one band miss is config-A ≤3, which overshot the (already widened) band top
+by **0.004 pt** — a thirtieth of one row of 815. It is reported as a miss
+because the rule says so. Full scoring: `UNSEALING_4.md` §8.6.
+
+**What was NOT decoded.** The coupled pair `v2pair-s1234` (option A, more
+accurate on val, 4.39 MB, two sessions) was deliberately left sealed and is
+**val-only permanently**. Every other val-only artifact in this repo stays
+val-only for the same reason: there is no fifth unsealing.
+
+**Ship artifacts and the fixture** (fixture and preset move together —
+`MODEL_COMPARISON.md` §5.1):
+
+| file | bytes | sha256 |
+|---|---|---|
+| `phaseM_kd_fresh_w1_s1234_fp16w.onnx` ← **ship** | 3,052,318 | `84718e6ebc8020176f27b9668e50922a765c96838307b640a8db9ab0549e88e5` |
+| `phaseM_kd_fresh_w1_fp16w_golden.json` (at the ship preset) | 140,462 | `2a449c4f2de19505131b396655ae01d3e3c325e40249446ff6e7a40c2b27559c` |
+| `phaseM_kd_fresh_w1_s1234.onnx` (fp32, decoded) | 6,068,519 | `b71911da3407abc0b113bbc662a1929953b04dcaf7650d848a7e897605a9bf80` |
+| `phaseM_kd_fresh_w1_s4321.onnx` (fp32, decoded) | 6,068,519 | `f7cb72c07e1d5a920e5ceb93b4f6cf241bf0c9dcc630bcd1117d4fdf38d2daf1` |
+| `phaseM_kd_fresh_w1_s7777.onnx` (fp32, decoded) | 6,068,519 | `c55cc3b055cf2db2b198c03b3fae688aad1930058dfed3902296aa08fd6510d7` |
+
+```kotlin
+// shipping preset, unchanged from resbn80g and now test-validated on this model
+CtcScoringParams(gamma = 0.9, lambda = 4.0, beta = 0.25, alpha = 0.0,
+                 gammaPrune = 0.25, betaPrune = 0.9882)
+```
+
+Disclosures that are part of the record, not footnotes to it: the **fp32**
+graphs were decoded and the **fp16w** artifact ships — bridged by a measured
+**0.00** val delta on all five at the app footing and ≤0.05 at E1, not by
+assumption; the config-B preset was fitted on `resbn80g` and **has never been
+swept for this model family**, so config B is a transplanted-preset footing
+that plausibly understates it; and every Campaign-2 caveat travels unchanged
+(T3 contributor contamination, the dedup defect, the preset asymmetry on
+published-bar comparisons, benchmark numbers rather than a generalization claim
+about an unseen user). **test-2400 has now been read four times.**
+
 # Phase M (2026-08-14): the close — a distilled single model takes all eleven bars on EVERY seed, the coupling optimum is interior, E4/E6/E2 all die by their own rules
 
 Full record `ctc/PHASE_M.md`. Twelve arms, every one pre-registered.
@@ -30,7 +116,9 @@ Full record `ctc/PHASE_M.md`. Twelve arms, every one pre-registered.
   transfer axes (0.06–0.43). Bar 1 (pair ≥ card, 2/3 seeds) **not met**.
 * **Gate band predictions: 12 of 12 correct** above 98 % agreement.
 * **test-2400 SEALED throughout L and M** (ledger 3). Unsealing is the
-  orchestrator's act.
+  orchestrator's act — **taken on 2026-08-14 for the shipped model only**;
+  see "The fourth unsealing" at the top of this file and `UNSEALING_4.md`.
+  The single model is now **test-validated**; the pair stays val-only.
 
 # Phase L (2026-08-13): pipeline v2 — the alignment gauge is TRAINABLE, the ≤3 stone falls to a single model on the seed-mean, and English synthesis is refuted
 

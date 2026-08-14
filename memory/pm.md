@@ -1149,6 +1149,24 @@ Subject: v2kd-fresh-w1 (distilled single, fp16w 2.91MB), seeds 1234/4321/7777.
       decode: configs, sha256s, beam 100 / top-k 8 / OOV=miss, bands per
       metric, hard cap 6 decodes no retries, tier + equal-footing + McNemar
       rules, fixture chore.
-- [ ] Decode 6 (2 configs x 3 seeds), append ledger entry 4.
-- [ ] Report UNSEALING_4 8; score expectations; update RESULTS, PHASE_M,
-      MODEL_COMPARISON; regenerate golden fixture at the ship preset.
+- [x] Decoded 6 (2 configs x 3 seeds), no retry, no crash. Ledger entry 4
+      appended (now 4 entries; no fifth is authorised).
+- [x] TEST-VALIDATED both footings, every seed. config A (aosp/e1)
+      88.931/92.681/93.361/92.597/87.045 vs published bar +4.10/+1.64/+1.28/
+      +3.03/+4.64; config B (app trie + app preset) 89.306/93.792/94.500/
+      93.701/87.045 vs trie-matched bar +4.39/+2.25/+1.54/+4.13/+4.53,
+      worst-seed t5 +1.50.
+- [x] QUALIFIED EQUAL-FOOTING WIN (the registered ceiling): all five vs the
+      val-tuned FUTO bar every seed, McNemar 3/3 p<0.001 (+45/+46/+39) — 2nd
+      in the campaign after ch192, at 2.91MB not 6.14MB. LIMITATIONS: the
+      whole lead is the HWS half (FUTO is +0.38 ahead on its OWN half); ch192
+      keeps t5 by 0.14.
+- [x] Expectations 7/7 verdicts right, band coverage 9/10. Only miss: config A
+      <=3, 92.597 vs band top 92.593 (+0.004 = 1/30 of a row) — reported as a
+      miss. <=3 val->test shift +1.22/+1.14, largest ever; a <=3 band wants
+      +-1.3 not +-0.8.
+- [x] Golden fixture regenerated from the fp16w ship artifact AT THE SHIP
+      PRESET (was E1): 140,462 B, sha 2a449c4f...; RESULTS/PHASE_M 11.1+12/
+      MODEL_COMPARISON updated; pushed.
+NOT DECODED and val-only permanently: v2pair-s1234 (option A) and every other
+val-only artifact. CAMPAIGN CLOSED.

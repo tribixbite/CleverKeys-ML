@@ -349,3 +349,173 @@ publication site. Entries are never removed, and there is no fifth.
 ## 8. RESULT
 
 *(appended after the six decodes; nothing above this line was edited afterwards)*
+
+Run 2026-08-14, exactly as registered: **six decodes, one per (config, seed),
+no warm-up, no retry, no fourth seed, nothing re-run after the numbers were
+seen, and no crash.** `seal.py` logged the 2,400/2,400 overlap and the
+`--unseal-test` override on every one. Ledger entry
+`test2400_seal.json["test-2400"]["unsealings"][3]`. Dumps:
+`~/ctc-train/ckpt/v2kd-fresh-w1{,-s4321,-s7777}/test2400_m_{e1,app}.jsonl`.
+Greedy-CTC t1 **72.50 / 72.75 / 73.00 %** (val was 72.35 / 72.35 / 72.37).
+
+Every table below is recomputed from the per-row dumps and reproduces
+`eval_beam`'s printed metrics exactly.
+
+### 8.1 Config A — AOSP STRIP 146,964 at E1, against the published bar
+
+| metric | s1234 | s4321 | s7777 | **seed-mean** | sd | worst | **published bar** | **Δ mean** | **Δ worst** | gate |
+|---|---|---|---|---|---|---|---|---|---|---|
+| t1 | 89.00 | 89.04 | 88.75 | **88.931** | 0.158 | 88.75 | 84.83 | **+4.10** | +3.92 | **PASS** |
+| t3 | 92.71 | 92.62 | 92.71 | **92.681** | 0.048 | 92.62 | 91.04 | **+1.64** | +1.58 | **PASS** |
+| t5 | 93.42 | 93.29 | 93.38 | **93.361** | 0.064 | 93.29 | 92.08 | **+1.28** | +1.21 | **PASS** |
+| ≤3 (n=815) | 92.76 | 92.76 | 92.27 | **92.597** | 0.283 | 92.27 | 89.57 | **+3.03** | +2.70 | **PASS** |
+| 4+ (n=1,585) | 87.07 | 87.13 | 86.94 | **87.045** | 0.096 | 86.94 | 82.40 | **+4.64** | +4.54 | **PASS** |
+
+**All five clear on the seed-mean and on every individual seed. The §6.1 tier
+rule is met: `phaseM_kd_fresh_w1` is TEST-VALIDATED.**
+
+### 8.2 Config B — the shipping footing: app trie 98,081 at the shipping app preset
+
+| metric | s1234 | s4321 | s7777 | **seed-mean** | sd | worst | **trie-matched bar** | **Δ mean** | **Δ worst** | gate |
+|---|---|---|---|---|---|---|---|---|---|---|
+| t1 | 89.38 | 89.29 | 89.25 | **89.306** | 0.064 | 89.25 | 84.92 | **+4.39** | +4.33 | **PASS** |
+| t3 | 93.75 | 93.79 | 93.83 | **93.792** | 0.042 | 93.75 | 91.54 | **+2.25** | +2.21 | **PASS** |
+| t5 | 94.50 | 94.54 | 94.46 | **94.500** | 0.042 | 94.46 | 92.96 | **+1.54** | +1.50 | **PASS** |
+| ≤3 (n=815) | 93.74 | 93.87 | 93.50 | **93.701** | 0.187 | 93.50 | 89.57 | **+4.13** | +3.93 | **PASS** |
+| 4+ (n=1,585) | 87.13 | 86.94 | 87.07 | **87.045** | 0.096 | 86.94 | 82.52 | **+4.53** | +4.42 | **PASS** |
+
+**All five clear, every seed. Worst-seed t5 margin +1.50** — against
+`resbn80g`'s +0.75 and the Campaign-2 incumbent's +0.08 knife edge. §6.2 is
+met: this is a **shipping validation** on the lexicon users run. It is **not**
+an equal-footing claim, and the preset is the one fitted on `resbn80g`
+(§2.1) — not this model's own optimum, which has never been sought.
+
+### 8.3 Equal footing — the campaign's second qualified win, and its cleanest
+
+Against `87.12 / 92.29 / 92.96 / 89.94 / 85.68` (both engines val-tuned, same
+2,400 rows, same STRIP trie, same beam, same OOV rule — `FAIR_REMATCH.md` §5):
+
+| metric | ours (mean) | worst seed | bar | **Δ mean** | **Δ worst** |
+|---|---|---|---|---|---|
+| t1 | 88.931 | 88.75 | 87.12 | **+1.81** | +1.63 |
+| t3 | 92.681 | 92.62 | 92.29 | **+0.39** | +0.33 |
+| t5 | 93.361 | 93.29 | 92.96 | **+0.40** | +0.33 |
+| ≤3 | 92.597 | 92.27 | 89.94 | **+2.66** | +2.33 |
+| 4+ | 87.045 | 86.94 | 85.68 | **+1.36** | +1.26 |
+
+**All five clear on the seed-mean and on every seed.** Exact paired two-sided
+McNemar on t1 against FUTO's val-tuned per-row output:
+
+| seed | we win | they win | net | p |
+|---|---|---|---|---|
+| s1234 | 81 | 36 | **+45** | **3.5e-05** |
+| s4321 | 89 | 43 | **+46** | **1.4e-04** |
+| s7777 | 80 | 41 | **+39** | **5.0e-04** |
+
+**Resolved on 3 of 3 seeds at p < 0.001.** Under §6.3 the permitted claim is a
+**qualified equal-footing win** — the same tier ch 192 holds and *no stronger*,
+as registered. What is new is only the resolution: ch 192 resolved 2 of 3, this
+resolves 3 of 3. This is the campaign's first model to hold that win at
+**2.91 MB** rather than 6.14 MB, and the first to hold it while also being
+test-validated on the shipping footing.
+
+### 8.4 The honest part of the equal-footing win: it is entirely the HWS half
+
+Per-source top-1, seed-mean, from `cache/holdout_source_tags.json["test"]` (no
+extra decode):
+
+| engine / config | FUTO half (n=1,217) | HWS half (n=1,183) | spread |
+|---|---|---|---|
+| **FUTO ceiling, val-tuned** (the equal-footing bar) | **95.89** | **78.11** | 17.78 |
+| ours, config A | 95.51 | **82.16** | 13.34 |
+| ours, config B | 95.21 | **83.24** | **11.97** |
+| *(prior reads: ch 128 95.07/80.56; `resbn80g` A 94.80/80.36, B 94.55/81.54)* | | | |
+
+**On FUTO's own corpus half, FUTO's val-tuned engine beats us by +0.38.** The
+entire +1.81 aggregate equal-footing lead is bought on the HWS half (+4.05).
+Anyone reading §8.3 as "our model is better at swipe decoding" should read this
+table first: what is demonstrated is better *coverage across two corpora*, and
+one of the two corpora is FUTO's own. The 14-point internal spread that every
+prior read of this split reported is, however, genuinely narrower here —
+**11.97 at the shipping footing is the smallest ever recorded on test-2400**.
+
+### 8.5 Against every other model ever decoded on this split
+
+Config A (all at AOSP STRIP / E1, seed-means):
+
+| model | file size | t1 | t3 | t5 | ≤3 | 4+ |
+|---|---|---|---|---|---|---|
+| **`phaseM_kd_fresh_w1`** (this decode) | **2.91 MB** fp16w | **88.931** | **92.681** | 93.361 | **92.597** | **87.045** |
+| ch 192 (unsealing 1) | 6.14 MB fp32 | 88.36 | 92.65 | **93.50** | 91.37 | 86.81 |
+| ch 128 (unsealing 1) | 2.80 MB fp32 | 87.92 | 92.33 | 93.00 | 91.08 | 86.29 |
+| `resbn80g` (unsealing 3) | 1.14 MB fp32 | 87.68 | 92.18 | 92.82 | 90.80 | 86.08 |
+| `fast_resbn80` (unsealing 2) | 1.14 MB fp32 | 87.29 | 91.89 | 92.82 | 91.17 | 85.30 |
+
+**Best test numbers the campaign has ever measured on four of five metrics**,
+at less than half of ch 192's bytes; **t5 is −0.14 behind ch 192** and that is
+the one place a previous model stays ahead. On the shipping footing it beats
+`resbn80g`'s config B on all five (+1.17 / +0.57 / +0.60 / +1.84 / +0.82).
+
+The **≤3 stratum** — the stone this campaign chased for four phases — lands at
+**92.60 (config A) / 93.70 (config B)**, +1.23 / +1.14 above its own val
+figure and 1.2–1.9 pt above any prior model's test ≤3.
+
+### 8.6 The pre-registered expectations, scored
+
+| # | registered in §5 | outcome | verdict |
+|---|---|---|---|
+| A1 | config A clears all five published, seed-mean **and** every seed; t5 narrowest | all five, every seed; t5 margin +1.28 is indeed the narrowest of the five | **RIGHT** |
+| A2 | config A clears all five **equal-footing** on the seed-mean | all five on the seed-mean **and** on every seed | **RIGHT** |
+| A3 | McNemar resolves on 2 or 3 of 3 seeds | 3 of 3, p ≤ 5.0e-04 | **RIGHT** |
+| B1 | config B clears all five, every seed, worst-seed t5 > +1.0 | all five, every seed, worst-seed t5 **+1.50** | **RIGHT** |
+| B2 | config B t1 exceeds config A t1 by +0.1 … +0.5 | **+0.375** | **RIGHT** |
+| §5.3 | "if one prediction misses its band, ≤3 is the one" | ≤3 is the **only** band miss, and it missed by the largest point error on both footings (+0.86 A, +1.04 B) while no other metric erred past 0.34 | **RIGHT** |
+| §5.3 | config-B point predictions worse than config-A's | mean absolute error **0.36 (B) vs 0.30 (A)** | **RIGHT (marginally)** — though B was 5/5 in-band and A 4/5 |
+
+**Point predictions vs measured:**
+
+| | t1 | t3 | t5 | ≤3 | 4+ |
+|---|---|---|---|---|---|
+| config A, predicted → measured | 88.78 → **88.931** (+0.15) | 92.80 → **92.681** (−0.12) | 93.53 → **93.361** (−0.17) | 91.74 → **92.597** (**+0.86**) | 87.26 → **87.045** (−0.21) |
+| config B, predicted → measured | 88.97 → **89.306** (+0.34) | 93.65 → **93.792** (+0.14) | 94.26 → **94.500** (+0.24) | 92.66 → **93.701** (**+1.04**) | 87.08 → **87.045** (−0.03) |
+
+**Band coverage: 9 of 10.** The single miss is **config A ≤3**, which came in
+at 92.597 against a band top of 92.593 — an overshoot of **0.004 pt**, i.e.
+**one thirtieth of a single row** of the 815-row stratum, against a band that
+had already been widened by 0.4 for exactly this metric. It is recorded as a
+**miss** because that is what the rule says, and the rule is not adjusted after
+the fact. What it actually establishes is the substantive finding:
+
+**The ≤3 stratum has now been the outlier at three unsealings running, and its
+val→test shift is not merely unstable but consistently the largest of the five:
++0.82 (U2), +0.02 (U3), and now +1.22 (A) / +1.14 (B) — the biggest yet.**
+Short words are systematically easier on test-2400 than on val-9918, by an
+amount no other metric approaches (every other shift here is within ±0.35), and
+four unsealings of evidence say a ≤3 prediction should carry a ±1.3 band, not
+±0.8. That is the durable methodological output of this decode.
+
+Measured val→test shifts for this model, added to the §4.3 table:
+
+| model / footing | t1 | t3 | t5 | ≤3 | 4+ |
+|---|---|---|---|---|---|
+| `phaseM_kd_fresh_w1`, config A | +0.18 | −0.09 | −0.11 | **+1.22** | −0.34 |
+| `phaseM_kd_fresh_w1`, config B | −0.07 | +0.11 | +0.03 | **+1.14** | −0.68 |
+
+### 8.7 What the test evidence now supports, at what tier
+
+| claim | tier | basis |
+|---|---|---|
+| `phaseM_kd_fresh_w1` beats FUTO's **published** encoder+refinement ceiling on all five metrics | **test-validated**, seed-mean and every seed | §8.1 |
+| …and on the **app lexicon** at the shipping preset, against the trie-matched published bar | **test-validated (shipping footing)**, every seed | §8.2 |
+| …and on **equal footing** (both engines val-tuned) | **qualified equal-footing win**, McNemar-resolved 3/3 — the registered ceiling on this claim, not a general superiority claim | §8.3, §6.3 |
+| the equal-footing lead is a *coverage* result, not a decoding-quality result | **stated as a limitation**: FUTO's engine is +0.38 ahead on its own corpus half | §8.4 |
+| the model is the campaign's best on test-2400 | **true on 4 of 5 config-A metrics**; ch 192 keeps t5 by 0.14 | §8.5 |
+| the fp16w **ship artifact** carries these numbers | **inferred**, not directly decoded: fp32 was decoded; fp16w ≡ fp32 to 0.00 on all five at the app footing on val and to ≤0.05 at E1 (§2.2) | §2.2 |
+| anything about `v2pair-s1234` (option A, the coupled pair) | **val-only, unchanged.** It was not decoded and never will be | §1 |
+| anything about a fifth read | **not authorised, and none is contemplated** | §3, §7 |
+
+Every Campaign-2 caveat travels unchanged: T3 contributor contamination, the
+dedup defect, the preset asymmetry on published-bar comparisons, the per-source
+spread of §8.4, and the standing fact that these are benchmark numbers on a
+worn split rather than a generalization claim about an unseen user.
+**test-2400 has now been read four times. There is no fifth.**

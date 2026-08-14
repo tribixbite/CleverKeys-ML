@@ -15,6 +15,24 @@
 > the `mix2-i8f16` card (misses 4 transfer axes by 0.06–0.43), so the crown is
 > recorded as not won. Ship **fp16w**. Full record `PHASE_M.md`.
 >
+> **⇧ TEST-VALIDATED 2026-08-14 — the fourth and final unsealing**
+> (`UNSEALING_4.md`, pre-registered and pushed at `b91f179` before any decode;
+> ledger 3 → 4). Six decodes, one per (config, seed), no retries.
+> **Config A** (AOSP STRIP 146,964, E1) seed-mean
+> **88.931 / 92.681 / 93.361 / 92.597 / 87.045** — all five above the published
+> FUTO bar on the seed-mean *and* every seed (+4.10 / +1.64 / +1.28 / +3.03 /
+> +4.64). **Config B** (app trie 98,081 at the shipping app preset) seed-mean
+> **89.306 / 93.792 / 94.500 / 93.701 / 87.045**, all five above the
+> trie-matched bar every seed, worst-seed t5 margin **+1.50**.
+> **Equal footing** (both engines val-tuned, `FAIR_REMATCH.md` §5 bar): all
+> five clear on every seed, exact paired McNemar on t1 resolved **3 of 3 at
+> p < 0.001** (+45 / +46 / +39 rows) → a **qualified equal-footing win**, the
+> same claim tier ch 192 holds, at **2.91 MB instead of 6.14 MB**.
+> Two limitations that travel with it: the entire equal-footing lead is bought
+> on the **HWS** corpus half (FUTO's engine is **+0.38 ahead on its own half**,
+> `UNSEALING_4.md` §8.4), and ch 192 keeps **t5 by 0.14**. The config-B preset
+> is `resbn80g`'s, never swept for this family.
+>
 > **⚠ RETRACTED 2026-08-13 — the *Phase-L* single-model promotion.** An
 > earlier version of this addendum promoted `phaseL_memberA_s1234_fp16w` as
 > clearing all eleven campaign bars on the seed-mean. Two further seeds
@@ -710,18 +728,25 @@ in this document.
 
 ## 5. Ship recommendation matrix
 
-**Read this first, post-Phase-J.** The matrix below ranks by *evidence quality*
-as well as accuracy, and the two now diverge: the most accurate models on val and
-alt-layouts (`sw2345`, then `resbn192i`) are **not test-validated**, while every
-test-validated model is behind them on val. That is a deliberate state — the
-seal was not spent, because Phase J's terminal condition was not met (§2.8).
-Choosing `sw2345` means choosing a model whose accuracy claim rests on val-9918
-plus seven alt-layout corpora and on no sealed split at all.
+**Read this first, post-Phase-M (2026-08-14).** The divergence this section was
+written to describe — most accurate models val-only, test-validated models
+behind them — **is over.** The fourth unsealing put the campaign's most
+accurate single model on the sealed split and it cleared everything on both
+footings (`UNSEALING_4.md` §8). The top row below is now both the most accurate
+single model *and* test-validated. The rows beneath it are kept because they
+remain the right pick under a different size/latency budget, and because the
+evidence-tier language on them is still accurate.
+
+Everything else in the campaign that is val-only **stays val-only permanently**:
+there is no fifth unsealing. That includes the coupled pair `v2pair-s1234`,
+which is the more accurate configuration on val and was deliberately not
+decoded.
 
 | priority | pick | why | what must move with it |
 |---|---|---|---|
+| **THE RECOMMENDATION — best accuracy *and* best evidence** | **`phaseM_kd_fresh_w1_s1234_fp16w`** (1,512,802 params, 3,052,318 B / 2.91 MiB, 0.83 ms class) | **Test-validated on both footings, every seed** (config A +4.10/+1.64/+1.28/+3.03/+4.64 over the published bar; config B +4.39/+2.25/+1.54/+4.13/+4.53 over the trie-matched bar, worst-seed t5 +1.50). Holds a **qualified equal-footing win** over FUTO's val-tuned engine, McNemar-resolved **3 of 3** — at less than half ch 192's bytes. Best test numbers in the campaign on 4 of 5 config-A metrics. On val it clears **all eleven campaign bars on every seed**. | app runtime preset **`CtcScoringParams(gamma = 0.9, lambda = 4.0, beta = 0.25, alpha = 0.0, gammaPrune = 0.25, betaPrune = 0.9882)`** *and* the fixture `artifacts/phaseM_kd_fresh_w1_fp16w_golden.json` sha256 `2a449c4f…`, regenerated from this artifact **at exactly that preset**. Benchmark numbers stay at E1. **int8w is not available to it** — PHASE_L §16 measured int8w costing a single model the ≤3 bar. The λ 4.0 user-dictionary caveat of §5.2 applies. |
 | **Best measured accuracy, accepting val-only evidence** | **`sw2345`** (Phase-J finalist, 1,512,802 params, 3,052,318 B fp16w / 2.91 MiB, 0.842 ms) | Best val seed-mean in the campaign (88.51 / 92.67 / 93.37 / 91.20 / 87.11) and **6 of 6 alt-layout bars**, 3 seeds. Beats the `resbn192i` incumbent on four of five val metrics. | **E1** preset (no app-trie sweep has been run for it); a golden fixture regenerated from it at whatever preset ships. **Never quote it as test-validated**, and it **misses the `≤3` bar by 0.07** — see §2.8. Cyrillic on this family is unresolved and the ru path wants **λ ≈ 2.0**, not E1's 1.1. |
-| **Accuracy first, device budget permits ~0.9 ms encoder** | **ch 192** (`ch192_s1234.onnx`, 1,525,378 params, 6.14 MB, 0.877 ms) | The only configuration with a **qualified equal-footing win** over FUTO (all five, McNemar resolved on 2 of 3 seeds). Best on every test metric. | E1 preset; golden fixture regenerated from ch 192 at whatever preset ships. |
+| **Accuracy first, device budget permits ~0.9 ms encoder** | **ch 192** (`ch192_s1234.onnx`, 1,525,378 params, 6.14 MB, 0.877 ms) | ~~The only configuration with~~ **the first of two** configurations with a **qualified equal-footing win** over FUTO (all five, McNemar resolved on 2 of 3 seeds; the Phase-M distilled single model now holds the same win, resolved 3 of 3, at 2.91 MB). It keeps exactly one thing: **test t5 93.50, +0.14 ahead** of that model. Otherwise superseded on every test metric. | E1 preset; golden fixture regenerated from ch 192 at whatever preset ships. |
 | **Accuracy first, balanced size** | **ch 128** (689,282 params, 2.80 MB, 0.455 ms) | Campaign-2's shipping pick. Test-validated, clears all five on every seed on both tries, +0.19 t1 behind ch 192 on val for 1.9× less encoder time. Equal-footing lead does **not** resolve on any metric or seed — do not claim superiority for it. | E1 preset; the existing ch 128 fixture. |
 | **Balanced — the recommendation** | **`resbn80g`** (`resbn80g_s1234.onnx`, 279,346 params, 1.14 MB, **0.215 ms class**) | Test-validated on **both** footings, every seed. 2.45× smaller and 2.21× faster than ch 128 for −0.24 t1 on test / −0.16 on val. On the shipping footing it clears the trie-matched bar by +3.22/+1.68/+0.94/+2.29/+3.71 with a **+0.75 worst-seed t5 margin**. Level with FUTO's val-tuned engine. | **`CtcScoringParams(gamma = 0.9, lambda = 4.0, beta = 0.25, alpha = 0.0, gammaPrune = 0.25, betaPrune = 0.9882)`** *and* the fixture `ctc_model_golden.json` sha256 `ce3b54…`, regenerated from `resbn80g_s1234` at that preset. |
 | **Smallest that clears the val bars** | `fast_resbn72` (229,642 params, 0.94 MB, 0.186 ms) | Fastest 5/5 configuration measured. | **Val evidence only, permanently** — never decoded on test, and the third unsealing is spent. Its Phase-G re-trained sibling is still in progress (§7). |
@@ -735,7 +760,21 @@ reproduces Python bit-for-bit *at that preset*. Shipping the model at one preset
 and the fixture at another means the parity test asserts against a configuration
 nothing runs (`RESULTS.md` §Artifacts).
 
-Concretely, for `resbn80g`:
+Concretely, for the **Phase-M ship pick** `phaseM_kd_fresh_w1_s1234_fp16w`
+(sha256 `84718e6e…`):
+
+* app runtime preset **must** be `0.9 / 4.0 / 0.25 / 0.25 / 0.9882` — the same
+  app preset, now **test-validated on this model** as config B of the fourth
+  unsealing (`UNSEALING_4.md` §8.2). It was fitted on `resbn80g` and has never
+  been swept for this family; that is a disclosed gap, not a fitted result;
+* fixture **must** be `artifacts/phaseM_kd_fresh_w1_fp16w_golden.json` sha256
+  **`2a449c4f2de19505131b396655ae01d3e3c325e40249446ff6e7a40c2b27559c`**,
+  regenerated 2026-08-14 from that artifact at exactly that preset. (The
+  earlier `140,480`-byte fixture of `PHASE_M.md` §11.1 was generated at **E1**
+  — the benchmark preset, not the shipping one — and is superseded by this
+  rule, not by any measurement.)
+
+And, for the superseded `resbn80g`:
 
 * app runtime preset **must** be `0.9 / 4.0 / 0.25 / 0.25 / 0.9882`;
 * fixture **must** be `artifacts/ctc_model_golden.json` sha256 `ce3b5456…`,
