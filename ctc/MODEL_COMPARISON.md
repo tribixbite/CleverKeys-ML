@@ -4,26 +4,25 @@
 > the **single-model finalist** and adds a pair configuration that is a
 > *recipe* rather than a draw. Quote with the footings.
 >
-> **NEW SINGLE-MODEL FINALIST — `phaseL_memberA_s1234_fp16w` (2.91 MB)**, the
-> slw-1.0 member of a coupled pair (`train_v2.py`: two encoders, identical
-> batches, ramped mutual per-frame KL, member-asymmetric ≤3 loss weights
-> 1.0/1.5). **Clears ALL ELEVEN campaign bars on the SEED-MEAN footing over
-> three seeds**: 88.54 / 92.60 / 93.33 / **91.35** / 87.08 · dvorak 89.84 ·
-> dvorak-app 89.51 · azerty 83.78 · qwertz 82.507 · german 80.72 · spanish
-> 88.43. It **supersedes `sw2345`** (10/11 seed-mean, ≤3 −0.07) as the
-> single-model finalist — the first model in the campaign to hold the ten
-> *and* the ≤3 stratum. Footings, all of them: two margins are ties (t3
-> **+0.000**, qwertz +0.007); the **every-seed** tally is 8/11; not
-> test-validated (Phase L never opened test-2400). **Ship fp16w, not int8w**
-> — int8w costs this model the ≤3 bar (91.24) and −0.78 dvorak, unlike the
-> averaged pair where PHASE_K §4.6 measured int8w free.
+> **⚠ RETRACTED 2026-08-13 — there is no new single-model finalist.** An
+> earlier version of this addendum promoted `phaseL_memberA_s1234_fp16w` as
+> clearing all eleven campaign bars on the seed-mean. Two further seeds
+> (PHASE_M.md §7.1) put its two tie margins under: t3 +0.000 → **−0.024**,
+> qwertz +0.007 → **−0.158**, giving **9/11** at a five-seed mean with
+> per-seed tallies [11, 8, 8, 6, 8]. **`sw2345` remains the single-model
+> finalist** (10/11 seed-mean, missing ≤3). What survives from that model:
+> it clears the **≤3 stratum on a five-seed mean (91.358, +0.088)**, and it
+> must ship **fp16w** if shipped at all — int8w costs it the ≤3 bar (91.24)
+> and −0.78 dvorak, unlike the averaged pair where PHASE_K §4.6 measured
+> int8w free.
 >
 > **`v2pair-s1234` (int8w + fp16w, 4.39 MB)** — the same run's two members
 > probability-averaged before the beam: val 88.86 / 92.82 / 93.59 / **91.56**
 > / 87.46, dvorak 92.88, dvorak-app 92.59, azerty 84.11, qwertz 84.41,
-> german 82.26, spanish 89.76. **All three seeds of this recipe clear all
-> eleven campaign bars — 11/11 EVERY SEED**, which nothing in Phases A–K
-> achieved (Phase J: 5/11 every-seed). Against the `mix2-i8f16` card it is
+> german 82.26, spanish 89.76. **All FIVE seeds of this recipe clear all
+> eleven campaign bars — 11/11 EVERY SEED** (five-seed mean margins +0.12 …
+> +2.76, PHASE_M.md §7.2), which nothing in Phases A–K achieved (Phase J:
+> 5/11 every-seed). Against the `mix2-i8f16` card it is
 > 10/11 at s1234 and 7/11 at the seed-mean (card keeps dvorak/dvorak-app/
 > spanish by 0.3–0.4), so the pre-registered bar 1 was **NOT met** and the
 > recorded ship configuration is unchanged pending an orchestrator decision.

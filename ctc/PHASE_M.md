@@ -193,3 +193,73 @@ retuned.
 | `v2pair-s9999` | 98.25 % | working band | **88.73 / greedy ✓** | PASS |
 
 **8 of 8 gate predictions correct** across five seeds.
+
+## 7. THE FIVE-SEED VERDICT — a retraction and a strengthened claim
+
+### 7.1 ⚠ RETRACTION — PHASE_L §15.4's single-model all-eleven claim does NOT survive five seeds
+
+The §1.1 rule fired. `L1 member A`, five seeds:
+
+| bar | s1234 | s4321 | s7777 | s5555 | s9999 | **5-seed mean** | bar | Δ |
+|---|---|---|---|---|---|---|---|---|
+| t1 | 88.60 | 88.65 | 88.37 | 88.35 | 88.72 | 88.538 | 88.30 | +0.238 |
+| **t3** | 92.62 | 92.64 | 92.54 | 92.51 | 92.57 | **92.576** | 92.60 | **−0.024 ✗** |
+| t5 | 93.36 | 93.31 | 93.32 | 93.31 | 93.35 | 93.330 | 93.26 | +0.070 |
+| ≤3 | 91.32 | 91.41 | 91.32 | 91.27 | 91.47 | **91.358** | 91.27 | +0.088 |
+| 4+ | 87.18 | 87.21 | 86.84 | 86.84 | 87.29 | 87.072 | 86.77 | +0.302 |
+| dvorak | 91.17 | 87.71 | 90.64 | 88.64 | 89.42 | 89.516 | 89.13 | +0.386 |
+| dvorak-app | 91.01 | 87.51 | 90.03 | 88.07 | 88.85 | 89.092 | 88.20 | +0.892 |
+| azerty | 83.97 | 83.59 | 83.78 | 83.73 | 83.64 | 83.742 | 83.60 | +0.142 |
+| **qwertz** | 82.56 | 82.90 | 82.06 | 81.89 | 82.31 | **82.342** | 82.50 | **−0.158 ✗** |
+| german | 81.26 | 79.99 | 80.90 | 80.04 | 80.35 | 80.509 | 79.64 | +0.869 |
+| spanish | 89.02 | 88.62 | 87.66 | 88.05 | 88.11 | 88.294 | 88.28 | +0.014 |
+| | | | | | **9/11** | | | |
+
+**Both tie margins went under.** t3 (+0.000 at three seeds) is now **−0.024**;
+qwertz (+0.007) is now **−0.158**. Per-seed tallies across five seeds are
+**[11, 8, 8, 6, 8]** — the s1234 11/11 was the single-seed floor, exactly as
+PHASE_K §8.3 warned and exactly as PHASE_L §15.4's own disclosure #2 flagged.
+
+**RETRACTED, in place and everywhere it propagated:** "the campaign's first
+single model to clear all eleven campaign bars on the seed-mean." The honest
+replacement: **`L1 member A` is a 9/11 seed-mean single model** that clears
+the ≤3 stratum (91.358, +0.088 — still a campaign first for that stratum on a
+seed-mean) but misses t3 and qwertz. It therefore **does not supersede
+`sw2345`** (10/11 seed-mean, missing ≤3): the two are non-dominating mirror
+images, which is precisely the standing PHASE_K §9 described. The
+single-model finalist question is **reopened**, pending the three-seed E7
+result.
+
+Retraction propagated this commit to `PHASE_L.md` §15.4, `RESULTS.md`,
+`MODEL_COMPARISON.md` and `APP_INTEGRATION_PLAN.md` §9.
+
+### 7.2 The PAIR claim strengthens at five seeds — 11/11 on EVERY SEED
+
+The same two new seeds, evaluated as pairs:
+
+| bar | 5-seed mean | campaign bar | Δ |
+|---|---|---|---|
+| t1 | **88.776** | 88.30 | +0.476 |
+| t3 | **92.724** | 92.60 | +0.124 |
+| t5 | **93.458** | 93.26 | +0.198 |
+| **≤3** | **91.436** | 91.27 | **+0.166** |
+| 4+ | **87.390** | 86.77 | +0.620 |
+| dvorak | **91.339** | 89.13 | +2.209 |
+| dvorak-app | **90.956** | 88.20 | +2.756 |
+| azerty | **84.766** | 83.60 | +1.166 |
+| qwertz | **84.128** | 82.50 | +1.628 |
+| german | **81.764** | 79.64 | +2.124 |
+| spanish | **89.078** | 88.28 | +0.798 |
+
+**Per-seed tallies: [11, 11, 11, 11, 11] — all eleven campaign bars on all
+five seeds**, with a seed-mean margin above +0.12 on every axis and above
++1.1 on five of six layouts. Nothing in Phases A–K approached this footing
+(Phase J: 5/11 every-seed; Phase K's all-eleven was one configuration whose
+recipe did not reproduce). Against the `mix2-i8f16` *card* the per-seed
+tallies are [10, 8, 6, 4, 8] — bar 1 remains unmet and is now clearly unmeetable
+by this recipe; the card's transfer numbers are a high-water single draw.
+
+**The durable Phase L/M result is therefore about the pair, not the single
+model:** coupled-pair training turns a lucky configuration into a recipe that
+clears every campaign bar on every seed tested (5/5), at 4.39 MB.
+Member B is 10/11 at the five-seed mean (per-seed [9, 10, 8, 8, 10]).

@@ -2200,8 +2200,8 @@ states what the app should carry when it next syncs models.
 
 | slot | was (Phase J/K) | **now** | why |
 |---|---|---|---|
-| single-model finalist | `sw2345_s1234` (10/11 seed-mean, ≤3 −0.07) | **`phaseL_memberA_s1234_fp16w.onnx`, 2.91 MB** | **11/11 campaign bars on the seed-mean over 3 seeds** — the first model to hold the ten *and* the ≤3 stratum (91.35, +0.08) |
-| two-model configuration | `mix2-i8f16` (4.45 MB, 11/11 single-config) | `v2pair-s1234` i8f16, **4.39 MB**, 11/11 campaign bars **every seed** (3/3) | reproducible by construction (6/6 gate passes) rather than a draw; pre-registered bar 1 vs the mix2 card was **not** met, so the recorded ship configuration is unchanged pending an orchestrator decision |
+| single-model finalist | `sw2345_s1234` (10/11 seed-mean, ≤3 −0.07) | **UNCHANGED — `sw2345_s1234`** | ⚠ the Phase-L promotion of `phaseL_memberA_s1234_fp16w` is **RETRACTED** (PHASE_M.md §7.1): at five seeds it is 9/11, not 11/11 (t3 −0.024, qwertz −0.158). It still clears ≤3 on a five-seed mean (91.358) and must ship fp16w if used |
+| two-model configuration | `mix2-i8f16` (4.45 MB, 11/11 single-config) | `v2pair-s1234` i8f16, **4.39 MB**, 11/11 campaign bars **every seed** (5/5) | reproducible by construction (6/6 gate passes) rather than a draw; pre-registered bar 1 vs the mix2 card was **not** met, so the recorded ship configuration is unchanged pending an orchestrator decision |
 
 **Contract is unchanged**: `[1,32,65]` log-emission head, E1 preset, AOSP/az26
 tries, same `CtcEmissionModel` seam, same dual-session averaging path §8

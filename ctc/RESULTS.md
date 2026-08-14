@@ -5,17 +5,16 @@
 **Settled at three seeds.** Seven 188 k arms, every one pre-registered before
 launch, every gate committed before its decode. Full record `ctc/PHASE_L.md`.
 
-* **BAR 2 MET — `L1 member A` clears ALL ELEVEN campaign bars on the
-  SEED-MEAN footing** (3 seeds): 88.54 / 92.60 / 93.33 / **91.35** / 87.08,
-  dvorak 89.84, dvorak-app 89.51, azerty 83.78, qwertz 82.507, german 80.72,
-  spanish 88.43. **The first single model in the campaign to do this** —
-  `sw2345` held 10/11 (≤3 −0.07), `slw2` bought ≤3 by losing four. Ships
-  **fp16w at 2.91 MB**. Disclosures that travel with it: t3 is an **exact
-  tie** (+0.000) and qwertz is +0.007; the **every-seed** footing is 8/11.
+* **⚠ BAR 2: met at three seeds, RETRACTED at five** (PHASE_M.md §7.1). The
+  two tie margins went under with two more seeds — t3 **−0.024**, qwertz
+  **−0.158** — leaving `L1 member A` at **9/11 seed-mean** (per-seed
+  [11, 8, 8, 6, 8]). It does **not** supersede `sw2345` (10/11, missing ≤3);
+  the two are non-dominating mirror images. What survives: member A clears
+  the **≤3 stratum on a five-seed mean (91.358, +0.088)**.
 * **BAR 1 NOT MET.** The gated pair had to beat every `mix2-i8f16` card
   number on ≥2/3 seeds; per-seed tallies were 10/11, 8/11, 6/11.
-* **But all three L1 pairs clear all eleven CAMPAIGN bars on EVERY SEED**
-  (11/11 × 3) — a footing nothing in Phases A–K reached (Phase J: 5/11
+* **All FIVE L1 pairs clear all eleven CAMPAIGN bars on EVERY SEED**
+  (11/11 × 5, five-seed mean margins +0.12 … +2.76 — PHASE_M.md §7.2) — a footing nothing in Phases A–K reached (Phase J: 5/11
   every-seed). The pair seed-mean beats all five card val numbers
   (t1 +0.15, ≤3 **+0.19**) at 4.39 MB; the card keeps a 0.3–0.4 edge on
   dvorak/dvorak-app/spanish. Ship standing unchanged pending an orchestrator

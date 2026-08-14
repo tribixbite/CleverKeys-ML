@@ -751,7 +751,18 @@ three-seed recipe mean against a single lucky configuration's numbers is a
 comparison the single configuration is favoured to win, and it wins it on
 three of eleven axes.
 
-### 15.4 BAR 2 — **MET**, on the seed-mean footing it was written on
+### 15.4 BAR 2 — **MET at three seeds, ⚠ RETRACTED at five** (see PHASE_M.md §7.1)
+
+> **⚠ RETRACTED 2026-08-13.** Two further seeds (PHASE_M.md §7.1) put this
+> claim's two tie margins under water: t3 +0.000 → **−0.024** and qwertz
+> +0.007 → **−0.158** at the five-seed mean, giving **9/11, not 11/11**.
+> Per-seed tallies are [11, 8, 8, 6, 8]. The s1234 11/11 was the single-seed
+> floor — the risk disclosure #2 below named. `L1 member A` does **not**
+> supersede `sw2345`; both statements below about "first single model to
+> clear all eleven" and the finalist change are withdrawn. What survives:
+> member A clears the **≤3** stratum on a five-seed mean (91.358, +0.088).
+> The three-seed table below is left standing exactly as published.
+
 
 `L1 member A` (slw 1.0), three seeds:
 
