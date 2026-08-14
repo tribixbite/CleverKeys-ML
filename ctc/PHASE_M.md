@@ -121,3 +121,20 @@ is paired against the already-decoded `v2pair-s1234` control.
 * **E6 carries the proposal's own kill criterion verbatim: any val bar −0.15
   at one seed and it is dropped.** No second chance at another weight.
 
+
+## 5. Stage-1 gates — measured and committed BEFORE decode
+
+| pair | agreement | blank | letters | verdict |
+|---|---|---|---|---|
+| `v2pair-s5555` | **98.14 %** | 98.69 | 96.54 | PASS |
+| `v2pair-s9999` | **98.25 %** | 98.79 | 96.60 | PASS |
+
+**Eight of eight coupled pairs have now passed the gate** (98.05–98.33 %)
+across five data seeds and two data mixes. **Committed prediction for both:
+working band — val t1 ≥ 88.30 and ensemble greedy ≥ 55 %.** Decodes follow
+this commit.
+
+The three E7 students finished at 188 k with selection-prefix canonical t1
+**86.38 (initA-w1) / 86.04 (fresh-w1) / 86.04 (initA-w4)** against member A's
+**85.60** on the same 5,000-row prefix — so on the selection metric the
+gauge-matched student is ahead of its own teacher's member. Full battery next.
