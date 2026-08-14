@@ -441,3 +441,18 @@ opened in Phases L or M** (ledger stays at 3 entries; `train_v2.py`,
 `english_synth.py` and `pair_agreement.py` refuse test features by name). The
 final unsealing pre-registration and the independent audit are the
 orchestrator's acts, not the agent's.
+
+## 12. The fourth unsealing — pre-registered in `UNSEALING_4.md`
+
+The orchestrator's act, taken on the user's directive of 2026-08-13/14 (one
+final pre-registered unsealing plus an adversarial audit, for whichever model
+ships) and on §11.2's recommendation of **option B**, the distilled single
+model. Subject: `v2kd-fresh-w1` at seeds 1234 / 4321 / 7777, two footings,
+**six decodes, hard-capped**. Option A (the coupled pair) is **not** decoded
+and stays val-only.
+
+The pre-registration — authority, exact configs, frozen artifact sha256s,
+numeric expectations with bands, the hard cap and the claim rules — is
+`UNSEALING_4.md` §1–§7, **committed before any decode**. Results and the
+scored expectations are `UNSEALING_4.md` §8, and are summarised into
+`RESULTS.md`. Ledger goes 3 → 4; there is no fifth.

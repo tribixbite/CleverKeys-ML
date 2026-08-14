@@ -1136,3 +1136,19 @@ PHASE L CLOSED. Nothing else launches without new instruction.
 LEDGER EMPTY — every registered-not-run item from Phase L was run.
 test-2400 SEALED (ledger 3, never opened in L or M). Unsealing + audit are the
 orchestrator's acts. NO FURTHER TRAINING.
+
+2026-08-14 — UNSEALING 4 (final): test-2400 opened for the SHIPPED model only.
+Authority: user directive of 2026-08-13/14 (one final pre-registered unsealing
++ adversarial audit for whichever model ships) + PHASE_M 11.2 option B.
+Subject: v2kd-fresh-w1 (distilled single, fp16w 2.91MB), seeds 1234/4321/7777.
+- [x] Ledger verified at exactly 3 entries before starting.
+- [x] Config-B footing measured on VAL first (unsealed, disclosed UNSEALING_4
+      1.2): app trie + app preset, 89.377/93.680/94.467/92.563/87.727;
+      fp16w == fp32 to 0.00 on all five.
+- [x] PRE-REGISTERED in ctc/UNSEALING_4.md 1-7 and COMMITTED+PUSHED BEFORE any
+      decode: configs, sha256s, beam 100 / top-k 8 / OOV=miss, bands per
+      metric, hard cap 6 decodes no retries, tier + equal-footing + McNemar
+      rules, fixture chore.
+- [ ] Decode 6 (2 configs x 3 seeds), append ledger entry 4.
+- [ ] Report UNSEALING_4 8; score expectations; update RESULTS, PHASE_M,
+      MODEL_COMPARISON; regenerate golden fixture at the ship preset.
