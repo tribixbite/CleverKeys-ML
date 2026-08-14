@@ -263,3 +263,31 @@ by this recipe; the card's transfer numbers are a high-water single draw.
 model:** coupled-pair training turns a lucky configuration into a recipe that
 clears every campaign bar on every seed tested (5/5), at 4.39 MB.
 Member B is 10/11 at the five-seed mean (per-seed [9, 10, 8, 8, 10]).
+
+## 8. STATE FOR A SUCCESSOR (written 2026-08-13, mid-phase)
+
+**Six arms in flight**, all detached, `--workers 0`, 188 k, resume = identical
+argv (in `~/ctc-train/ckpt_<run>.launch.log`) + `--resume ckpt/<run>/last.pt`:
+
+| run | what | trainer | harvest |
+|---|---|---|---|
+| `v2kd-fresh-w1-s4321` | E7 3-seed | `train.py` | `~/ctc-train/phaseJ_eval.sh <run>` |
+| `v2kd-fresh-w1-s7777` | E7 3-seed | `train.py` | same |
+| `v2pair-pw01` | coupling 0.1 | `train_v2.py` | `phaseL_eval.sh <run> {gate,pair,members}` |
+| `v2pair-pw10` | coupling 1.0 | `train_v2.py` | same |
+| `v2pair-e4` | `w_real` 0.25 | `train_v2.py` | same |
+| `v2pair-e6` | geo prior 0.05 | `train_v2.py` | same |
+
+**Decision rules already committed** — §1.2 (E7 crown = every card number),
+§4 (sweep is a measurement + interior-optimum rule; E4 needs euro gains with
+no val/dvorak loss > 0.15 → 3 seeds; **E6 dies on any val bar −0.15**).
+
+**What is settled and must not be re-litigated:** E1 confirmed (PHASE_L §11.1);
+E2 refuted at 3 paired seeds (§15.5); the single-model all-eleven claim
+**retracted** (§7.1); the pair at **11/11 × 5 seeds** (§7.2); E7 crown **not
+won** (§6.1) with `fresh` ≥ `initA` — teacher gauge-consistency matters,
+student init does not. Gate predictions stand at **8/8**.
+
+**Ship candidate unchanged:** `v2pair-s1234` int8w+fp16w, 4.39 MB, artifacts
+and sha256s in `PHASE_L.md` §16.1. **test-2400 SEALED — the final unsealing is
+the orchestrator's act, not the agent's.**
