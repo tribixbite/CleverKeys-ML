@@ -24,7 +24,11 @@ pre-registered rule, unchanged from all three prior unsealings.
 
 **Equal footing — a qualified win, and what it is not.** Exact paired two-sided
 McNemar on top-1 against FUTO's val-tuned per-row output resolves on **3 of 3
-seeds**: +45 (p 3.5e-05), +46 (p 1.4e-04), +39 (p 5.0e-04). Under the rule
+seeds**: +45 (p 3.87e-05), +46 (p 7.69e-05), +39 (p 4.99e-04) — *corrected
+2026-08-14; the first write-up printed 3.5e-05 / 1.4e-04 / 5.0e-04, two of them
+hand-transcribed from a four-decimal print at precision that had not been
+computed. Counts unchanged, verdict unchanged; erratum in `UNSEALING_4.md`
+§8.3.* Under the rule
 registered in `UNSEALING_4.md` §6.3 the permitted claim is a **qualified
 equal-footing win** — the same tier ch 192 holds and no stronger — now held at
 **2.91 MB instead of 6.14 MB** and resolved on three seeds instead of two.
@@ -32,7 +36,7 @@ equal-footing win** — the same tier ch 192 holds and no stronger — now held 
 
 * **The entire lead is bought on the HWS corpus half.** Per-source top-1:
   FUTO's val-tuned engine **95.89 futo / 78.11 hws**; ours **95.51 / 82.16**
-  (config A) and **95.21 / 83.24** (config B). *On FUTO's own corpus half
+  (config A) and **95.21 / 83.23** (config B). *On FUTO's own corpus half
   FUTO's engine beats us by +0.38.* What is demonstrated is better coverage
   across two corpora, not better decoding per se. (The internal spread does
   narrow to **11.97** at the shipping footing — the smallest ever recorded on
@@ -100,7 +104,7 @@ Full record `ctc/PHASE_M.md`. Twelve arms, every one pre-registered.
   pair) — and the student's own init turned out **not** to matter (fresh beat
   warm-started).
 * **⚠ RETRACTION:** Phase L's single-model all-eleven claim (`L1 member A`)
-  **does not survive five seeds** — t3 −0.024, qwertz −0.158, **9/11**.
+  **does not survive five seeds** — t3 −0.024, qwertz −0.156, **9/11**.
   Retracted in place; see PHASE_M §7.1.
 * **The pair strengthens: 11/11 campaign bars on 5 of 5 seeds**, seed-mean
   margins +0.12 … +2.76, at 4.39 MB.
@@ -127,7 +131,7 @@ launch, every gate committed before its decode. Full record `ctc/PHASE_L.md`.
 
 * **⚠ BAR 2: met at three seeds, RETRACTED at five** (PHASE_M.md §7.1). The
   two tie margins went under with two more seeds — t3 **−0.024**, qwertz
-  **−0.158** — leaving `L1 member A` at **9/11 seed-mean** (per-seed
+  **−0.156** — leaving `L1 member A` at **9/11 seed-mean** (per-seed
   [11, 8, 8, 6, 8]). It does **not** supersede `sw2345` (10/11, missing ≤3);
   the two are non-dominating mirror images. What survives: member A clears
   the **≤3 stratum on a five-seed mean (91.358, +0.088)**.
@@ -530,8 +534,12 @@ Against the incumbent `fast_resbn80` at the same test footing (config A):
 5, McNemar unresolved on every seed (+17 p 0.17, +23 p 0.052, +0 p 1.00).**
 `resbn80g` is *level* with FUTO's val-tuned engine where `fast_resbn80` was
 behind it (three losses become two −0.1 ties and a win) — but **no
-equal-footing superiority claim is made or permitted** for it. ch 192 remains
-the only configuration with a (qualified) equal-footing win.
+equal-footing superiority claim is made or permitted** for it. ~~ch 192 remains
+the only configuration with a (qualified) equal-footing win.~~ **⚠ SUPERSEDED
+2026-08-14:** the Phase-M distilled single model
+`phaseM_kd_fresh_w1_s1234_fp16w` now holds the same qualified win, all five on
+every seed with McNemar resolved **3 of 3** (ch 192 resolved 2 of 3), at
+2.91 MB — see "The fourth unsealing" at the top of this file.
 
 **The preset changes for the app.** The per-model sweep (`PHASE_G.md` §6)
 confirms E1 on the AOSP/benchmark footing and finds the app-trie optimum at

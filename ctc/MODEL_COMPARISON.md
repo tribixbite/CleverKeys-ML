@@ -37,7 +37,7 @@
 > earlier version of this addendum promoted `phaseL_memberA_s1234_fp16w` as
 > clearing all eleven campaign bars on the seed-mean. Two further seeds
 > (PHASE_M.md §7.1) put its two tie margins under: t3 +0.000 → **−0.024**,
-> qwertz +0.007 → **−0.158**, giving **9/11** at a five-seed mean with
+> qwertz +0.007 → **−0.156**, giving **9/11** at a five-seed mean with
 > per-seed tallies [11, 8, 8, 6, 8]. **`sw2345` remains the single-model
 > finalist** (10/11 seed-mean, missing ≤3). What survives from that model:
 > it clears the **≤3 stratum on a five-seed mean (91.358, +0.088)**, and it
@@ -690,8 +690,12 @@ Quoted precisely, from `PHASE_G.md` §7.5:
 The move from the incumbent is real and worth naming: `fast_resbn80` lost t3, t5
 and 4+ by 0.14–0.40 and had a **net-negative** McNemar seed; `resbn80g` turns
 those three losses into two −0.1 ties and a +0.40 win, with no negative seed. It
-is *level*, not ahead. ch 192 remains the only configuration with a (qualified)
-equal-footing win.
+is *level*, not ahead. ~~ch 192 remains the only configuration with a
+(qualified) equal-footing win.~~ **⚠ SUPERSEDED 2026-08-14 (the fourth
+unsealing):** `phaseM_kd_fresh_w1` holds the same qualified equal-footing win —
+all five on the seed-mean and on every seed, McNemar resolved **3 of 3** at
+p < 5e-4 against ch 192's 2 of 3 — at 2.91 MB. See `UNSEALING_4.md` §8.3, and
+§8.4 for the limitation that the lead is bought on the HWS corpus half.
 
 ### 4.4 Everything vs the old shipped transformer — the rout
 
@@ -744,7 +748,7 @@ decoded.
 
 | priority | pick | why | what must move with it |
 |---|---|---|---|
-| **THE RECOMMENDATION — best accuracy *and* best evidence** | **`phaseM_kd_fresh_w1_s1234_fp16w`** (1,512,802 params, 3,052,318 B / 2.91 MiB, 0.83 ms class) | **Test-validated on both footings, every seed** (config A +4.10/+1.64/+1.28/+3.03/+4.64 over the published bar; config B +4.39/+2.25/+1.54/+4.13/+4.53 over the trie-matched bar, worst-seed t5 +1.50). Holds a **qualified equal-footing win** over FUTO's val-tuned engine, McNemar-resolved **3 of 3** — at less than half ch 192's bytes. Best test numbers in the campaign on 4 of 5 config-A metrics. On val it clears **all eleven campaign bars on every seed**. | app runtime preset **`CtcScoringParams(gamma = 0.9, lambda = 4.0, beta = 0.25, alpha = 0.0, gammaPrune = 0.25, betaPrune = 0.9882)`** *and* the fixture `artifacts/phaseM_kd_fresh_w1_fp16w_golden.json` sha256 `2a449c4f…`, regenerated from this artifact **at exactly that preset**. Benchmark numbers stay at E1. **int8w is not available to it** — PHASE_L §16 measured int8w costing a single model the ≤3 bar. The λ 4.0 user-dictionary caveat of §5.2 applies. |
+| **THE RECOMMENDATION — best accuracy *and* best evidence** | **`phaseM_kd_fresh_w1_s1234_fp16w`** (1,512,802 params, 3,052,318 B / 2.91 MiB, 0.83 ms class) | **Test-validated on both footings, every seed** (config A +4.10/+1.64/+1.28/+3.03/+4.64 over the published bar; config B +4.39/+2.25/+1.54/+4.13/+4.53 over the trie-matched bar, worst-seed t5 +1.50). Holds a **qualified equal-footing win** over FUTO's val-tuned engine, McNemar-resolved **3 of 3** — at less than half ch 192's bytes. Best test numbers in the campaign on 4 of 5 config-A metrics (ch 192 keeps t5 by 0.14). On val it clears **all eleven campaign bars on every seed**. **Limitation to quote with the equal-footing win:** the whole lead is bought on the HWS corpus half — FUTO's engine is **+0.38 ahead on its own corpus half** (`UNSEALING_4.md` §8.4). | app runtime preset **`CtcScoringParams(gamma = 0.9, lambda = 4.0, beta = 0.25, alpha = 0.0, gammaPrune = 0.25, betaPrune = 0.9882)`** *and* the fixture `artifacts/phaseM_kd_fresh_w1_fp16w_golden.json` sha256 `2a449c4f…`, regenerated from this artifact **at exactly that preset**. Benchmark numbers stay at E1. **int8w is not available to it** — PHASE_L §16 measured int8w costing a single model the ≤3 bar. The λ 4.0 user-dictionary caveat of §5.2 applies. |
 | **Best measured accuracy, accepting val-only evidence** | **`sw2345`** (Phase-J finalist, 1,512,802 params, 3,052,318 B fp16w / 2.91 MiB, 0.842 ms) | Best val seed-mean in the campaign (88.51 / 92.67 / 93.37 / 91.20 / 87.11) and **6 of 6 alt-layout bars**, 3 seeds. Beats the `resbn192i` incumbent on four of five val metrics. | **E1** preset (no app-trie sweep has been run for it); a golden fixture regenerated from it at whatever preset ships. **Never quote it as test-validated**, and it **misses the `≤3` bar by 0.07** — see §2.8. Cyrillic on this family is unresolved and the ru path wants **λ ≈ 2.0**, not E1's 1.1. |
 | **Accuracy first, device budget permits ~0.9 ms encoder** | **ch 192** (`ch192_s1234.onnx`, 1,525,378 params, 6.14 MB, 0.877 ms) | ~~The only configuration with~~ **the first of two** configurations with a **qualified equal-footing win** over FUTO (all five, McNemar resolved on 2 of 3 seeds; the Phase-M distilled single model now holds the same win, resolved 3 of 3, at 2.91 MB). It keeps exactly one thing: **test t5 93.50, +0.14 ahead** of that model. Otherwise superseded on every test metric. | E1 preset; golden fixture regenerated from ch 192 at whatever preset ships. |
 | **Accuracy first, balanced size** | **ch 128** (689,282 params, 2.80 MB, 0.455 ms) | Campaign-2's shipping pick. Test-validated, clears all five on every seed on both tries, +0.19 t1 behind ch 192 on val for 1.9× less encoder time. Equal-footing lead does **not** resolve on any metric or seed — do not claim superiority for it. | E1 preset; the existing ch 128 fixture. |

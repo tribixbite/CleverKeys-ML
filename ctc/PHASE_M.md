@@ -210,13 +210,13 @@ The §1.1 rule fired. `L1 member A`, five seeds:
 | dvorak | 91.17 | 87.71 | 90.64 | 88.64 | 89.42 | 89.516 | 89.13 | +0.386 |
 | dvorak-app | 91.01 | 87.51 | 90.03 | 88.07 | 88.85 | 89.092 | 88.20 | +0.892 |
 | azerty | 83.97 | 83.59 | 83.78 | 83.73 | 83.64 | 83.742 | 83.60 | +0.142 |
-| **qwertz** | 82.56 | 82.90 | 82.06 | 81.89 | 82.31 | **82.342** | 82.50 | **−0.158 ✗** |
+| **qwertz** | 82.56 | 82.90 | 82.06 | 81.89 | 82.31 | **82.344** | 82.50 | **−0.156 ✗** |
 | german | 81.26 | 79.99 | 80.90 | 80.04 | 80.35 | 80.509 | 79.64 | +0.869 |
 | spanish | 89.02 | 88.62 | 87.66 | 88.05 | 88.11 | 88.294 | 88.28 | +0.014 |
 | | | | | | **9/11** | | | |
 
 **Both tie margins went under.** t3 (+0.000 at three seeds) is now **−0.024**;
-qwertz (+0.007) is now **−0.158**. Per-seed tallies across five seeds are
+qwertz (+0.007) is now **−0.156**. Per-seed tallies across five seeds are
 **[11, 8, 8, 6, 8]** — the s1234 11/11 was the single-seed floor, exactly as
 PHASE_K §8.3 warned and exactly as PHASE_L §15.4's own disclosure #2 flagged.
 

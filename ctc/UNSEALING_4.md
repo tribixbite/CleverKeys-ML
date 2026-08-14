@@ -406,13 +406,24 @@ Against `87.12 / 92.29 / 92.96 / 89.94 / 85.68` (both engines val-tuned, same
 **All five clear on the seed-mean and on every seed.** Exact paired two-sided
 McNemar on t1 against FUTO's val-tuned per-row output:
 
-| seed | we win | they win | net | p |
+| seed | we win | they win | net | p (exact, two-sided) |
 |---|---|---|---|---|
-| s1234 | 81 | 36 | **+45** | **3.5e-05** |
-| s4321 | 89 | 43 | **+46** | **1.4e-04** |
-| s7777 | 80 | 41 | **+39** | **5.0e-04** |
+| s1234 | 81 | 36 | **+45** | **3.87e-05** |
+| s4321 | 89 | 43 | **+46** | **7.69e-05** |
+| s7777 | 80 | 41 | **+39** | **4.99e-04** |
 
-**Resolved on 3 of 3 seeds at p < 0.001.** Under §6.3 the permitted claim is a
+> **⚠ ERRATUM (2026-08-14, `AUDIT_FINAL2.md` §4.3).** The first version of this
+> table printed **3.5e-05 / 1.4e-04 / 5.0e-04**. Two of those three were wrong:
+> they were transcribed by hand from a four-decimal console print (`0.0000`,
+> `0.0001`, `0.0005`) and written out with **precision that had not been
+> computed**. The counts — which are the substance of the test — were correct
+> and the audit reproduced them exactly from the committed dumps, as it did the
+> corrected p-values above. **No verdict changes**: all three seeds still
+> resolve at p < 5e-4, and s4321 is in fact *more* significant than was
+> printed. The error was in the write-up, not the arithmetic, and it is
+> recorded here rather than silently overwritten.
+
+**Resolved on 3 of 3 seeds at p < 5e-4.** Under §6.3 the permitted claim is a
 **qualified equal-footing win** — the same tier ch 192 holds and *no stronger*,
 as registered. What is new is only the resolution: ch 192 resolved 2 of 3, this
 resolves 3 of 3. This is the campaign's first model to hold that win at
@@ -428,7 +439,7 @@ extra decode):
 |---|---|---|---|
 | **FUTO ceiling, val-tuned** (the equal-footing bar) | **95.89** | **78.11** | 17.78 |
 | ours, config A | 95.51 | **82.16** | 13.34 |
-| ours, config B | 95.21 | **83.24** | **11.97** |
+| ours, config B | 95.21 | **83.23** | **11.97** |
 | *(prior reads: ch 128 95.07/80.56; `resbn80g` A 94.80/80.36, B 94.55/81.54)* | | | |
 
 **On FUTO's own corpus half, FUTO's val-tuned engine beats us by +0.38.** The
@@ -457,7 +468,7 @@ the one place a previous model stays ahead. On the shipping footing it beats
 `resbn80g`'s config B on all five (+1.17 / +0.57 / +0.60 / +1.84 / +0.82).
 
 The **≤3 stratum** — the stone this campaign chased for four phases — lands at
-**92.60 (config A) / 93.70 (config B)**, +1.23 / +1.14 above its own val
+**92.60 (config A) / 93.70 (config B)**, +1.22 / +1.14 above its own val
 figure and 1.2–1.9 pt above any prior model's test ≤3.
 
 ### 8.6 The pre-registered expectations, scored
@@ -466,7 +477,7 @@ figure and 1.2–1.9 pt above any prior model's test ≤3.
 |---|---|---|---|
 | A1 | config A clears all five published, seed-mean **and** every seed; t5 narrowest | all five, every seed; t5 margin +1.28 is indeed the narrowest of the five | **RIGHT** |
 | A2 | config A clears all five **equal-footing** on the seed-mean | all five on the seed-mean **and** on every seed | **RIGHT** |
-| A3 | McNemar resolves on 2 or 3 of 3 seeds | 3 of 3, p ≤ 5.0e-04 | **RIGHT** |
+| A3 | McNemar resolves on 2 or 3 of 3 seeds | 3 of 3, p ≤ 4.99e-04 (corrected — see the §8.3 erratum) | **RIGHT** |
 | B1 | config B clears all five, every seed, worst-seed t5 > +1.0 | all five, every seed, worst-seed t5 **+1.50** | **RIGHT** |
 | B2 | config B t1 exceeds config A t1 by +0.1 … +0.5 | **+0.375** | **RIGHT** |
 | §5.3 | "if one prediction misses its band, ≤3 is the one" | ≤3 is the **only** band miss, and it missed by the largest point error on both footings (+0.86 A, +1.04 B) while no other metric erred past 0.34 | **RIGHT** |

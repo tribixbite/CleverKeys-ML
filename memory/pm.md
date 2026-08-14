@@ -1123,7 +1123,7 @@ PHASE L CLOSED. Nothing else launches without new instruction.
       sw2345. Ships fp16w 2.91MB. Teacher gauge-consistency is what mattered;
       student init did NOT (fresh beat warm-started initA).
 - [x] RETRACTED: Phase L's member-A all-eleven claim — 9/11 at five seeds
-      (t3 -0.024, qwertz -0.158). Propagated to PHASE_L/RESULTS/
+      (t3 -0.024, qwertz -0.156). Propagated to PHASE_L/RESULTS/
       MODEL_COMPARISON/APP_INTEGRATION.
 - [x] PAIR at 5 seeds: 11/11 EVERY SEED (5/5), mean margins +0.12..+2.76.
 - [x] Coupling sweep 0/0.1/0.3/1.0: 0.3 interior-optimal; agreement monotone
@@ -1170,3 +1170,13 @@ Subject: v2kd-fresh-w1 (distilled single, fp16w 2.91MB), seeds 1234/4321/7777.
       MODEL_COMPARISON updated; pushed.
 NOT DECODED and val-only permanently: v2pair-s1234 (option A) and every other
 val-only artifact. CAMPAIGN CLOSED.
+- [x] AUDIT_FINAL2 (47e5b4c) corrections applied: (1) McNemar p-values fixed to
+      the exact two-sided 3.87e-05 / 7.69e-05 / 4.99e-04 with an inline erratum
+      (two of the three had been hand-transcribed at precision never computed;
+      counts and verdict unchanged); (2) APP_INTEGRATION_PLAN 9.5 "no number is
+      test-validated" replaced with the unsealing result; (3) the two stale
+      "ch 192 is the only qualified equal-footing win" lines struck and
+      superseded (MODEL_COMPARISON 4.3, RESULTS Phase-G); (4) rounding
+      reconciled (<=3 lift +1.22/+1.14, hws 83.23, memberA qwertz 82.344 /
+      -0.156 propagated); plus the HWS-half limitation added to the
+      MODEL_COMPARISON 5 recommendation row.

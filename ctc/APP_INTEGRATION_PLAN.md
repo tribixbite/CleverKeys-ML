@@ -2200,7 +2200,7 @@ states what the app should carry when it next syncs models.
 
 | slot | was (Phase J/K) | **now** | why |
 |---|---|---|---|
-| single-model finalist | `sw2345_s1234` (10/11 seed-mean, ≤3 −0.07) | **`phaseM_kd_fresh_w1_s1234_fp16w.onnx`, 2.91 MB** — 11/11 campaign bars on ALL 3 seeds and the seed-mean (PHASE_M §9); distilled from the coupled pair; **recommended ship model** (one session, no app code change) | ⚠ the Phase-L promotion of `phaseL_memberA_s1234_fp16w` is **RETRACTED** (PHASE_M.md §7.1): at five seeds it is 9/11, not 11/11 (t3 −0.024, qwertz −0.158). It still clears ≤3 on a five-seed mean (91.358) and must ship fp16w if used |
+| single-model finalist | `sw2345_s1234` (10/11 seed-mean, ≤3 −0.07) | **`phaseM_kd_fresh_w1_s1234_fp16w.onnx`, 2.91 MB** — 11/11 campaign bars on ALL 3 seeds and the seed-mean (PHASE_M §9); distilled from the coupled pair; **recommended ship model** (one session, no app code change) | ⚠ the Phase-L promotion of `phaseL_memberA_s1234_fp16w` is **RETRACTED** (PHASE_M.md §7.1): at five seeds it is 9/11, not 11/11 (t3 −0.024, qwertz −0.156). It still clears ≤3 on a five-seed mean (91.358) and must ship fp16w if used |
 | two-model configuration | `mix2-i8f16` (4.45 MB, 11/11 single-config) | `v2pair-s1234` i8f16, **4.39 MB**, 11/11 campaign bars **every seed** (5/5) | reproducible by construction (6/6 gate passes) rather than a draw; pre-registered bar 1 vs the mix2 card was **not** met, so the recorded ship configuration is unchanged pending an orchestrator decision |
 
 **Contract is unchanged**: `[1,32,65]` log-emission head, E1 preset, AOSP/az26
@@ -2247,5 +2247,30 @@ dual-session path, exactly as §8.4 specifies.
 | accuracy-first | `phaseL_v2pair_s1234_{a_int8w,b_fp16w}.onnx` + `phaseL_v2pair_i8f16_golden.json` | 4.39 MB | 11/11 campaign bars, every seed (5/5); needs the dual-session seam §8 describes |
 
 The Phase-L single-model promotion (`phaseL_memberA_*`) is **retracted**
-(PHASE_M §7.1) — do not ship it. test-2400 remains sealed; no number in §9 is
-test-validated.
+(PHASE_M §7.1) — do not ship it.
+
+**⚠ UPDATED 2026-08-14 — the recommended asset is now TEST-VALIDATED.** The
+fourth and final unsealing of test-2400 (`ctc/UNSEALING_4.md`, pre-registered
+and pushed before any decode; ledger 3 → 4) decoded
+`phaseM_kd_fresh_w1` at three seeds on two footings:
+
+* **benchmark footing** (AOSP STRIP 146,964, E1) seed-mean
+  **88.931 / 92.681 / 93.361 / 92.597 / 87.045** — all five above FUTO's
+  published bar on the seed-mean *and* every seed;
+* **the shipping footing** — app `en_enhanced.json` STRIP 98,081 at exactly the
+  preset this plan specifies, `0.9 / 4.0 / 0.25 / 0.25 / 0.9882` — seed-mean
+  **89.306 / 93.792 / 94.500 / 93.701 / 87.045**, all five above the
+  trie-matched bar on every seed, worst-seed top-5 margin **+1.50**;
+* **equal footing** against FUTO's val-tuned engine: all five clear on every
+  seed, exact paired McNemar resolved **3 of 3** at p < 5e-4 → a *qualified*
+  equal-footing win, the registered ceiling on that claim.
+
+So the recommended row's numbers are test-validated **on the configuration this
+plan actually ships**. Three things do not change: the accuracy-first pair
+option is **val-only and stays val-only** (it was deliberately not decoded, and
+there is no fifth unsealing); the fp32 graphs were decoded while the **fp16w**
+artifact ships (bridged by a measured 0.00 val delta on all five at this
+footing); and the golden fixture must be the one regenerated at the ship
+preset — `phaseM_kd_fresh_w1_fp16w_golden.json`, sha256
+`2a449c4f2de19505131b396655ae01d3e3c325e40249446ff6e7a40c2b27559c` (the earlier
+140,480-byte fixture was generated at E1 and must not ship).

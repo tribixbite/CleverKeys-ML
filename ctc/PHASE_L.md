@@ -755,7 +755,7 @@ three of eleven axes.
 
 > **⚠ RETRACTED 2026-08-13.** Two further seeds (PHASE_M.md §7.1) put this
 > claim's two tie margins under water: t3 +0.000 → **−0.024** and qwertz
-> +0.007 → **−0.158** at the five-seed mean, giving **9/11, not 11/11**.
+> +0.007 → **−0.156** at the five-seed mean, giving **9/11, not 11/11**.
 > Per-seed tallies are [11, 8, 8, 6, 8]. The s1234 11/11 was the single-seed
 > floor — the risk disclosure #2 below named. `L1 member A` does **not**
 > supersede `sw2345`; both statements below about "first single model to
