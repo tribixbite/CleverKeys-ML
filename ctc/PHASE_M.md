@@ -371,3 +371,73 @@ attraction was that it would pin the gauge globally; E1 pins it without a
 prior and without a val bill, so the motivation is gone as well as the
 result. (Both E4 and E6 pairs still cleared 11/11 campaign bars — the coupled
 recipe is robust enough to absorb two bad knobs, which is itself informative.)
+
+## 11. PHASE M CLOSE — the ship menu and the final verdict
+
+### 11.1 Packaging the promoted single model
+
+`v2kd-fresh-w1` (s1234) at **fp16w, 3,052,318 B (2.91 MB)**: val
+88.62 / 92.69 / 93.46 / 91.38 / 87.18, dvorak 92.19, azerty 84.45,
+qwertz 83.74, german 81.17, spanish 89.36 — **free vs fp32** (largest delta
+0.05). int8w is not retested here: PHASE_L §16 measured it costing a single
+model the ≤3 bar, and this model's ≤3 margin (+0.103 seed-mean) has no room.
+
+| file | bytes | sha256 |
+|---|---|---|
+| `phaseM_kd_fresh_w1_s1234_fp16w.onnx` | 3,052,318 | `84718e6e…549e88e5` |
+| `phaseM_kd_fresh_w1_fp16w_golden.json` | 140,480 | `3788697f…495f058c` |
+
+### 11.2 THE SHIP MENU (all evidence, all footings)
+
+| option | size | campaign bars | vs `mix2-i8f16` card | footing |
+|---|---|---|---|---|
+| **A. Coupled pair** `v2pair-s1234` int8w+fp16w | **4.39 MB** | **11/11 on 5 of 5 seeds** (5-seed mean +0.12…+2.76) | 10/11 at s1234, 7/11 seed-mean | strongest accuracy; two ONNX sessions, 1.79 ms |
+| **B. Distilled single** `phaseM_kd_fresh_w1_s1234_fp16w` | **2.91 MB** | **11/11 on 3 of 3 seeds** (mean +0.10…+2.90) | 7/11 seed-mean (beats all 5 **val** numbers, misses 4 transfer) | one session, one graph; the campaign's first robust all-eleven single model |
+| C. incumbent `mix2-i8f16` | 4.45 MB | 11/11 as **one configuration** | — (it is the card) | recipe did **not** reproduce (PHASE_K §8.5) |
+| D. previous single finalist `sw2345` | 6.07 MB fp32 | 10/11 seed-mean (≤3 −0.07) | — | superseded by B |
+
+**Recommendation.** **Ship B, the 2.91 MB distilled single model**, unless the
+app wants the last few tenths and can afford two sessions, in which case
+**A**. The reasoning, stated with its weaknesses: B is smaller than every
+option, is a single graph on the frozen `[1,32,65]` contract with **no app
+code change at all**, and is the only single model in the campaign's history
+to clear all eleven bars **on every seed tested** — the property member A
+failed to have. A is more accurate in absolute terms (s1234 t1 88.90 vs
+88.62) and has the deeper seed evidence (5 seeds vs 3), so an accuracy-first
+call picks A. **C is superseded on footing, not on numbers**: its card is a
+high-water single draw whose recipe demonstrably does not reproduce, while A
+and B reproduce by construction.
+
+**Neither A nor B beats the C card on every axis** — both miss on transfer
+(dvorak/dvorak-app/azerty/spanish, 0.06–0.43 at the seed-mean). That is the
+honest residual, and it is why bar 1 and the crown are both recorded as
+**not met** rather than argued around.
+
+### 11.3 Every pre-registered bar and rule in Phases L+M, scored
+
+| item | rule | outcome |
+|---|---|---|
+| Bar 1 (pair ≥ card, 2/3 seeds) | primary | **NOT MET** (per-seed 10/8/6/4/8 across five seeds) |
+| Bar 2 (single ≥ 11 campaign bars, seed-mean) | secondary | **MET at 3 seeds → RETRACTED at 5** for member A (§7.1); **MET and robust** for the E7 student (§9) |
+| Bar 3 / crown (single beats full card) | stretch | **NOT WON** (misses 4 transfer axes) |
+| E1 coupling | attribution control | **CONFIRMED** (PHASE_L §11.1) |
+| E2 synthesis | val gate | **REFUTED** at 3 paired seeds |
+| E4 `w_real` | euro gain, no loss > 0.15 | **DROPPED** (dvorak −2.81) |
+| E6 geo prior | any val bar −0.15 → die | **DROPPED** (four val bars past it) |
+| coupling sweep | interior-optimum rule | **0.3 confirmed interior-optimal**; knob closed |
+| E7 | ≥ member A on t1 and ≤3 → 3 seeds | gate passed by `fresh`, failed by both `initA`; 3 seeds → **11/11 every seed** |
+| gate band predictions | PHASE_K §8.5 bands | **12 of 12 correct** above 98 % agreement across the two phases |
+
+### 11.4 THE LEDGER IS EMPTY
+
+Every item registered-not-run at the end of Phase L has been run and reported:
+the L1 three-seed stage (→ five seeds), E2 at three seeds, the `--pair-weight`
+sweep, E4, E6, E7 (single-seed gate → three seeds), and the extra seeds for
+the tie margins. **Nothing is outstanding, nothing was quietly dropped, and no
+element was retried after failing its rule.**
+
+The one thing this campaign cannot self-certify: **test-2400 has never been
+opened in Phases L or M** (ledger stays at 3 entries; `train_v2.py`,
+`english_synth.py` and `pair_agreement.py` refuse test features by name). The
+final unsealing pre-registration and the independent audit are the
+orchestrator's acts, not the agent's.

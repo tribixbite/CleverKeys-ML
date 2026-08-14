@@ -1,5 +1,37 @@
 # CTC Swipe Encoder — Training Results
 
+# Phase M (2026-08-14): the close — a distilled single model takes all eleven bars on EVERY seed, the coupling optimum is interior, E4/E6/E2 all die by their own rules
+
+Full record `ctc/PHASE_M.md`. Twelve arms, every one pre-registered.
+
+* **NEW SINGLE-MODEL FINALIST — `phaseM_kd_fresh_w1_s1234_fp16w` (2.91 MB)**:
+  a single 1.5 M-param model **distilled from the coupled pair**, clearing
+  **all eleven campaign bars on ALL THREE seeds and on the seed-mean**
+  (88.750 / 92.773 / 93.473 / **91.373** / 87.387 · dvorak 91.82 ·
+  dvorak-app 91.10 · azerty 84.53 · qwertz 83.97 · german 81.30 ·
+  spanish 89.53; margins +0.10 … +2.90). It supersedes `sw2345` (10/11).
+  The mechanism: the teacher was **alignment-consistent** (a gated coupled
+  pair) — and the student's own init turned out **not** to matter (fresh beat
+  warm-started).
+* **⚠ RETRACTION:** Phase L's single-model all-eleven claim (`L1 member A`)
+  **does not survive five seeds** — t3 −0.024, qwertz −0.158, **9/11**.
+  Retracted in place; see PHASE_M §7.1.
+* **The pair strengthens: 11/11 campaign bars on 5 of 5 seeds**, seed-mean
+  margins +0.12 … +2.76, at 4.39 MB.
+* **Coupling weight: 0.3 is interior-optimal** on a four-point sweep
+  (0/0.1/0.3/1.0). Agreement rises monotonically with the weight
+  (92.09 → 98.58 %) while the mix's transfer edge **collapses at 1.0**
+  (dvorak −1.95) — over-coupling kills the diversity averaging feeds on.
+* **E4 `w_real` DROPPED** (dvorak −2.81); **E6 geometric prior DROPPED** by
+  its own kill criterion (four val bars past −0.15); **E2 synthesis REFUTED**
+  at three paired seeds. No element was retried after failing.
+* **Crown NOT won:** the best single model beats all five of the
+  `mix2-i8f16` card's **val** numbers at the seed-mean but misses four
+  transfer axes (0.06–0.43). Bar 1 (pair ≥ card, 2/3 seeds) **not met**.
+* **Gate band predictions: 12 of 12 correct** above 98 % agreement.
+* **test-2400 SEALED throughout L and M** (ledger 3). Unsealing is the
+  orchestrator's act.
+
 # Phase L (2026-08-13): pipeline v2 — the alignment gauge is TRAINABLE, the ≤3 stone falls to a single model on the seed-mean, and English synthesis is refuted
 
 **Settled at three seeds.** Seven 188 k arms, every one pre-registered before

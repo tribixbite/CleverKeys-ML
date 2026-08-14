@@ -2200,7 +2200,7 @@ states what the app should carry when it next syncs models.
 
 | slot | was (Phase J/K) | **now** | why |
 |---|---|---|---|
-| single-model finalist | `sw2345_s1234` (10/11 seed-mean, ≤3 −0.07) | **UNCHANGED — `sw2345_s1234`** | ⚠ the Phase-L promotion of `phaseL_memberA_s1234_fp16w` is **RETRACTED** (PHASE_M.md §7.1): at five seeds it is 9/11, not 11/11 (t3 −0.024, qwertz −0.158). It still clears ≤3 on a five-seed mean (91.358) and must ship fp16w if used |
+| single-model finalist | `sw2345_s1234` (10/11 seed-mean, ≤3 −0.07) | **`phaseM_kd_fresh_w1_s1234_fp16w.onnx`, 2.91 MB** — 11/11 campaign bars on ALL 3 seeds and the seed-mean (PHASE_M §9); distilled from the coupled pair; **recommended ship model** (one session, no app code change) | ⚠ the Phase-L promotion of `phaseL_memberA_s1234_fp16w` is **RETRACTED** (PHASE_M.md §7.1): at five seeds it is 9/11, not 11/11 (t3 −0.024, qwertz −0.158). It still clears ≤3 on a five-seed mean (91.358) and must ship fp16w if used |
 | two-model configuration | `mix2-i8f16` (4.45 MB, 11/11 single-config) | `v2pair-s1234` i8f16, **4.39 MB**, 11/11 campaign bars **every seed** (5/5) | reproducible by construction (6/6 gate passes) rather than a draw; pre-registered bar 1 vs the mix2 card was **not** met, so the recorded ship configuration is unchanged pending an orchestrator decision |
 
 **Contract is unchanged**: `[1,32,65]` log-emission head, E1 preset, AOSP/az26
@@ -2238,3 +2238,14 @@ dual-session path, exactly as §8.4 specifies.
 * **Stop planning around targeted English synthesis.** Phase L built it,
   gated it, and **refuted it** at three paired seeds (−0.21 t1). It is not a
   data source the app or any future collection should assume.
+
+### 9.5 Phase M final (2026-08-14) — ship menu
+
+| option | asset | size | footing |
+|---|---|---|---|
+| **recommended** | `artifacts/phaseM_kd_fresh_w1_s1234_fp16w.onnx` + `phaseM_kd_fresh_w1_fp16w_golden.json` | **2.91 MB** | 11/11 campaign bars, every seed (3/3) — single session, zero app code change |
+| accuracy-first | `phaseL_v2pair_s1234_{a_int8w,b_fp16w}.onnx` + `phaseL_v2pair_i8f16_golden.json` | 4.39 MB | 11/11 campaign bars, every seed (5/5); needs the dual-session seam §8 describes |
+
+The Phase-L single-model promotion (`phaseL_memberA_*`) is **retracted**
+(PHASE_M §7.1) — do not ship it. test-2400 remains sealed; no number in §9 is
+test-validated.

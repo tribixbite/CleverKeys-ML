@@ -4,7 +4,18 @@
 > the **single-model finalist** and adds a pair configuration that is a
 > *recipe* rather than a draw. Quote with the footings.
 >
-> **⚠ RETRACTED 2026-08-13 — there is no new single-model finalist.** An
+> **Phase-M addendum (2026-08-14) — THE single-model finalist is now
+> `phaseM_kd_fresh_w1_s1234_fp16w` (2.91 MB)**, a single ch192 model
+> **distilled from the coupled pair** (teacher = the s1234 gated pair,
+> prob-averaged; student init irrelevant — fresh beat warm-started). It clears
+> **all eleven campaign bars on all three seeds AND the seed-mean**
+> (88.750 / 92.773 / 93.473 / **91.373** / 87.387 · dvorak 91.82 ·
+> dvorak-app 91.10 · azerty 84.53 · qwertz 83.97 · german 81.30 · spanish
+> 89.53), smallest margin +0.103. It **supersedes `sw2345`**. It does not beat
+> the `mix2-i8f16` card (misses 4 transfer axes by 0.06–0.43), so the crown is
+> recorded as not won. Ship **fp16w**. Full record `PHASE_M.md`.
+>
+> **⚠ RETRACTED 2026-08-13 — the *Phase-L* single-model promotion.** An
 > earlier version of this addendum promoted `phaseL_memberA_s1234_fp16w` as
 > clearing all eleven campaign bars on the seed-mean. Two further seeds
 > (PHASE_M.md §7.1) put its two tie margins under: t3 +0.000 → **−0.024**,
@@ -20,7 +31,8 @@
 > probability-averaged before the beam: val 88.86 / 92.82 / 93.59 / **91.56**
 > / 87.46, dvorak 92.88, dvorak-app 92.59, azerty 84.11, qwertz 84.41,
 > german 82.26, spanish 89.76. **All FIVE seeds of this recipe clear all
-> eleven campaign bars — 11/11 EVERY SEED** (five-seed mean margins +0.12 …
+> eleven campaign bars — 11/11 EVERY SEED** (and the coupling weight 0.3 is
+> confirmed interior-optimal on a four-point sweep, PHASE_M §10.1) (five-seed mean margins +0.12 …
 > +2.76, PHASE_M.md §7.2), which nothing in Phases A–K achieved (Phase J:
 > 5/11 every-seed). Against the `mix2-i8f16` card it is
 > 10/11 at s1234 and 7/11 at the seed-mean (card keeps dvorak/dvorak-app/
