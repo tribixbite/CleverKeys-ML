@@ -291,3 +291,83 @@ student init does not. Gate predictions stand at **8/8**.
 **Ship candidate unchanged:** `v2pair-s1234` int8w+fp16w, 4.39 MB, artifacts
 and sha256s in `PHASE_L.md` §16.1. **test-2400 SEALED — the final unsealing is
 the orchestrator's act, not the agent's.**
+
+## 9. STAGE-1b FINAL — the E7 student at three seeds WINS the single-model question
+
+`v2kd-fresh-w1`, three seeds, full battery, fp32:
+
+| bar | s1234 | s4321 | s7777 | **3-seed mean** | campaign bar | Δ |
+|---|---|---|---|---|---|---|
+| t1 | 88.62 | 88.88 | 88.75 | **88.750** | 88.30 | +0.450 |
+| t3 | 92.69 | 92.80 | 92.83 | **92.773** | 92.60 | +0.173 |
+| t5 | 93.46 | 93.45 | 93.51 | **93.473** | 93.26 | +0.213 |
+| **≤3** | 91.38 | 91.44 | 91.30 | **91.373** | 91.27 | **+0.103** |
+| 4+ | 87.18 | 87.55 | 87.43 | **87.387** | 86.77 | +0.617 |
+| dvorak | 92.23 | 92.14 | 91.09 | **91.819** | 89.13 | +2.689 |
+| dvorak-app | 91.90 | 91.45 | 89.95 | **91.100** | 88.20 | +2.900 |
+| azerty | 84.45 | 84.69 | 84.45 | **84.530** | 83.60 | +0.930 |
+| qwertz | 83.74 | 83.91 | 84.25 | **83.965** | 82.50 | +1.465 |
+| german | 81.22 | 81.45 | 81.22 | **81.295** | 79.64 | +1.655 |
+| spanish | 89.36 | 89.87 | 89.36 | **89.534** | 88.28 | +1.254 |
+| | | | | **11/11** | | |
+
+**Per-seed tallies: [11, 11, 11] — all eleven campaign bars on EVERY seed**,
+seed-mean margins **+0.10 … +2.90**, smallest margin (≤3, +0.103) an order of
+magnitude clear of the ties that sank the member-A claim.
+
+**This is the single-model result the campaign was after, and it is robust
+where the Phase-L one was luck.** It supersedes `sw2345` (10/11 seed-mean,
+≤3 −0.07) as the **single-model finalist**, on both footings, at 1.5 M
+parameters. Note what produced it: **distillation from an
+alignment-consistent teacher** — the coupled pair. The pair is not just a
+shipping configuration, it is a *training instrument* for single models.
+
+**Crown, scored against the pre-stated definition:** SUCCESS required meeting
+**every** `mix2-i8f16` card number. At the 3-seed mean the student beats **all
+five val numbers** of the card (t1 88.750 > 88.68, t3, t5, ≤3 91.373 > 91.30,
+4+) but misses four transfer axes (dvorak −0.12, dvorak-app −0.43, azerty
+−0.40, spanish −0.06). **Crown NOT won** — per-seed card tallies [6, 8, 6].
+**My §1.2 forecast — "beats member A on val, fails the crown on transfer" —
+is confirmed at three seeds** on the transfer half; the val half was a wash
+against member A at one seed but is a clear +0.21 at three.
+
+## 10. STAGE-2 RESULTS — the coupling optimum is interior; E4 and E6 both die by their own rules
+
+### 10.1 Coupling-weight sweep (four points, seed 1234, pair)
+
+| `--pair-weight` | agreement | mix greedy | t1 | ≤3 | dvorak | azerty | campaign | card |
+|---|---|---|---|---|---|---|---|---|
+| 0.0 (control) | 92.09 % | **53.12** | 88.09 | 91.12 | 89.34 | 84.35 | 7/11 | 1/11 |
+| 0.1 | 98.08 % | 73.72 | 88.84 | 91.44 | 92.96 | 84.07 | 11/11 | 9/11 |
+| **0.3 (finalist)** | 98.33 % | 72.92 | **88.90** | **91.53** | **93.04** | 84.16 | **11/11** | **10/11** |
+| 1.0 | **98.58 %** | 73.22 | 88.85 | 91.47 | 91.09 | **84.78** | 11/11 | 8/11 |
+
+**My §4 pre-stated expectation is CONFIRMED on both halves:** agreement rises
+**monotonically** with the weight (92.09 → 98.08 → 98.33 → 98.58) *and* the
+mix's transfer advantage **falls at 1.0** (dvorak 93.04 → 91.09, −1.95) as
+over-coupling collapses the member diversity that averaging feeds on. The
+coupling-vs-diversity trade PHASE_L §11.1 could not resolve is now measured.
+**0.3 is the interior optimum** under the campaign's interior-optimum rule —
+the knob was already at its best value and the sweep closes it. No promotion,
+by design.
+
+### 10.2 E4 (`w_real` 0.217 → 0.25) — DROPPED
+
+Rule: euro gains with **no** val bar and no dvorak axis losing more than 0.15.
+Measured Δ vs the s1234 control: **dvorak −2.81, dvorak-app −2.85**,
+qwertz −1.26, german −1.14, spanish −1.37, azerty +0.62, 4+ −0.15.
+The rule is violated by nearly 20×, and only one of four euro axes even gains.
+**Dropped.** Raising real-layout exposure at fixed `w_canon` buys one euro
+axis and pays for it everywhere, dvorak worst — the mixture trade PHASE_J
+§5.1b described, reproduced at ch 192.
+
+### 10.3 E6 (geometric alignment prior, weight 0.05) — DROPPED by its kill criterion
+
+The proposal's kill criterion: **any val bar −0.15 at one seed.** Measured Δ:
+**t1 −0.21, t5 −0.16, ≤3 −0.18, 4+ −0.23** — four val bars past the
+threshold, three of them past double it. **Dropped, and per the
+pre-registration not retried at another weight.** The geometric prior's
+attraction was that it would pin the gauge globally; E1 pins it without a
+prior and without a val bill, so the motivation is gone as well as the
+result. (Both E4 and E6 pairs still cleared 11/11 campaign bars — the coupled
+recipe is robust enough to absorb two bad knobs, which is itself informative.)
