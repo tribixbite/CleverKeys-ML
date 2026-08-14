@@ -92,3 +92,32 @@ start inside member A's weights, and the KD arms are all training.
 
 *(Stage-1 results land below. Stage 2 is pre-registered separately when slots
 free.)*
+
+## 4. STAGE 2 — pre-registration (committed BEFORE launch)
+
+All four arms are the **L1 recipe at seed 1234**, one knob each, so every one
+is paired against the already-decoded `v2pair-s1234` control.
+
+| arm | knob | rationale |
+|---|---|---|
+| `v2pair-pw01` | `--pair-weight 0.1` | with pw 0.0 (`v2pair-pw0`), 0.3 (`v2pair-s1234`) and 1.0 already/also run, this completes a **four-point coupling-strength sweep at one seed** |
+| `v2pair-pw10` | `--pair-weight 1.0` | the over-coupling end: does agreement saturate while member diversity (and the mix's transfer edge) collapses? |
+| `v2pair-e4` | `--layout-synth-frac 0.615` | E4: `w_real` 0.217 → 0.25 at fixed `w_canon`, the proposal's §2.3-E4 arm |
+| `v2pair-e6` | `--geo-align-weight 0.05` | E6: the geometric alignment prior, implemented in Phase L and never run |
+
+**Decision rules, fixed now.**
+
+* **pair-weight sweep** is a *measurement*, not a promotion candidate: report
+  agreement, member solo scores and mix bars across {0, 0.1, 0.3, 1.0}, and
+  apply the campaign's interior-optimum rule. If 0.3 is not interior-optimal
+  the winner is registered for a three-seed test, not promoted on one seed.
+  A specific pre-stated expectation: **agreement rises monotonically with the
+  weight while the mix's transfer advantage falls at 1.0** (the
+  coupling-vs-diversity trade PHASE_L §11.1 could not resolve).
+* **E4** promotes only if the four euro axes gain with **no** val bar and no
+  dvorak axis losing more than 0.15 — and then only to a registered
+  three-seed test, since PHASE_L §15.5 just showed single-seed layout gains
+  not reproducing.
+* **E6 carries the proposal's own kill criterion verbatim: any val bar −0.15
+  at one seed and it is dropped.** No second chance at another weight.
+
