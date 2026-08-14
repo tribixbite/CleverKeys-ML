@@ -1115,3 +1115,24 @@ E7 not triggered (bar 1 stands). test-2400 SEALED (ledger 3, untouched).
 REGISTERED NOT RUN: pair-weight sweep {0.1,1.0}, E6 geo prior, E4 w_real,
 E7 distillation, a 4th/5th seed to firm the two tie margins.
 PHASE L CLOSED. Nothing else launches without new instruction.
+
+2026-08-14 — PHASE M CLOSED (final training phase). 12 arms, all pre-registered.
+- [x] NEW SINGLE-MODEL FINALIST: v2kd-fresh-w1 (E7, distilled from the coupled
+      pair) — ALL 11 campaign bars on ALL 3 SEEDS + seed-mean (88.750/92.773/
+      93.473/91.373/87.387 + 6 layouts, margins +0.10..+2.90). Supersedes
+      sw2345. Ships fp16w 2.91MB. Teacher gauge-consistency is what mattered;
+      student init did NOT (fresh beat warm-started initA).
+- [x] RETRACTED: Phase L's member-A all-eleven claim — 9/11 at five seeds
+      (t3 -0.024, qwertz -0.158). Propagated to PHASE_L/RESULTS/
+      MODEL_COMPARISON/APP_INTEGRATION.
+- [x] PAIR at 5 seeds: 11/11 EVERY SEED (5/5), mean margins +0.12..+2.76.
+- [x] Coupling sweep 0/0.1/0.3/1.0: 0.3 interior-optimal; agreement monotone
+      92.09->98.58% while transfer collapses at 1.0 (dvorak -1.95).
+- [x] E4 DROPPED (dvorak -2.81); E6 DROPPED by kill criterion (4 val bars past
+      -0.15); E2 refuted earlier at 3 paired seeds. None retried after failing.
+- [x] Crown NOT won (best single beats all 5 card VAL numbers seed-mean, misses
+      4 transfer axes). Bar 1 NOT met.
+- [x] Gate band predictions 12/12 correct. Artifacts+fixtures+sha256s staged.
+LEDGER EMPTY — every registered-not-run item from Phase L was run.
+test-2400 SEALED (ledger 3, never opened in L or M). Unsealing + audit are the
+orchestrator's acts. NO FURTHER TRAINING.
