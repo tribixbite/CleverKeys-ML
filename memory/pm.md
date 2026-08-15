@@ -1213,7 +1213,12 @@ itself). Plan of record: ctc/PHASE_N.md, committed BEFORE execution.
 - [x] Contamination measured: official dev/test are SESSION-DISJOINT from
       swipe-1 train (0/692, 0/697) => no tier shares a contributor with the
       benchmark. futo_verify ExecuTorch env re-verified running.
-- [ ] N0 converter + seal + trace-hash checks
-- [ ] N1 dev sweeps both engines + FUTO's two futo-test reads + gap decomp
+- [x] N0 DONE: futo_dev 53,373 / futo_test 49,208 converted (drops accounted),
+      futo-test-49970 sealed + guard verified, splits fully contributor-
+      disjoint, only leak = 3 cross-contributor 'a'-tap bit-collisions
+      (0.006%, symmetric, documented in PHASE_N.md 10.3). dev-8k prefix frozen.
+- [~] N1 IN FLIGHT: symmetric wide-grid dev sweeps launched for both engines
+      (same spans, tune 0:26686 / holdout 26686:53373); FUTO test reads +
+      gap decomposition next.
 - [ ] M0 pre-registration + baseline read (ship model, 3 seeds)
 - [ ] N2 lever screening -> N3 pair+KD -> M2 final read -> close-out
