@@ -50,6 +50,7 @@ import lexicon  # noqa: E402
 from model import MAX_KEYS  # noqa: E402
 from paths import DEFAULT_LAYOUT, DEFAULT_WORKDIR, resolve  # noqa: E402
 import seal  # noqa: E402
+from prepare_data import normalize_word  # noqa: E402
 
 #: Coarse grid, centred on the published encoder-only preset.
 GRID_GAMMA = (0.30, 0.3556, 0.4056, 0.4556, 0.51)
@@ -329,7 +330,12 @@ def main() -> int:
 
     rows = load_test(resolve(args.workdir, args.test))[:need]
     seal.check(rows, args.unseal_test, what="sweep_scoring.py")
-    targets = [w.lower() for w, _, _, _ in rows]
+    # Phase N §15.1: a-z-normalize targets (not merely lowercase). Canonical
+    # splits are pre-normalized so this is a no-op for them; on raw corpora
+    # (FUTO official dev/test) the old form auto-missed every punctuated word
+    # for every preset — the PHASE_N.md §11.2 erratum. Trie candidates are
+    # normalized, so the target must be scored in the same alphabet.
+    targets = [normalize_word(w) for w, _, _, _ in rows]
     print(f"rows: {len(rows)}  sweep {sw_lo}:{sw_hi}  holdout {ho_lo}:{ho_hi}  "
           f"full {fu_lo}:{fu_hi}")
 
