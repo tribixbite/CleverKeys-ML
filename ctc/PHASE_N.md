@@ -677,3 +677,23 @@ launched anyway because the pair (N2a = price of a *soft* reweight,
 N2b = price of a *hard* one) brackets the trade the final recipe must buy.
 If both pass, the stronger dev-8k 4+ wins; if both fail, N2d (capacity)
 opens with a new registration.
+
+### 14.3 N2 gates — measured and committed BEFORE any decode (2026-08-15)
+
+Both arms reached 188 k clean (n2a header confirms the source-weight table:
+FUTO 927,869 rows @1.5; totals 1,284,662 / 1,208,633 as registered).
+Label-free per-frame agreement gates:
+
+| pair | agreement | verdict |
+|---|---|---|
+| `n2a-srcw15` | **98.34 %** | PASS |
+| `n2b-hws1` | **98.28 %** | PASS |
+
+Ten of ten coupled pairs across three phases now pass the gate.
+**Committed working-band prediction for both arms (the PHASE_K §8.5 band,
+unchanged):** val pair-mix t1 ≥ 88.30 and ensemble greedy ≥ 55 %. Control
+reference numbers, computed from the existing Phase-L dump (no decode):
+`v2pair-s1234` pair val t1 **88.90** — FUTO half **95.59**, HWS half
+**82.25**. G-N2's HWS floor is therefore **≥ 82.05**. Decodes follow this
+commit: pair val-9918 + six layout bars per arm, dev-8k (frozen prefix) for
+both arms and the control.
