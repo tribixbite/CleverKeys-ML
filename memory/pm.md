@@ -1188,16 +1188,20 @@ the whole A→M campaign, superseding the scattered per-phase records. Every
 number must trace to a named doc/section; unrecorded values are written
 "not recorded" rather than reconstructed.
 
-- [ ] extract every model/arm from PHASE_A..M, RESULTS, MODEL_COMPARISON,
-      UNSEALING_4, ALT_LAYOUT_EVAL, FAIR_REMATCH + the artifacts sha256s and
-      the ~/ctc-train/ckpt run dirs (never-promoted arms listed with their
-      best recorded phase-doc val numbers; nothing re-run)
-- [ ] structure: ship model + active candidates / test-validated tier /
-      val-validated finalists / full historical ladder by phase / configurations
-      (mixes+pairs, with member composition) / footings legend
-- [ ] FUTO reference rows (floor, ceiling, published + val-tuned + their paper
-      number) marked as the opponent
-- [ ] commit
+- [x] extracted every model/arm from PHASE_A..M, RESULTS, MODEL_COMPARISON,
+      UNSEALING_4, ALT_LAYOUT_EVAL, FAIR_REMATCH, FUTO_WEIGHTS_VERIFICATION,
+      THREEWAY_AUDIT, AUDIT_PHASEJ, AUDIT_FINAL2 + all 52 artifact sha256s
+      (recomputed) and the 147 ~/ctc-train/ckpt run dirs (export sizes measured
+      with stat where a phase doc prints none; nothing re-run)
+- [x] structure: ship menu / test-validated tier (5 models, 4 unsealings) /
+      val-only finalists / full ladder by phase / configurations with member
+      composition / FUTO opponent rows / footings legend / run+hash appendix
+- [x] committed d3f3293
+- [~] adversarial number-by-number audit of the file against the sources
+      (two passes in flight); fixes to follow in a second commit
+NOTE: phase N (futo-test-49970) is IN FLIGHT in a concurrent session and is
+explicitly out of MODELS_TABLE scope; it needs a 4.14 + its own footing entry
+when it closes.
 
 2026-08-15 — PHASE N OPENED (beat FUTO on EVERY metric on the FUTO dataset
 itself). Plan of record: ctc/PHASE_N.md, committed BEFORE execution.
