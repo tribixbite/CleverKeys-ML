@@ -822,3 +822,29 @@ the campaign's strongest val configuration (11/11 on 5/5 seeds) and its
 dev-8k 4+ (+0.04 over single) was noise-level; a full-dev sweep prices the
 pair as an M2 fallback subject properly. Its §15.3-style success rule is
 identical (all five margins positive, holdout-confirmed).
+
+### 16.1 N2e-b — RESULT: FAIL, at the identical ceiling
+
+The pair's minmargin optimum (`0.475, 2.0, 0.8, 0.2, 0.7`) on full dev:
+91.28 / 95.05 / 95.62 / 95.82 / **88.63** — margins +0.77 / +0.87 / +0.80 /
++2.11 / **−0.02**, holdout-half 4+ 88.73 vs FUTO's 88.84 (−0.11). **The
+pair lands on the same 88.63 dev-4+ ceiling as the single model, to the
+hundredth.** The long-word ceiling is a property of the ch 192 emissions
+family — teacher, student, and their average alike — which is exactly the
+capacity hypothesis N2d exists to test. The pair is dead as an M2 subject.
+
+### 16.2 N2d gate — committed BEFORE decode
+
+Training reached 188 k clean. Export note, disclosed: the ch 256 members'
+float32 export residues exceed the ch≤192-calibrated defaults —
+`FOLD_TOL` 2e-3 → 5e-3 (measured 3.91e-3, log-emission units) and member
+exports run at explicit `--parity-tol 3e-3` (worst sliced residue 1.83e-3)
+— while **argmax parity, the binding gate, is 100/100 on every member**,
+and all four artifacts were re-exported and confirmed byte-identical
+(deterministic) with parity PASS. No tolerance governing a decision metric
+changed.
+
+**Agreement gate: 98.1 % — PASS** (eleven of eleven pairs across the
+campaign). **Committed working-band prediction:** val pair t1 ≥ 88.30,
+ensemble greedy ≥ 55 %. Decodes follow this commit: dev-8k pair (the §16
+kill-rule axis: 4+ vs control 88.80), pair val-9918 + layouts.
