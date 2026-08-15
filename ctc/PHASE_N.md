@@ -317,3 +317,76 @@ coin-flip on t1 (we trail −0.38 on curated FUTO data but official-test's
 uncurated regimes cut both ways), and if M0 loses any metric, 4+ or t1 are
 the likely ones; (e) at least one of N2a/N2b passes G-N2. Exact bands per
 milestone are committed before each decode, as always.
+
+---
+
+## 10. N0 — RESULT (executed 2026-08-15)
+
+### 10.1 The benchmark files
+
+`convert_futo_official.py` run on the HF originals
+(`~/ctc-train/data/hf/{dev,test}.jsonl`); full accounting in
+`~/ctc-train/data/futo_official_convert.stats.json` (sha256s of source and
+output files included there):
+
+| split | rows in | rows out | dropped <2 pts | dropped empty word | malformed | ≤3 (n) | 4+ (n) | sessions |
+|---|---|---|---|---|---|---|---|---|
+| **futo_dev** | 54,269 | **53,373** | 895 | 1 | 0 | 19,677 | 33,696 | 686 |
+| **futo_test** | 49,970 | **49,208** | 759 | 3 | 0 | 17,906 | 31,302 | 687 |
+
+The only material drop is single-point traces (~1.5 % of each split — taps,
+undecodable by any featurizer here). Both engines are evaluated on the same
+converted files, so every drop is symmetric. Caveat for the paper anchor:
+FUTO's 92.94/93.30 was computed on all 49,970 rows; ours is on the 49,208
+decodable ones (a ≤ ~0.2 pt definitional wobble, stated whenever the anchor
+is quoted).
+
+### 10.2 Seal registered and verified
+
+`futo-test-49970` written into `test2400_seal.json`: 49,208 rows, 49,207
+unique fingerprints (**one bit-exact duplicate trace inside the official
+test split itself** — FUTO's own defect, kept as shipped),
+`words_sha256 3b9f884b63549eb8…`. Guard verified: a 200-row slice is refused
+at 100 % overlap with the split-generic refusal message (seal.py messages
+made name-aware this commit). Cross-checks: `futo_dev` overlaps the sealed
+set by 1 row (§10.3), `val_hwsfuto` by 0 — no false-trigger for dev-side
+iteration. The frozen G-N2 screening prefix is `futo_dev.jsonl` rows
+0–7,999, sha256 `1e7e9439…807d4495`.
+
+### 10.3 Contamination — the §2 checks, executed
+
+Method: 16-byte `scan_futo_sessions.trace_hash` (a–z-normalized word +
+exact float64 x/y bytes) of every converted dev/test row, intersected with
+(a) the full swipe-1 train index (939,550 rows), (b) every tier jsonl that
+feeds or has fed a trainer.
+
+| check | result |
+|---|---|
+| dev sessions ∩ train sessions | **0** of 692 |
+| test sessions ∩ train sessions | **0** of 697 |
+| dev sessions ∩ test sessions | **0** — FUTO's splits are fully contributor-disjoint |
+| dev traces ∩ swipe-1 train | **0** |
+| test traces ∩ swipe-1 train | **3** (bit-exact, across different sessions) |
+| dev ∩ test traces | 1 |
+| test traces ∩ `tier_t3futo` (ship mix) | **4 row-instances, all the word "a"** |
+| test traces ∩ `tier_t2` | 2 (word "a"; tier not in the ship mix) |
+| dev/test ∩ `tier_t3hws` / `tier_sw234` / `tier_sw5q` / `tier_t1` / `tier_t2b` | **0 everywhere** |
+
+**Explanation of the non-zero cell, as §2 requires before proceeding.** The
+3 shared traces are single-letter **"a" taps** whose 2-point quantized
+coordinates collide bit-exactly across different contributors — not a split
+leak (sessions are disjoint; a leak would come with its session siblings).
+Exposure: ≤ 4 training row-instances out of 1,285,381 (0.0003 %) touching
+at most 3 of 49,208 test rows (0.006 %), all in the ≤3 stratum, and **FUTO's
+own models trained on the identical train rows** — the exposure is symmetric
+to the row. Verdict: recorded, immaterial, phase proceeds. No row is
+removed from either side (removing them would *desynchronize* us from the
+benchmark FUTO's numbers describe).
+
+### 10.4 Environment re-verification
+
+ExecuTorch 1.2.0 x86_64 venv at `~/ctc-train/futo_verify/etvenv` loads and
+executes both hash-verified `.pte` (encoder 26.1 ms, decoder 8.8 ms,
+single-thread smoke) — the `FUTO_WEIGHTS_VERIFICATION.md` §2 environment is
+intact. N0 complete; N1 (dev sweeps both engines, FUTO's two frozen
+futo-test reads, gap decomposition) is next.

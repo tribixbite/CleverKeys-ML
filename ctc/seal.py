@@ -125,13 +125,25 @@ def check(rows, allow: bool, what: str = "this run",
                f"the SEALED split '{name}' (n={rec['n']})")
         if allow:
             print(msg + "  — proceeding because --unseal-test was passed.")
-            print("[seal] the test-2400 seal is SPENT (AUDIT_FINAL.md §7); this "
-                  "decode is not a legitimate basis for any published number.")
+            if name == "test-2400":
+                print("[seal] the test-2400 seal is SPENT (AUDIT_FINAL.md §7); "
+                      "this decode is not a legitimate basis for any published "
+                      "number.")
+            else:
+                print(f"[seal] '{name}' is a registered sealed split: a read is "
+                      "legitimate ONLY as a pre-registered milestone recorded in "
+                      "its unsealings ledger (PHASE_N.md §3 for futo-test).")
             return
+        if name == "test-2400":
+            raise SystemExit(
+                msg + "\n[seal] refusing to decode. The seal on test-2400 was "
+                "spent by the pre-registered decode in AUDIT_FINAL.md §7, and no "
+                "further decode of it is legitimate.\n[seal] pass --unseal-test "
+                "to override deliberately (it will be logged).")
         raise SystemExit(
-            msg + "\n[seal] refusing to decode. The seal on test-2400 was spent by "
-            "the pre-registered decode in AUDIT_FINAL.md §7, and no further decode "
-            "of it is legitimate.\n[seal] pass --unseal-test to override "
+            msg + f"\n[seal] refusing to decode. '{name}' may only be read at a "
+            "pre-registered milestone (see its unsealings ledger and the "
+            "registering phase doc).\n[seal] pass --unseal-test to override "
             "deliberately (it will be logged).")
 
 
