@@ -1180,3 +1180,40 @@ val-only artifact. CAMPAIGN CLOSED.
       reconciled (<=3 lift +1.22/+1.14, hws 83.23, memberA qwertz 82.344 /
       -0.156 propagated); plus the HWS-half limitation added to the
       MODEL_COMPARISON 5 recommendation row.
+
+2026-08-15 — MODELS_TABLE.md (the definitive model registry)
+
+Task: build `ctc/MODELS_TABLE.md`, one row per trained model/configuration for
+the whole A→M campaign, superseding the scattered per-phase records. Every
+number must trace to a named doc/section; unrecorded values are written
+"not recorded" rather than reconstructed.
+
+- [ ] extract every model/arm from PHASE_A..M, RESULTS, MODEL_COMPARISON,
+      UNSEALING_4, ALT_LAYOUT_EVAL, FAIR_REMATCH + the artifacts sha256s and
+      the ~/ctc-train/ckpt run dirs (never-promoted arms listed with their
+      best recorded phase-doc val numbers; nothing re-run)
+- [ ] structure: ship model + active candidates / test-validated tier /
+      val-validated finalists / full historical ladder by phase / configurations
+      (mixes+pairs, with member composition) / footings legend
+- [ ] FUTO reference rows (floor, ceiling, published + val-tuned + their paper
+      number) marked as the opponent
+- [ ] commit
+
+2026-08-15 — PHASE N OPENED (beat FUTO on EVERY metric on the FUTO dataset
+itself). Plan of record: ctc/PHASE_N.md, committed BEFORE execution.
+- [x] Plan: primary benchmark = FUTO official test split (49,970 rows), both
+      engines through our harness, symmetric dev-tuned presets (dev 54,269);
+      secondary = FUTO half of val-9918. Seal futo-test-49970, hard cap 3
+      milestone reads for our models (M0 ship baseline / M1 optional / M2
+      final); FUTO engine 2 reads (published anchor + dev-tuned bar).
+      Bars B1 (all five metrics, every seed, McNemar) / B2 (val FUTO-half)
+      / B3 (11 campaign bars every seed + ship-card noise floor) / B4 (app
+      footing). Levers: source-loss-weight, HWS x2 rebalance, domain aug,
+      ch256 — screened via G-N2, then pair+KD stack. test-2400 NEVER touched.
+- [x] Contamination measured: official dev/test are SESSION-DISJOINT from
+      swipe-1 train (0/692, 0/697) => no tier shares a contributor with the
+      benchmark. futo_verify ExecuTorch env re-verified running.
+- [ ] N0 converter + seal + trace-hash checks
+- [ ] N1 dev sweeps both engines + FUTO's two futo-test reads + gap decomp
+- [ ] M0 pre-registration + baseline read (ship model, 3 seeds)
+- [ ] N2 lever screening -> N3 pair+KD -> M2 final read -> close-out
