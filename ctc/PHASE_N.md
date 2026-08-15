@@ -769,3 +769,56 @@ bar". Protocol:
 5. If no such preset exists, **N2d launches**: coupled pair at **ch 256**
    (control mix, L1 recipe otherwise, s1234) → gate → G-N2 screening →
    KD-fresh students; registered in full at that point.
+
+### 15.6 N2e — RESULT: FAIL. The single model's emissions cannot out-4+ FUTO at any preset
+
+The corrected-convention minmargin sweep (grid γ 0.5–1.1 × λ 0.6–2.3 ×
+β 0.0–0.8 × 16 prune pairs, +local refinement; winner interior on every
+axis) found its optimum at `0.55, 2.0, 0.625, 0.05, 1.2`:
+
+| | t1 | t3 | t5 | ≤3 | 4+ |
+|---|---|---|---|---|---|
+| ours @minmargin preset, full dev | 91.05 | 95.04 | 95.60 | 95.20 | **88.63** |
+| FUTO bar (full dev) | 90.51 | 94.18 | 94.82 | 93.71 | **88.65** |
+| margin | +0.54 | +0.86 | +0.78 | +1.49 | **−0.02** |
+
+Per-half 4+ (FUTO measured from its frozen dump: 88.46 sweep-half / 88.84
+holdout-half): ours +0.18 on the tune half, **−0.22 on the holdout half**.
+The §15.3 rule — all five margins positive, holdout-confirmed — is **not
+met**. Trading the ≤3 slack buys 4+ only +0.08 (88.55 → 88.63) before the
+trade exhausts; the 4+ deficit is a property of the emissions, not of the
+scoring. **N2e is closed; §15.5 fires: N2d launches.**
+
+## 16. N2d — capacity (registered in full, committed before launch)
+
+**Arm `n2d-ch256`:** `train_v2.py`, **`--ch 256`**, control mix
+(`train_t3,train_t3hws×2,tier_sw234,tier_sw5q`), otherwise the L1 recipe
+verbatim (seed 1234, init 1111/2222, slw 1.0/1.5, pw 0.3 ramp 5000+15000,
+188 k, `--workers 0`, detached). Phase J priced raw ch 256 without the
+pair/KD instrument; this is the registered test of capacity **with** it.
+
+**Reading rules, fixed now.**
+
+* Gate-first blind order as always (agreement ≥ 0.95 committed before any
+  decode).
+* G-N2 unchanged (dev-8k pair t1 ≥ control +0.10; val 11-bar 11/11; val
+  HWS half ≥ 82.05), **plus the axis this arm exists for: dev-8k 4+.**
+* **Pre-stated expectation:** if capacity is the binding constraint on long
+  words, the ch 256 pair's dev-8k 4+ gains **+0.15…+0.40** over the
+  control's 88.80. **If 4+ moves less than +0.10, the capacity hypothesis
+  is dead** — and with N2a/b/c/e all closed, Phase N's honest B1 verdict
+  becomes "won four of five outright at every seed; statistically level on
+  4+" and the remaining decision is handed up rather than trained around.
+* If screening passes → KD-fresh students at **ch 256** (primary) and
+  **ch 192** (ship-size secondary), then 3 seeds of whichever clears the
+  student gate (≥ pair-member on dev-8k t1 and 4+), then a fresh dev
+  preset sweep (t1 and minmargin both computed, minmargin governs) → M2
+  pre-registration.
+
+**N2e-b, registered as a parallel free measurement (no training, open
+splits only):** the same corrected-convention minmargin sweep run on the
+**coupled pair's** averaged emissions (v2pair-s1234) on dev — the pair is
+the campaign's strongest val configuration (11/11 on 5/5 seeds) and its
+dev-8k 4+ (+0.04 over single) was noise-level; a full-dev sweep prices the
+pair as an M2 fallback subject properly. Its §15.3-style success rule is
+identical (all five margins positive, holdout-confirmed).
