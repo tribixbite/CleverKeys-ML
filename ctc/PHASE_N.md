@@ -591,3 +591,59 @@ uncertainty (FUTO's shifts were ≤ 0.19):
 
 The ledger entry for this read (and the two §12.1 FUTO reads) is appended to
 `futo-test-49970.unsealings` with this commit and the decode follows it.
+
+## 14. M0 — RESULT (decoded 2026-08-15, exactly as registered)
+
+Three decodes, one per seed, no retries, no crash; seal override logged on
+each; dumps `~/ctc-train/phaseN/m0_v2kd-fresh-w1{,-s4321,-s7777}.jsonl`.
+Metrics recomputed from dumps under the registered convention; McNemar is
+exact paired two-sided on t1 against FUTO's frozen dev-tuned test dump.
+
+| metric | s1234 | s4321 | s7777 | **seed-mean** | bar | **Δ mean** | every seed? | band (§13) |
+|---|---|---|---|---|---|---|---|---|
+| t1 | 91.32 | 91.33 | 91.21 | **91.289** | 90.42 | **+0.87** | **yes** | in |
+| t3 | 95.18 | 95.19 | 95.18 | **95.182** | 94.31 | **+0.87** | **yes** | in |
+| t5 | 95.70 | 95.74 | 95.71 | **95.719** | 95.01 | **+0.71** | **yes** | in |
+| ≤3 | 96.25 | 96.21 | 95.98 | **96.147** | 93.73 | **+2.42** | **yes** | in |
+| **4+** | 88.51 | **88.54** | 88.48 | **88.510** | 88.52 | **−0.010** | **no** [miss, pass, miss] | in |
+
+McNemar t1: +447 / +450 / +391 net rows, p = 1.7e-23 / 3.0e-24 / 1.7e-18 —
+**resolved on every seed.**
+
+**Verdict: B1 NOT MET at M0 — 4 of 5, and the registered coin flip fell as
+registered.** All three §13 expectations score **RIGHT**: M0-1 (four metrics
+clear every seed, McNemar every seed), M0-2 (4+ is the only miss — though
+the measured −0.010 is twenty times closer than the −0.10 point prediction;
+one seed individually clears), M0-3's consequence now binds. Band coverage
+**10/10** (all five metrics, all in, on both footings of reading).
+
+What the baseline already establishes, plainly: **on FUTO's own official
+test split, at symmetric dev-tuned footing, the 2.91 MB ship model beats
+FUTO's engine on t1/t3/t5/≤3 on every seed with the top-1 lead resolved at
+p < 1e-17 — and the entire remaining contest is 0.010 pt (≈ 3 rows of
+31,302) on 4+-char words.** The −0.38 FUTO-half story of `UNSEALING_4.md`
+§8.4 is now measured at scale: it is a long-word residual, currently a
+statistical tie, and everything else on their domain is won outright.
+
+### 14.1 The branch taken (per the pre-registered M0-3 rule)
+
+4-of-5 → Phase-N training proceeds, targeted at 4+, with the
+mechanism-matched arms pre-selected in §13:
+
+* **N2a** — FUTO-source loss emphasis: `--source-loss-weight` (new,
+  per-`--train-npz`-entry CTC loss weight), mix re-expressed
+  `train_t3futo.npz + train_t3hws.npz×2 + tier_sw234.npz + tier_sw5q.npz`
+  with weights `1.5,1,1,1,1`. Disclosed: `train_t3futo.npz` (927,869) +
+  HWS ≠ `train_t3.npz` row-exactly — the re-expressed pool is 719 rows
+  (0.07 %) smaller than the control's, a documented delta, not a claimed
+  identity.
+* **N2b** — drop the second `train_t3hws.npz` copy (HWS ×1): measures what
+  the control's deliberate HWS double-count costs on the FUTO domain.
+
+Both are coupled-pair arms (`train_v2.py`, L1 recipe otherwise verbatim,
+seed 1234), screened against the fully-evaluated `v2pair-s1234` control
+under gate **G-N2** (§6-N2): dev-8k t1 ≥ control +0.10 **and** val 11-bar
+tally 11/11 **and** val HWS-half t1 ≥ control −0.20 — with the arm's 4+
+dev-8k delta reported as the primary curiosity even though the gate is t1.
+N2c stays un-launched (§12.3: no motion-regime deficit exists); N2d waits
+on the N2a/N2b verdict.
