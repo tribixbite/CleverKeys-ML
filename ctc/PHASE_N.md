@@ -697,3 +697,75 @@ reference numbers, computed from the existing Phase-L dump (no decode):
 **82.25**. G-N2's HWS floor is therefore **≥ 82.05**. Decodes follow this
 commit: pair val-9918 + six layout bars per arm, dev-8k (frozen prefix) for
 both arms and the control.
+
+### 14.4 N2 RESULT — both arms FAIL G-N2; source reweighting is refuted for this domain
+
+Decoded after the gate commit, exactly as registered (working band: both
+pairs pass — val t1 88.47 / 88.45 ≥ 88.30, greedy ✓). G-N2 scoring, all
+prongs, control = `v2pair-s1234`:
+
+| prong | control | `n2a-srcw15` | `n2b-hws1` | rule |
+|---|---|---|---|---|
+| dev-8k pair t1 | 91.29 | 91.36 (**+0.07**) | 90.88 (**−0.41**) | ≥ +0.10 → **both FAIL** |
+| val 11-bar tally | 11/11 | **9/11** (≤3 91.21 −0.06; t3 92.60 exact tie) | **10/11** (≤3 91.27 exact tie) | 11/11 → **both FAIL** |
+| val HWS half | 82.25 | **81.61** | **81.53** | ≥ 82.05 → **both FAIL** |
+| dev-8k 4+ (curiosity) | 88.80 | 88.80 (+0.00) | 88.95 (+0.15) | — |
+| val FUTO half | 95.59 | 95.37 (−0.22) | 95.41 (−0.18) | — |
+
+Layout detail: all six layout bars pass for both arms (n2a dvorak 92.47 /
+dv-app 91.78 / azerty 84.55 / qwertz 83.91 / german 80.76 / spanish 89.76;
+n2b 91.01 / 90.52 / 84.40 / 84.92 / 81.31 / 89.19) — the failures are
+entirely on the en axes and the dev gate.
+
+**§14.2 expectations, scored.** N2a: **wrong on all four sub-predictions**
+— dev-8k below band, 4+ flat, val FUTO-half *negative* (−0.22), HWS worse
+than band, 11/11 lost. N2b: "larger FUTO-domain shift" **wrong on t1**
+(−0.41; its HWS cut cost dev ≤3 95.81 → 94.37 — the HWS corpus is
+evidently where short-word skill comes from), **right** on dev 4+ being the
+larger (+0.15), **right** on the HWS bill band (−0.72) and on the predicted
+G-N2 failure. The durable finding mirrors Phase-M's E4: **the control
+mixture is already at its optimum for this domain — pushing FUTO emphasis,
+softly (loss weight) or hard (mass), buys nothing on dev and pays on both
+val halves.** The 4+ residual is not a data-balance artifact. Both arms are
+dropped, not retuned, per the rules.
+
+One more measurement from the same dumps (no decode): the **pair lift over
+the single model on dev-8k is +0.17 t1 / +0.42 ≤3 / +0.04 4+** — the
+coupled pair does not close 4+ either; two-point averaging buys short
+words, not long ones.
+
+## 15. Plan amendment (committed before execution): N2e — the decode-side lever — then N2d
+
+§14.2's rule fires: N2d (capacity) **opens**. But the M0/N2 evidence
+identifies a cheaper, mechanism-matched lever that must be priced first,
+because it costs hours and no training:
+
+**N2e — B1-objective preset for our engine on dev.** M0's only miss is
+−0.010 on 4+ while holding **+2.42 of slack on ≤3**; `FAIR_REMATCH.md`
+showed scoring presets trade exactly this axis (λ/β moved ≤3 and 4+ in
+opposite directions for both engines). `sweep_scoring.py --objective
+minmargin --bars <FUTO dev numbers>` is a direct encoding of "clear every
+bar". Protocol:
+
+1. **Fix the §11.2 normalization defect at its root** — `sweep_scoring`
+   (and `futo_sweep`) target construction gets the a–z normalization the
+   rest of the campaign uses. Validation gate: the analytic path at the
+   §11.1 preset must reproduce the dump-recomputed full-dev numbers
+   (91.25 / 95.02 / 95.57 / 95.86 / 88.55) before any new sweep is trusted.
+2. Sweep on dev (tune half 0:26686, holdout 26686:53373, interior-optimum
+   rule) with `--objective minmargin`, bars = **FUTO's dev-tuned dev
+   numbers `90.51, 94.18, 94.82, 93.71, 88.65`** (§11.2).
+3. **Success = a holdout-confirmed interior preset whose five dev margins
+   are all positive** (worst margin > 0 on the holdout half as well).
+   Then **M2 pre-registers the ship model (same 3 seeds) at that preset** —
+   B1 with zero training, B3/B4 untouched by construction (the app preset
+   and artifact do not change; the benchmark preset is a benchmark
+   configuration, exactly as E1 always was).
+4. **Declared objective asymmetry:** FUTO's engine keeps its t1-optimal
+   dev preset (an engine's own best tuning); ours optimizes the B1
+   conjunction. Both engines had identical grid machinery and identical
+   dev data; the difference is only which scalarization each side's
+   objective calls for, and it is disclosed here in advance.
+5. If no such preset exists, **N2d launches**: coupled pair at **ch 256**
+   (control mix, L1 recipe otherwise, s1234) → gate → G-N2 screening →
+   KD-fresh students; registered in full at that point.
