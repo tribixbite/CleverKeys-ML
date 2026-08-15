@@ -390,3 +390,60 @@ executes both hash-verified `.pte` (encoder 26.1 ms, decoder 8.8 ms,
 single-thread smoke) — the `FUTO_WEIGHTS_VERIFICATION.md` §2 environment is
 intact. N0 complete; N1 (dev sweeps both engines, FUTO's two frozen
 futo-test reads, gap decomposition) is next.
+
+## 11. N1 step 1 — RESULT: the symmetric dev sweeps (2026-08-15)
+
+Both engines swept on official dev with **identical wide spans**
+(γ 0–3.0 × λ 0–1.8 × β 0–1.3 × gp {0.05…0.5} × bp {0.25…1.2}; tune
+half rows 0:26686, holdout 26686:53373), then a widened fine grid per the
+interior-optimum rule: FUTO's wide winner hit the λ boundary (1.8, flagged
+by the sweep), ours picked edge prune values on a flat prune surface
+(spread ≤ 0.04). Artifacts:
+`~/ctc-train/phaseN/{ours,futo}_dev_{wide,fine}.{json,log}`.
+
+### 11.1 Adopted dev-tuned presets — both interior, holdout-confirmed
+
+| engine | γ | λ | β | gp | bp | tune-half t1 | holdout-half t1 |
+|---|---|---|---|---|---|---|---|
+| **ours** (`v2kd-fresh-w1` s1234) | **0.725** | **1.75** | **0.35** | **0.05** | **1.2** | 79.40 (+3.11 over baseline) | 79.68 (+2.79) |
+| **FUTO ceiling** | **0.65** | **2.2** | **0.55** | **0.3734** | **0.7** | 78.50 (+1.26 over published) | 79.01 (+1.13) |
+
+Gains generalize tune→holdout for both (no sweep overfit), and both fine
+winners reproduce their wide-grid full-dev numbers to ≤ 0.01 — converged.
+
+### 11.2 Full official dev (53,373 rows), the N1 scoreboard
+
+| engine / preset | t1 | t3 | t5 | ≤3 (19,677) | 4+ (33,696) |
+|---|---|---|---|---|---|
+| FUTO, published | 77.56 | 81.17 | 81.81 | 92.94 | 68.77 |
+| **FUTO, dev-tuned** | **78.76** | **81.73** | **82.27** | **93.56** | **70.30** |
+| ours s1234, dev-tuned | **79.54** | **82.60** | **83.05** | **95.70** | **70.31** |
+| Δ (ours − FUTO dev-tuned) | **+0.78** | **+0.87** | **+0.78** | **+2.14** | **+0.01** |
+
+**On FUTO's own dev split, at symmetric tuning, the ship model already
+leads four of five metrics clearly — and 4+ is a dead tie (+0.01).** The
+FUTO-half pattern of `UNSEALING_4.md` §8.4 sharpens: the domain gap is a
+**long-word** phenomenon; short words are ours by +2.1 even on their data.
+
+### 11.3 The paper anchor cannot describe the raw split — flagged before any test read
+
+Expectation §9(a) is already refuted on dev: FUTO's paper reports 92.94 t1
+(enc-only) on their **test**, but their full engine at the published preset
+scores 77.56 on raw dev, and target-OOV is only **3.39 %** (1,809/53,373 vs
+the STRIP trie) — OOV cannot explain a ~15 pt difference. The paper number
+is therefore almost certainly measured on a **quality-filtered subset**
+(their training-time cascade — dictionary words, portrait, speed bounds —
+`DATA_TIERS.md` §3) and/or a different scoring convention (in-vocab-only).
+Consequence, stated before the test reads: the anchor comparison in §1.1
+will be scored against the harness's **in-vocab** metrics and against a
+cascade-filtered subset computed from the same frozen dumps (disclosed
+analysis, not a bar; both engines see identical rows so every bar is
+unaffected). Nothing about B1–B4 changes.
+
+### 11.4 Ship-model val per-source baselines (from the existing s1234 E1 dump, no new decode)
+
+val-9918 at AOSP STRIP / E1: **FUTO half 95.08 / 98.28 / 98.75 (t1/t3/t5,
+n=4,942), HWS half 82.19 / 87.14 / 88.20 (n=4,976)** — aggregate 88.62
+reproduces the PHASE_M §9 s1234 row exactly. These are the B2 our-side and
+B3 HWS-floor reference points; FUTO's val-tuned per-row val decode lands
+with the N1 step-2 reads.
