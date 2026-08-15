@@ -1197,8 +1197,12 @@ number must trace to a named doc/section; unrecorded values are written
       val-only finalists / full ladder by phase / configurations with member
       composition / FUTO opponent rows / footings legend / run+hash appendix
 - [x] committed d3f3293
-- [~] adversarial number-by-number audit of the file against the sources
-      (two passes in flight); fixes to follow in a second commit
+- [x] adversarial number-by-number audit, two independent passes over the whole
+      file. part 2 (4.6-5): 7 provenance corrections, zero accuracy errors.
+      part 1 (1-4.5, 6, 7): 11 value corrections, 20 attribution corrections,
+      11 over-claims narrowed. all 37 derived euro-means recomputed correct;
+      all 52 artifact sha256s verified; all 32 tables shape-validated.
+      commits d3f3293, bd05a84, 6e76a75, e8f8634, 947a45e, 5bdd82a.
 NOTE: phase N (futo-test-49970) is IN FLIGHT in a concurrent session and is
 explicitly out of MODELS_TABLE scope; it needs a 4.14 + its own footing entry
 when it closes.
