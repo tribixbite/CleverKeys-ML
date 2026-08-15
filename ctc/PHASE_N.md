@@ -413,17 +413,39 @@ winners reproduce their wide-grid full-dev numbers to ≤ 0.01 — converged.
 
 ### 11.2 Full official dev (53,373 rows), the N1 scoreboard
 
+> **⚠ ERRATUM (2026-08-15, found the same day, before any test read).** The
+> table as first committed was computed by the sweep scripts, whose target
+> matching lowercases but does **not** a–z-normalize (`futo_sweep.py:130`,
+> and the same convention inside `sweep_scoring`'s tally). Canonical splits
+> are pre-normalized so this never mattered before; the raw official split
+> is not — **14.11 %** of dev words carry punctuation ("don't", "the,"), and
+> every such row was scored an automatic miss for **both** engines. The
+> depressed numbers (ours 79.54 / FUTO 78.76 t1, and the whole first
+> version of this table) were artifacts of that convention. Because the
+> auto-miss set is identical for both engines and constant across presets,
+> the **tuned presets remain valid argmaxes** and the inter-engine deltas
+> were approximately preserved — the correction moves levels, not the
+> ordering. Corrected numbers below are recomputed from **per-row dumps**
+> (harness for FUTO, `eval_beam` for ours) with a–z normalization applied
+> to both target and prediction — the campaign's standard convention. The
+> FUTO harness path was verified digit-exact against the committed
+> val-9918 record (87.48 / 92.31 / 93.03 / 89.76 / 86.29 reproduced) before
+> being trusted for this.
+
+Corrected scoreboard (normalized convention, per-row decodes, s1234):
+
 | engine / preset | t1 | t3 | t5 | ≤3 (19,677) | 4+ (33,696) |
 |---|---|---|---|---|---|
-| FUTO, published | 77.56 | 81.17 | 81.81 | 92.94 | 68.77 |
-| **FUTO, dev-tuned** | **78.76** | **81.73** | **82.27** | **93.56** | **70.30** |
-| ours s1234, dev-tuned | **79.54** | **82.60** | **83.05** | **95.70** | **70.31** |
-| Δ (ours − FUTO dev-tuned) | **+0.78** | **+0.87** | **+0.78** | **+2.14** | **+0.01** |
+| FUTO, published | *(dev not decoded at published; test read in §12.1)* | | | | |
+| **FUTO, dev-tuned** | **90.51** | **94.18** | **94.82** | **93.71** | **88.65** |
+| ours s1234, dev-tuned | **91.25** | **95.02** | **95.57** | **95.86** | **88.55** |
+| Δ (ours − FUTO) | **+0.74** | **+0.84** | **+0.75** | **+2.15** | **−0.10** |
 
-**On FUTO's own dev split, at symmetric tuning, the ship model already
-leads four of five metrics clearly — and 4+ is a dead tie (+0.01).** The
-FUTO-half pattern of `UNSEALING_4.md` §8.4 sharpens: the domain gap is a
-**long-word** phenomenon; short words are ours by +2.1 even on their data.
+**On FUTO's own dev split, at symmetric tuning, the ship model leads
+t1/t3/t5/≤3 — t1 McNemar-resolved at p = 4.7e-18 — and loses 4+ by 0.10.**
+The `UNSEALING_4.md` §8.4 FUTO-half pattern sharpens: the domain contest is
+entirely about **words of 4+ characters at ordinary motion**; short words
+are ours by +2.15 even on their data (§12.3).
 
 ### 11.3 The paper anchor cannot describe the raw split — flagged before any test read
 
@@ -447,3 +469,125 @@ n=4,942), HWS half 82.19 / 87.14 / 88.20 (n=4,976)** — aggregate 88.62
 reproduces the PHASE_M §9 s1234 row exactly. These are the B2 our-side and
 B3 HWS-floor reference points; FUTO's val-tuned per-row val decode lands
 with the N1 step-2 reads.
+
+## 12. N1 step 2 — RESULT: the frozen FUTO test reads, the B-bars, and the decomposition
+
+Executed 2026-08-15: FUTO's engine decoded per-row (sharded ×12, `beamD`,
+width 100, top-k 8, STRIP trie) on futo-test at the **published** preset and
+at its **dev-tuned** preset — its two frozen reads under §3 rule 3, now
+spent — plus open-split dumps: futo-dev @dev-tuned, val-9918 @val-tuned.
+Dumps: `~/ctc-train/phaseN/futo_{test_published,test_devtuned,dev_devtuned,
+val_valtuned}.jsonl`. All numbers below use the normalized-target
+convention (§11.2 erratum).
+
+### 12.1 The B1 bar — FUTO's engine on its own official test (49,208 rows)
+
+| preset | t1 | t3 | t5 | ≤3 (17,906) | 4+ (31,302) | in-vocab t1 |
+|---|---|---|---|---|---|---|
+| published | 88.85 | 93.61 | 94.40 | 93.11 | 86.40 | 92.25 |
+| **dev-tuned (THE BAR)** | **90.42** | **94.31** | **95.01** | **93.73** | **88.52** | 93.82 |
+
+Dev-tuning is worth +1.57 t1 to FUTO on its own test — within the §9(b)
+predicted lever size. Measured FUTO dev→test shift @dev-tuned:
+−0.09 / +0.13 / +0.19 / +0.02 / −0.13 — the two splits are near-twins, as
+their contributor-disjoint 50/50-style construction implies.
+
+**The paper anchor reconciles.** FUTO's paper reports 92.94 (enc-only) /
+93.30 (refined) on this split; the harness's **in-vocab** t1 is 92.25 at
+the published preset and 93.82 dev-tuned. The paper's convention is
+evidently in-vocab (or filtered) scoring — on the raw split with OOV-as-miss
+its engine scores 88.85. §9(a) is scored **wrong as literally written**
+(raw-convention reproduction was impossible for any engine) and **right in
+substance** under the in-vocab reading (92.25 vs 92.94, within port/protocol
+wobble of the C++ beam). All B-bars are unaffected: both engines are scored
+on identical rows under identical conventions.
+
+### 12.2 The B2 bar — val-9918 FUTO half, FUTO's val-tuned engine (real per-row decode)
+
+| rows | t1 | t3 | t5 |
+|---|---|---|---|
+| val ALL (9,918) | 87.48 | 92.31 | 93.03 | — digit-exact vs the committed `FAIR_REMATCH.md` §2 val row |
+| **val FUTO half (4,942) = B2 bar** | **95.65** | 98.73 | 99.05 |
+| val HWS half (4,976) | 79.36 | 85.93 | 87.06 |
+
+Ship model s1234 (E1) val FUTO half: 95.08 → **current B2 gap −0.57** (the
+val analog of the −0.38; seed-mean pending s4321/s7777 val dumps).
+
+### 12.3 Gap decomposition on dev (both engines dev-tuned, paired per row)
+
+`phase_n_decomp.py`, full table in `~/ctc-train/phaseN/dev_decomp.json`:
+
+| stratum | n | ours | FUTO | Δ | McNemar p |
+|---|---|---|---|---|---|
+| ALL | 53,373 | 91.25 | 90.51 | **+0.74** | 4.7e-18 |
+| len ≤3 | 19,677 | 95.86 | 93.71 | **+2.15** | 6.0e-49 |
+| len 4–5 | 13,515 | 89.88 | 90.10 | **−0.22** | 0.24 |
+| len 6–8 | 14,069 | 88.49 | 88.54 | −0.05 | 0.78 |
+| len ≥9 | 6,112 | 85.77 | 85.67 | +0.10 | 0.68 |
+| in-vocab speed q1 (slow) | 12,891 | 94.92 | 91.23 | **+3.68** | 1.7e-67 |
+| speed q2 / q3 / q4 | 12,891 ea | — | — | −0.21 / −0.16 / −0.26 | 0.13–0.33 |
+| npts q1 (short traces) | 13,336 | 95.54 | 92.57 | **+2.97** | 4.2e-47 |
+| npts q2 / q3 / q4 | ~12.7 k ea | — | — | −0.25 / +0.13 / +0.10 | ≥0.16 |
+| landscape / portrait | 1,539 / 51,588 | — | — | +0.32 / +0.76 | 0.55 / 3.2e-18 |
+
+**Reading.** Our entire lead lives in short words, short traces and the
+slow-speed quartile — where FUTO's engine is weak and ours is not. On the
+long-word bulk (4+ at ordinary speeds) the engines are statistically level,
+with FUTO consistently a nose ahead in the middle bins (−0.05…−0.26, none
+individually resolved, sign-consistent across five adjacent strata). 4+
+aggregate: **88.55 vs 88.65, −0.10.** Orientation is NOT a factor (+0.32 on
+landscape). There is no motion-regime catastrophe anywhere — the raw-domain
+"collapse" feared after §11.3 was entirely the scoring-convention artifact.
+**Phase N's real fight is ±0.2 pt on 4+-char words; everything else is
+already won.**
+
+## 13. M0 — PRE-REGISTRATION (committed BEFORE any decode of our model on futo-test)
+
+Milestone read 1 of the §3 cap of 3. Subject: the **ship model**
+`v2kd-fresh-w1`, the three frozen fp32 exports whose sha256s are committed
+in `UNSEALING_4.md` §2.3 (`b71911da…`, `f7cb72c0…`, `c55cc3b0…`).
+
+**The exact configuration, frozen now.** One config: STRIP trie 146,964,
+beam 100, top-k 8, OOV = miss, normalized-target convention (§11.2), preset
+**`0.725,1.75,0.35,0.05,1.2`** — the §11.1 dev-tuned preset, fitted on
+s1234's dev emissions and applied to all three seeds unchanged (a slight
+handicap to s4321/s7777, disclosed; FUTO's engine runs its own dev-tuned
+optimum). **Hard cap: 3 decodes (one per seed), no retries — a crash is a
+missing cell scored as a failure — no other preset, no grid scoring of test
+emissions, nothing re-run after numbers are seen.** Published metrics are
+recomputed from the per-row dumps under the stated convention
+(`eval_beam`'s internal print uses raw-form targets and will read low; the
+dump recomputation is the number, deterministic from committed artifacts).
+
+**Numeric expectations.** Point prediction = our dev number (§11.2) + FUTO's
+measured dev→test shift at its dev-tuned preset (§12.1) — the only
+model-free transfer estimate available. Bands = point ± 0.45 (± 0.55 for
+≤3, its documented record), covering seed spread (val sd ≤ 0.2) plus shift
+uncertainty (FUTO's shifts were ≤ 0.19):
+
+| metric | dev (s1234) | shift | **point** | **band** | FUTO bar | predicted Δ |
+|---|---|---|---|---|---|---|
+| t1 | 91.25 | −0.09 | **91.16** | 90.71–91.61 | 90.42 | **+0.74** |
+| t3 | 95.02 | +0.13 | **95.15** | 94.70–95.60 | 94.31 | +0.84 |
+| t5 | 95.57 | +0.19 | **95.76** | 95.31–96.21 | 95.01 | +0.75 |
+| ≤3 | 95.86 | +0.02 | **95.88** | 95.33–96.43 | 93.73 | +2.15 |
+| **4+** | 88.55 | −0.13 | **88.42** | 87.97–88.87 | 88.52 | **−0.10** |
+
+**Registered expectations:**
+
+* **M0-1:** t1, t3, t5, ≤3 all clear the FUTO bar on the seed-mean **and on
+  every seed**, with t1 McNemar resolved p < 0.01 on every seed (dev net was
+  +393 rows at p = 4.7e-18; the test analog is ~+360).
+* **M0-2:** **4+ is the coin flip and the predicted MISS** (point −0.10
+  against the bar, band spanning both outcomes). If B1 fails at M0, it fails
+  on 4+ and nothing else.
+* **M0-3:** consequence pre-stated: a 4-of-5 M0 is **not** a B1 pass and is
+  written as the baseline it is; Phase-N training then targets 4+ per §12.3
+  (levers N2a/N2b — FUTO-source emphasis and short-word/HWS de-emphasis —
+  are the mechanism-matched arms; N2c is NOT indicated, §12.3 shows no
+  motion-regime deficit). A clean 5-of-5 every-seed M0 means **B1 is met by
+  the ship model with no training at all**; remaining work would be scoped
+  to B2 and margin, and that decision is handed up.
+
+The ledger entry for this read (and the two §12.1 FUTO reads) is appended to
+`futo-test-49970.unsealings` with this commit and the decode follows it.

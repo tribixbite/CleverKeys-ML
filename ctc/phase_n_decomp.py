@@ -35,11 +35,12 @@ def mcnemar_p(b: int, c: int) -> float:
     if n == 0:
         return 1.0
     k = min(b, c)
-    # two-sided: 2 * P(X <= k), capped at 1
-    p = 0.0
-    for i in range(k + 1):
-        p += math.comb(n, i)
-    p = 2.0 * p * (0.5 ** n)
+    # two-sided: 2 * P(X <= k) under Binomial(n, 0.5), accumulated in log space
+    # so large discordant counts cannot overflow (math.comb -> float overflowed).
+    log_terms = [math.lgamma(n + 1) - math.lgamma(i + 1) - math.lgamma(n - i + 1)
+                 - n * math.log(2.0) for i in range(k + 1)]
+    m = max(log_terms)
+    p = 2.0 * math.exp(m) * sum(math.exp(t - m) for t in log_terms)
     return min(1.0, p)
 
 

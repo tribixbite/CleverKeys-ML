@@ -49213,7 +49213,29 @@
   "n": 49208,
   "note": "a-z-normalized word + float64 x/y; see seal.py",
   "source": "/home/will/ctc-train/data/futo_test.jsonl",
-  "unsealings": [],
+  "unsealings": [
+   {
+    "date": "2026-08-15",
+    "n": 1,
+    "published": "PHASE_N.md \u00a712.1 (anchor row)",
+    "what": "FUTO engine (honorable_sturgeon+magic_macaw .pte), published preset, beamD w100 k8, STRIP trie",
+    "who": "phase-N architect, per PHASE_N.md \u00a73 rule 3 (pre-registered)"
+   },
+   {
+    "date": "2026-08-15",
+    "n": 2,
+    "published": "PHASE_N.md \u00a712.1 (bar row)",
+    "what": "FUTO engine, dev-tuned preset g0.65 l2.2 b0.55 gp0.3734 bp0.7 \u2014 THE B1 BAR; frozen hereafter",
+    "who": "phase-N architect, per PHASE_N.md \u00a73 rule 3 (pre-registered)"
+   },
+   {
+    "date": "2026-08-15",
+    "n": 3,
+    "published": "PHASE_N.md \u00a714",
+    "what": "ship model v2kd-fresh-w1 fp32, seeds 1234/4321/7777, preset 0.725,1.75,0.35,0.05,1.2, one decode per seed, no retries",
+    "who": "phase-N architect, milestone M0 per PHASE_N.md \u00a713 (pre-registered before decode)"
+   }
+  ],
   "words_sha256": "3b9f884b63549eb88f5faa27a0b342fe9fbdc04143e5e886b7705e0e4637cd04"
  },
  "test-2400": {
