@@ -90,13 +90,16 @@ def build_member(args: argparse.Namespace, dilations: Tuple[int, ...],
 
 def weighted_ctc(ctc_none: torch.nn.CTCLoss, log_e: torch.Tensor,
                  targets: torch.Tensor, tlens: torch.Tensor,
-                 slw: float) -> Tuple[torch.Tensor, float]:
+                 slw: float,
+                 src_w: "Optional[torch.Tensor]" = None
+                 ) -> Tuple[torch.Tensor, float]:
     """Per-member short-weighted CTC. -> (loss, unweighted-mean float for logs).
 
     Identical math to train.py's --short-loss-weight branch: per-sample loss is
     length-normalized (the stock 'mean' reduction semantics), then a weighted
     mean with weight `slw` on len ≤ 3 targets. slw == 1.0 reproduces the stock
-    reduction exactly.
+    reduction exactly. Phase N2a: *src_w* ([B], per-row source weight) simply
+    multiplies into the same weighted mean; None reproduces the pre-N path.
     """
     t = log_e.permute(1, 0, 2)                                  # [T',B,65]
     in_lens = torch.full((t.shape[1],), t.shape[0], dtype=torch.long)
@@ -105,6 +108,8 @@ def weighted_ctc(ctc_none: torch.nn.CTCLoss, log_e: torch.Tensor,
     w = torch.where(tlens.to(log_e.device) <= 3,
                     torch.as_tensor(float(slw), device=log_e.device),
                     torch.as_tensor(1.0, device=log_e.device))
+    if src_w is not None:
+        w = w * src_w.to(log_e.device)
     return (per * w).sum() / w.sum(), float(per.detach().mean())
 
 
@@ -254,6 +259,11 @@ def main() -> int:
                     help="data/augmentation stream seed (shared by the pair)")
     ap.add_argument("--init-seed-a", type=int, default=1111, dest="init_seed_a")
     ap.add_argument("--init-seed-b", type=int, default=2222, dest="init_seed_b")
+    ap.add_argument("--source-loss-weight", default="", dest="source_loss_weight",
+                    help="comma floats, one per --train-npz entry: per-SOURCE "
+                         "CTC loss weight (Phase N2a — the slw move aimed at a "
+                         "corpus instead of a length stratum). Empty = all 1.0, "
+                         "which reproduces the stock path bit-for-bit.")
     ap.add_argument("--slw-a", type=float, default=1.0, dest="slw_a",
                     help="member-A short-word (len ≤ 3) CTC loss weight")
     ap.add_argument("--slw-b", type=float, default=1.5, dest="slw_b",
@@ -370,10 +380,43 @@ def main() -> int:
                             layout_aug=layout_aug,
                             source_centers=source_centers)
     val_ds = SwipeDataset(cache_dir / "val.npz", centers, augment=False)
-    train_dl = DataLoader(train_ds, args.batch, shuffle=True,
-                          collate_fn=collate, num_workers=args.workers,
-                          pin_memory=True, drop_last=True,
-                          persistent_workers=args.workers > 0)
+    # Phase N2a: per-source CTC loss weights. Row -> source via the dataset's
+    # own cumulative counts; the wrapper draws no randomness and, when the flag
+    # is empty, is not installed at all — the stock path is untouched.
+    src_w: Optional[np.ndarray] = None
+    if args.source_loss_weight:
+        ws = [float(v) for v in args.source_loss_weight.split(",")]
+        if len(ws) != len(train_ds.sources):
+            raise SystemExit(f"--source-loss-weight has {len(ws)} entries for "
+                             f"{len(train_ds.sources)} --train-npz files")
+        src_w = np.ones(len(train_ds), np.float32)
+        start = 0
+        for end, w in zip(train_ds._src_end.tolist(), ws):
+            src_w[start:end] = w
+            start = end
+        print("source-loss-weight: " + ", ".join(
+            f"{Path(str(p)).name}={w} (n={n})" for p, w, n in
+            zip(train_ds.sources, ws,
+                np.diff([0, *train_ds._src_end.tolist()]).tolist())))
+
+    class _SrcWeighted(torch.utils.data.Dataset):
+        """Append the row's source weight to each sample tuple."""
+
+        def __init__(self, ds, w): self.ds, self.w = ds, w
+        def __len__(self): return len(self.ds)
+        def __getitem__(self, i): return (*self.ds[i], self.w[i])
+
+    def collate_w(batch):
+        base = collate([b[:-1] for b in batch])
+        return (*base, torch.tensor([b[-1] for b in batch]))
+
+    train_dl = DataLoader(
+        train_ds if src_w is None else _SrcWeighted(train_ds, src_w),
+        args.batch, shuffle=True,
+        collate_fn=collate if src_w is None else collate_w,
+        num_workers=args.workers,
+        pin_memory=True, drop_last=True,
+        persistent_workers=args.workers > 0)
     val_workers = min(2, args.workers)
     val_dl = DataLoader(val_ds, args.batch, shuffle=False, collate_fn=collate,
                         num_workers=val_workers,
@@ -444,15 +487,19 @@ def main() -> int:
         t0 = time.time()
         run_a = run_b = run_kl = run_geo = 0.0
         nb = 0
-        for feats, keys, mask, targets, tlens in train_dl:
+        for batch in train_dl:
+            feats, keys, mask, targets, tlens = batch[:5]
+            bw = batch[5] if len(batch) > 5 else None           # N2a source weights
             feats = feats.to(device, non_blocking=True)
             keys = keys.to(device, non_blocking=True)
             mask = mask.to(device, non_blocking=True)
 
             log_a, _, _ = model_a(feats, keys, mask)            # [B,T',65]
             log_b, _, _ = model_b(feats, keys, mask)
-            la, la_log = weighted_ctc(ctc_none, log_a, targets, tlens, args.slw_a)
-            lb, lb_log = weighted_ctc(ctc_none, log_b, targets, tlens, args.slw_b)
+            la, la_log = weighted_ctc(ctc_none, log_a, targets, tlens,
+                                      args.slw_a, bw)
+            lb, lb_log = weighted_ctc(ctc_none, log_b, targets, tlens,
+                                      args.slw_b, bw)
             loss = la + lb
             pw = pair_w_at(step)
             if pw > 0.0:

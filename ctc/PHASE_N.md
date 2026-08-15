@@ -632,11 +632,13 @@ mechanism-matched arms pre-selected in §13:
 
 * **N2a** — FUTO-source loss emphasis: `--source-loss-weight` (new,
   per-`--train-npz`-entry CTC loss weight), mix re-expressed
-  `train_t3futo.npz + train_t3hws.npz×2 + tier_sw234.npz + tier_sw5q.npz`
-  with weights `1.5,1,1,1,1`. Disclosed: `train_t3futo.npz` (927,869) +
-  HWS ≠ `train_t3.npz` row-exactly — the re-expressed pool is 719 rows
-  (0.07 %) smaller than the control's, a documented delta, not a claimed
-  identity.
+  `train_t3futo.npz + train_t3hws.npz×3 + tier_sw234.npz + tier_sw5q.npz`
+  with weights `1.5,1,1,1,1,1`. *(Corrected at launch, before any result:
+  the first version of this bullet wrote HWS ×2, which would have silently
+  dropped one effective HWS copy — `train_t3.npz` itself contains 77,467
+  HWS rows, so composition-preserving re-expression needs ×3.)* Disclosed:
+  the re-expressed pool is 1,284,662 rows = control −719 (0.06 %) — a
+  documented delta, not a claimed identity.
 * **N2b** — drop the second `train_t3hws.npz` copy (HWS ×1): measures what
   the control's deliberate HWS double-count costs on the FUTO domain.
 
@@ -647,3 +649,31 @@ tally 11/11 **and** val HWS-half t1 ≥ control −0.20 — with the arm's 4+
 dev-8k delta reported as the primary curiosity even though the gate is t1.
 N2c stays un-launched (§12.3: no motion-regime deficit exists); N2d waits
 on the N2a/N2b verdict.
+
+### 14.2 N2a/N2b launch record + pre-stated expectations (committed before launch)
+
+`--source-loss-weight` implemented in `train_v2.py` this commit: per-entry
+weight folded into the same weighted mean as slw (`weighted_ctc`), wrapper
+dataset draws no randomness, empty flag reproduces the stock path (unit
+check: src_w = 1 is bit-identical; the shuffle stream is untouched).
+
+| arm | mix (`--train-npz`) | lever |
+|---|---|---|
+| `n2a-srcw15` | `train_t3futo,train_t3hws×3,tier_sw234,tier_sw5q` | `--source-loss-weight 1.5,1,1,1,1,1` |
+| `n2b-hws1` | `train_t3,train_t3hws,tier_sw234,tier_sw5q` | HWS mass 18.0 % → 12.6 %, no new code |
+
+Everything else is the `PHASE_L.md` §3 command verbatim (seed 1234, init
+1111/2222, slw 1.0/1.5, pw 0.3 ramp 5000+15000, 188 k steps, `--workers 0`,
+detached; resume = same argv + `--resume ckpt/<run>/last.pt`). Gate-first
+blind order at harvest: `pair_agreement` ≥ 0.95 → commit gate + prediction →
+decode dev-8k + val battery.
+
+**Expectations, recorded to be scoreable.** N2a: dev-8k t1 +0.1…+0.3 and
+4+ up, val FUTO-half +0.1…+0.4, val HWS-half −0.1…−0.4 (the gate's −0.20
+floor is genuinely at risk — that is what the gate is for), val aggregate
+≈ wash, 11/11 retained. N2b: the larger FUTO-domain shift of the two and
+the larger HWS bill (−0.3…−0.8 — likely G-N2 failure on the HWS floor);
+launched anyway because the pair (N2a = price of a *soft* reweight,
+N2b = price of a *hard* one) brackets the trade the final recipe must buy.
+If both pass, the stronger dev-8k 4+ wins; if both fail, N2d (capacity)
+opens with a new registration.
