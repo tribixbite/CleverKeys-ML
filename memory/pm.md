@@ -1238,9 +1238,17 @@ itself). Plan of record: ctc/PHASE_N.md, committed BEFORE execution.
       clear EVERY SEED (t1 +0.87, mcnemar p<=1.7e-18 all seeds); 4+ misses
       by 0.010 seed-mean [miss,pass,miss] — the registered coin-flip fell
       as registered, bands 10/10. B1 NOT met; branch M0-3 binds. PHASE_N 14.
-- [~] N2 IN FLIGHT: n2a-srcw15 (--source-loss-weight 1.5 on futo source,
-      implemented+unit-checked in train_v2) and n2b-hws1 (hws mass 18->12.6%)
-      launched detached, 188k, L1 recipe verbatim otherwise; gate G-N2 vs
-      v2pair-s1234; expectations pre-stated in PHASE_N 14.2.
+- [x] N2 DONE — both reweighting arms FAIL G-N2 on every prong (dev-8k
+      +0.07/-0.41 vs +0.10; hws floor 81.61/81.53 vs 82.05; 9/11+10/11).
+      Source reweighting refuted: mixture already optimal (mirrors e4).
+      Pair lift on dev-8k 4+ = +0.04 (noise). PHASE_N 14.4.
+- [x] N2e DONE — FAIL: minmargin dev preset tops out 4+ 88.63 vs bar 88.65
+      (full-dev -0.02, holdout-half -0.22); emissions ceiling, not scoring.
+      Root fix landed: sweep_scoring now scores a-z-normalized targets,
+      validated digit-exact vs dump recomputation. PHASE_N 15.6.
+- [~] N2d IN FLIGHT: n2d-ch256 coupled pair (control mix, L1 recipe, 188k)
+      training; kill rule pre-stated (dev-8k 4+ < +0.10 => capacity
+      hypothesis dead, verdict handed up). N2e-b pair-emissions minmargin
+      sweep running in parallel (free fallback M2 subject). PHASE_N 16.
 - [ ] M0 pre-registration + baseline read (ship model, 3 seeds)
 - [ ] N2 lever screening -> N3 pair+KD -> M2 final read -> close-out
