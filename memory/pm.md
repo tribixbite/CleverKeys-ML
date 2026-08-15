@@ -1225,8 +1225,22 @@ itself). Plan of record: ctc/PHASE_N.md, committed BEFORE execution.
       futo-test-49970 sealed + guard verified, splits fully contributor-
       disjoint, only leak = 3 cross-contributor 'a'-tap bit-collisions
       (0.006%, symmetric, documented in PHASE_N.md 10.3). dev-8k prefix frozen.
-- [~] N1 IN FLIGHT: symmetric wide-grid dev sweeps launched for both engines
-      (same spans, tune 0:26686 / holdout 26686:53373); FUTO test reads +
-      gap decomposition next.
+- [x] N1 DONE: symmetric dev-tuned presets adopted interior (ours
+      0.725,1.75,0.35,0.05,1.2; futo 0.65,2.2,0.55,0.3734,0.7). ERRATUM
+      caught before any test read: sweep target-matching auto-missed the
+      14.11% punctuated raw words for both engines; corrected from per-row
+      dumps (normalized convention). B1 bar frozen from futo's two spent
+      reads: 90.42/94.31/95.01/93.73/88.52. Paper anchor = in-vocab
+      convention (92.25 measured vs 92.94). B2 bar 95.65 (ship s1234 95.08,
+      gap -0.57). Decomposition: our lead = short/slow (+2.15 <=3, p~1e-49);
+      futo a nose ahead mid-length; 4+ = -0.10. PHASE_N.md 11-12.
+- [x] M0 DONE (read 1 of 3): ship model 3 seeds vs the bar — t1/t3/t5/<=3
+      clear EVERY SEED (t1 +0.87, mcnemar p<=1.7e-18 all seeds); 4+ misses
+      by 0.010 seed-mean [miss,pass,miss] — the registered coin-flip fell
+      as registered, bands 10/10. B1 NOT met; branch M0-3 binds. PHASE_N 14.
+- [~] N2 IN FLIGHT: n2a-srcw15 (--source-loss-weight 1.5 on futo source,
+      implemented+unit-checked in train_v2) and n2b-hws1 (hws mass 18->12.6%)
+      launched detached, 188k, L1 recipe verbatim otherwise; gate G-N2 vs
+      v2pair-s1234; expectations pre-stated in PHASE_N 14.2.
 - [ ] M0 pre-registration + baseline read (ship model, 3 seeds)
 - [ ] N2 lever screening -> N3 pair+KD -> M2 final read -> close-out
