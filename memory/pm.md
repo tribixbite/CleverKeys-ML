@@ -1246,9 +1246,16 @@ itself). Plan of record: ctc/PHASE_N.md, committed BEFORE execution.
       (full-dev -0.02, holdout-half -0.22); emissions ceiling, not scoring.
       Root fix landed: sweep_scoring now scores a-z-normalized targets,
       validated digit-exact vs dump recomputation. PHASE_N 15.6.
-- [~] N2d IN FLIGHT: n2d-ch256 coupled pair (control mix, L1 recipe, 188k)
-      training; kill rule pre-stated (dev-8k 4+ < +0.10 => capacity
-      hypothesis dead, verdict handed up). N2e-b pair-emissions minmargin
-      sweep running in parallel (free fallback M2 subject). PHASE_N 16.
+- [x] N2d DONE — CAPACITY REAL: ch256 pair dev-8k 4+ 89.09 (+0.29,
+      in-band), t1 +0.15, val improved (89.02/87.69 4+), hws floor clear
+      (82.54). G-N2 spanish prong failed at one seed (-0.17, sd~1.4) —
+      deferred by registered amendment to the students' every-seed B3 bar.
+      N2e-b FAIL: pair hits the identical 88.63 dev-4+ ceiling (ch192
+      emissions family property). PHASE_N 16.1-16.3.
+- [~] N3 IN FLIGHT: n3kd256-s1234 + n3kd192-s1234 (KD-fresh from the
+      ch256 pair, E7 recipe verbatim otherwise) launched detached.
+      Student gate fixed in PHASE_N 17; winner -> 3 seeds -> B3 every-seed
+      -> dev preset sweep -> M2 pre-registration. Reads used: 1 of 3
+      (M0); futo engine reads spent; test-2400 untouched.
 - [ ] M0 pre-registration + baseline read (ship model, 3 seeds)
 - [ ] N2 lever screening -> N3 pair+KD -> M2 final read -> close-out
