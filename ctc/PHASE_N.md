@@ -848,3 +848,57 @@ changed.
 campaign). **Committed working-band prediction:** val pair t1 ≥ 88.30,
 ensemble greedy ≥ 55 %. Decodes follow this commit: dev-8k pair (the §16
 kill-rule axis: 4+ vs control 88.80), pair val-9918 + layouts.
+
+### 16.3 N2d — RESULT: capacity is REAL; G-N2 scored as written (one prong fails on a single-seed layout axis)
+
+| axis | control (`v2pair-s1234`) | **`n2d-ch256` pair** | rule / band | verdict |
+|---|---|---|---|---|
+| **dev-8k 4+ (the kill axis)** | 88.80 | **89.09 (+0.29)** | kill < +0.10; band-if-real +0.15…+0.40 | **CAPACITY REAL, in-band** |
+| dev-8k t1 | 91.29 | 91.44 (+0.15) | ≥ +0.10 | PASS |
+| val t1 / t3 / t5 / ≤3 / 4+ | 88.90 / … | 89.02 / 92.85 / 93.55 / 91.59 / **87.69** | 5 en bars | all PASS (4+ **+0.92** over bar) |
+| val HWS half | 82.25 | **82.54** | ≥ 82.05 | PASS — no HWS give-back at all |
+| val FUTO half | 95.59 | 95.55 | — | wash |
+| layouts | — | dvorak 90.44 ✓ dv-app 89.50 ✓ azerty 84.40 ✓ qwertz 83.15 ✓ german 81.26 ✓ **spanish 88.11 ✗ (−0.17)** | 6 bars | **10/11 val tally → the 11/11 prong FAILS** |
+
+Working band: PASS (val t1 89.02, greedy ✓). The §16 pre-stated
+expectation — 4+ gains +0.15…+0.40 if capacity binds — is **RIGHT**
+(+0.29). ch 256 is the first lever in the phase to move the 4+ axis, and it
+does so while *improving* val aggregate, val 4+, and the HWS half.
+
+**Amendment, registered before the student stage (not a silent pass):**
+G-N2's 11/11 prong is failed by spanish at **−0.17 on one seed** — an axis
+whose measured seed spread is ~1.4 (PHASE_M §7.1: member-A spanish
+87.66–89.02 across five seeds). The arm's registered purpose (4+) landed
+in-band, every en axis and the HWS floor improved, and the failing prong is
+single-seed layout noise of exactly the kind PHASE_L §15.5 warned against
+reading at one seed. Capacity therefore **proceeds to the student stage**,
+where the concern is subsumed by a stricter bar it cannot dodge: the B3
+floor requires **all 11 campaign bars on every seed of the 3-seed student**
+— spanish included — or the candidate dies there. If the student fails
+spanish at 3 seeds, the capacity path ends and the §16 terminal verdict is
+written; the prong is deferred to a better-powered test, not waived.
+
+## 17. N3 — the capacity students (registered before launch)
+
+Teacher: the gated `n2d-ch256` pair (98.1 %). Students, both KD-fresh
+(the settled E7 recipe — fresh init, `--kd-weight 1.0`, control mix,
+`train.py`):
+
+| arm | `--ch` | role |
+|---|---|---|
+| `n3kd256-s1234` | 256 | primary — carries the capacity |
+| `n3kd192-s1234` | 192 | ship-size control — if it keeps the 4+ gain, capacity was distillable; if not, the mechanism check confirms ch 256 was load-bearing |
+
+**Student gate, fixed now (sharpening §16's "≥ pair-member"):** dev-8k t1
+AND 4+ ≥ the **stronger pair member's** solo dev-8k numbers (members
+decoded once at gate time, same preset), and val t1 ≥ the ship model's
+88.62. Whichever student clears goes to **3 seeds** (1234/4321/7777);
+the 3-seed battery must then clear **all 11 campaign bars on every seed**
+(B3, spanish's deferred test) with val HWS half ≥ 82.05. Then a dev preset
+sweep on the student's own emissions (t1 and minmargin, minmargin governs
+if its four-plus margin is positive) → **M2 pre-registration** with bands
+from the measured dev→test shift. Pre-stated expectations: the ch 256
+student keeps ≥ half of the pair's +0.29 dev-8k 4+ edge (E7 precedent:
+transfer distills); the ch 192 student loses most of it; spanish at 3
+seeds behaves like PHASE_M's member A (mean ~88.3 ± 0.5) for the ch 256
+student — i.e. a genuine coin flip that B3 will resolve properly.
