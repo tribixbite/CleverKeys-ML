@@ -902,3 +902,45 @@ student keeps ≥ half of the pair's +0.29 dev-8k 4+ edge (E7 precedent:
 transfer distills); the ch 192 student loses most of it; spanish at 3
 seeds behaves like PHASE_M's member A (mean ~88.3 ± 0.5) for the ch 256
 student — i.e. a genuine coin flip that B3 will resolve properly.
+
+### 17.1 N3 student gate — RESULT: both students FAIL; the distillation step is the loss
+
+Gate reference (pair members solo, dev-8k, same preset): A 91.00 / 4+
+88.76, B **91.20 / 88.76** → bar = 91.20 AND 88.76, plus val t1 ≥ 88.62.
+
+| student | dev-8k t1 | dev-8k 4+ | val t1 | verdict |
+|---|---|---|---|---|
+| `n3kd256-s1234` | 90.81 (**−0.39**) | 88.86 (+0.10) | 88.68 ✓ | **FAIL** (t1) |
+| `n3kd192-s1234` | 91.19 (**−0.01**) | 88.78 (+0.02) | 88.67 ✓ | **FAIL** (t1, one row of 8,000 — applied as written, the §6.1-of-M precedent: initA-w1 died at the same margin) |
+
+Expectations scored: "ch 256 student keeps ≥ half of the +0.29 4+ edge" —
+**WRONG** (kept +0.10, about a third); "ch 192 student loses most of it" —
+**RIGHT** (+0.02). The E7 magic does not transfer here: what distilled
+cleanly from a ch 192 pair into a ch 192 student does **not** carry the
+ch 256 pair's long-word gain into any single student tried. Both students
+are dropped, not retuned. **The one artifact that beats the ch 192
+emissions ceiling on 4+ remains the ch 256 pair itself** (dev-8k mix
+89.09; members solo 88.76).
+
+## 18. N3b — pricing the ch 256 pair as the M2 subject (free, open-split; registered before running)
+
+The §15.3 success rule, applied to the **ch 256 pair's averaged emissions**
+on full dev: corrected-convention minmargin sweep (same grids/halves),
+success = all five margins positive, holdout-confirmed, interior. Also
+reported: the pair at the plain dev-tuned preset on full dev (the §16.3
+battery measured only dev-8k).
+
+* **If the sweep succeeds** → **N3c registers**: train `n2d-ch256` seeds
+  s4321 + s7777 (the recipe's standard 3-seed footing), full battery —
+  **B3 every-seed on the pair (all 11 bars, spanish's deferred test,
+  every seed)** — then M2 pre-registration: **the ch 256 coupled pair, 3
+  seeds, at the swept preset**, bands from the measured dev→test shift.
+  The M2 subject would be a two-session configuration (~10.7 MB fp32 ×2
+  before quantization) — a shipping-footprint question that is disclosed
+  to the user with the M2 registration, not decided here.
+* **If the sweep fails** → every registered lever (N2a, N2b, N2e, N2e-b,
+  N2d-via-students, N3b) is exhausted or dead, and the **terminal Phase-N
+  standing is written and handed up**: B1 = won 4 of 5 outright on every
+  seed with McNemar < 1e-17, statistically level on 4+; the remaining M2
+  options (spend the final read on a coin flip, or bank it) priced for
+  the user's decision.
