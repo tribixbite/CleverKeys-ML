@@ -944,3 +944,98 @@ battery measured only dev-8k).
   seed with McNemar < 1e-17, statistically level on 4+; the remaining M2
   options (spend the final read on a coin flip, or bank it) priced for
   the user's decision.
+
+### 18.1 N3b — RESULT: FAIL on holdout confirmation, by the rule as written
+
+Two passes (the first bp-boundary-landed at 1.4; the widened pass moved bp
+to 1.8 — the new edge — while **4+ stayed at 88.81 to the hundredth**, so
+the prune axis is measured-flat and the boundary is cosmetic; both winners
+interior on every scoring axis). Best: `0.65, 1.65, 0.55, 0.05, 1.8`,
+full dev **91.30 / 95.12 / 95.65 / 95.57 / 88.81**:
+
+| | t1 | t3 | t5 | ≤3 | 4+ |
+|---|---|---|---|---|---|
+| margin vs the FUTO dev bar, **full dev** | +0.79 | +0.94 | +0.83 | +1.86 | **+0.16** |
+| margin, tune half | +3.26 basis — | — | — | — | **+0.43** (88.89 vs 88.46) |
+| margin, **holdout half** | +0.71 | — | — | — | **−0.10** (88.74 vs 88.84) |
+
+The ch 256 pair is the **first configuration in the phase whose full-dev
+margins are positive on all five metrics.** But the §15.3/§18 rule demands
+the worst margin positive **on the holdout half as well**, and the 4+
+margin flips sign between halves (+0.43 / −0.10; FUTO's own halves swing
+88.46 → 88.84, more than our configuration's 88.89 → 88.74). The +0.16
+full-dev 4+ edge is therefore **not resolved within dev** — a genuine
+coin flip with a slight edge, and the rule scores it: **FAIL. §18's
+second branch fires: the terminal standing follows.**
+
+## 19. PHASE N — TERMINAL STANDING (handed up; nothing else runs without new instruction)
+
+### 19.1 What is measured and final (all committed, all pre-registered)
+
+**On FUTO's official test split (49,208 rows), symmetric dev-tuned footing,
+the 2.91 MB ship model `v2kd-fresh-w1` vs FUTO's engine at its own
+dev-tuned optimum (M0, read 1 of 3):**
+
+| | t1 | t3 | t5 | ≤3 | 4+ |
+|---|---|---|---|---|---|
+| ours, seed-mean | **91.289** | **95.182** | **95.719** | **96.147** | 88.510 |
+| FUTO's bar | 90.42 | 94.31 | 95.01 | 93.73 | 88.52 |
+| Δ | **+0.87** | **+0.87** | **+0.71** | **+2.42** | **−0.010** |
+
+Four of five metrics won **outright on every seed**, top-1 McNemar
+resolved at p ≤ 1.7e-18 on every seed; 4+ is a statistical tie (−0.010 =
+≈3 rows of 31,302; one of three seeds individually passes). **B2 (val
+FUTO half, seed-mean, measured to completion):** FUTO's val-tuned engine
+**95.65**; ship model **95.285** (95.08 / 95.35 / 95.43) → **−0.365, not
+closed** — and strikingly consistent with the −0.38 test-2400 FUTO-half
+gap that opened the phase: the long-word residual is the same ~0.4 pt
+object on every curated FUTO slice, and the same ~0.0 pt object on the
+raw official split (where our short-word strength offsets it). HWS half
+seed-mean 82.255 — unchanged. B3/B4 floors: untouched — nothing that
+ships changed in this phase.
+
+### 19.2 Every lever, closed with evidence
+
+| lever | verdict |
+|---|---|
+| N2a soft FUTO reweight | FAIL G-N2 every prong; val FUTO-half went *down* |
+| N2b hard HWS de-emphasis | FAIL; HWS mass is where short-word skill lives |
+| N2e preset (single, ch 192) | FAIL — emissions ceiling 88.63 vs 88.65 |
+| N2e-b preset (pair, ch 192) | FAIL — identical 88.63 ceiling; family property |
+| N2d capacity (ch 256 pair) | **the one real lever**: dev-8k 4+ +0.29 in-band, val improved, HWS floor clear; spanish −0.17 single-seed deferred |
+| N3 students (ch 256 / ch 192) | both FAIL the gate — capacity is **not student-distillable** (kept +0.10 / +0.02 of the edge) |
+| N3b pair-as-subject preset | full-dev all-five-positive (+0.16 on 4+) but **holdout-unconfirmed** (−0.10) — FAIL as registered |
+
+### 19.3 The M2 decision — priced options, decision handed up
+
+Read budget: **M0 spent; two milestone reads remain**; FUTO's two engine
+reads spent and frozen; test-2400 permanently sealed (ledger 4).
+
+1. **Bank the read (architect's recommendation).** The standing claim is
+   already the strongest measured on their domain: four of five outright
+   every seed at 2.91 MB vs their 3.9 MB two-model stack, level on the
+   fifth. No candidate exists whose dev evidence clears its own bars;
+   spending the final read now buys at best "all five point estimates,
+   4+ unresolved" on a coin flip.
+2. **M2 = ship model at the §15.6 minmargin preset.** Dev 4+ margin −0.02
+   full-dev → predicted test 4+ ≈ bar − 0.15 ± 0.4: a *below-even* coin
+   flip. Not recommended.
+3. **M2 = the ch 256 coupled pair** (the only artifact above the ch 192
+   ceiling): requires N3c first — train s4321 + s7777 (~9 h), pair B3
+   battery **every seed** (spanish's deferred test, genuine risk), then
+   M2 at the swept preset. Dev prices it +0.16 on 4+ with halves at
+   +0.43 / −0.10: a slight-edge coin flip. Also a **two-session,
+   ~2×5.3 MB fp16w shipping footprint** — a product decision in itself.
+   This is the best available vehicle *if* the user wants the outright
+   sweep attempted.
+4. **Deeper capacity (ch 320+, pair-of-pairs, KD variants).** Unregistered,
+   days of GPU, diminishing returns, and every distillation attempt so
+   far failed its gate. Not recommended without new instruction.
+
+Whatever is chosen, the honest ceiling on the claim should be stated in
+advance: at n = 31,302 4+ rows, a ±0.1–0.2 pt difference does not McNemar-
+resolve; **"beats FUTO on every metric" can be achieved on point estimates,
+but on 4+ it cannot currently be achieved as a *statistically resolved*
+superiority** by any artifact this phase produced. The four resolved wins
+and the tie are the measured truth of where this codebase stands on FUTO's
+own benchmark.

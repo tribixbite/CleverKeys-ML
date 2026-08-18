@@ -1252,10 +1252,18 @@ itself). Plan of record: ctc/PHASE_N.md, committed BEFORE execution.
       deferred by registered amendment to the students' every-seed B3 bar.
       N2e-b FAIL: pair hits the identical 88.63 dev-4+ ceiling (ch192
       emissions family property). PHASE_N 16.1-16.3.
-- [~] N3 IN FLIGHT: n3kd256-s1234 + n3kd192-s1234 (KD-fresh from the
-      ch256 pair, E7 recipe verbatim otherwise) launched detached.
-      Student gate fixed in PHASE_N 17; winner -> 3 seeds -> B3 every-seed
-      -> dev preset sweep -> M2 pre-registration. Reads used: 1 of 3
-      (M0); futo engine reads spent; test-2400 untouched.
+- [x] N3 DONE — both students FAIL the gate (t1 -0.39 / -0.01 vs the
+      stronger pair member; rule applied as written). Capacity is NOT
+      student-distillable (kept +0.10 / +0.02 of the +0.29 edge).
+- [x] N3b DONE — FAIL as registered: ch256 pair is the FIRST config with
+      all-five-positive full-dev margins (+0.16 on 4+) but the 4+ margin
+      flips sign across dev halves (+0.43/-0.10) => holdout-unconfirmed.
+- [x] PHASE N TERMINAL STANDING written (PHASE_N.md 19, committed):
+      B1 = 4/5 outright EVERY seed on futo's official test (t1 +0.87,
+      mcnemar p<=1.7e-18 all seeds), 4+ statistical tie (-0.010). B2 not
+      closed (-0.365 seed-mean, mirrors the original -0.38). B3/B4 floors
+      untouched. All levers closed with evidence. M2 decision handed up
+      with 4 priced options (recommend: bank the read). 2 of 3 milestone
+      reads unspent; test-2400 sealed at ledger 4 throughout.
 - [ ] M0 pre-registration + baseline read (ship model, 3 seeds)
 - [ ] N2 lever screening -> N3 pair+KD -> M2 final read -> close-out
