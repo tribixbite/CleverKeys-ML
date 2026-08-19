@@ -1319,10 +1319,62 @@ itself). Plan of record: ctc/PHASE_N.md, committed BEFORE execution.
       endpoint stats in the ru reference band, wrong-geo controls collapse.
 - [x] Five trainings at the ru-synth recipe VERBATIM (94k steps, resbn ch80,
       greedy selection) — all reached 94,000.
-- [ ] O2 eval battery (lambda sweep tune/confirm, full holdout fp32+fp16w,
-      two zero-shot controls, permuted-layout falsification) — running
-- [ ] phaseO-ru-initH: warm-start from the en ch80 phaseH-p50, ru synthesis,
-      measured on REAL ru — the one recipe change phase O can validate against
-      real data — running
-- [ ] O2(e) artifacts + goldens, O3 close (PHASE_O.md, MODELS_TABLE, RESULTS)
-- [ ] regenerate cache_ru/val.npz (clobbered and disclosed; see f0c7a66)
+- [x] O2 eval battery DONE. holdout t1 at the adopted preset: el 82.54 /
+      uk 79.27 / bg 71.80 / mk 71.69 / he 65.36. four pass the registered >=70
+      gate; he fails at lambda 2.0 (70.28 at 1.1) and is exported flagged.
+      vs capacity-matched ch80 EN zero-shot: +4.9..+7.3 every script.
+      vs the 3x-capacity ship model: -0.6..-3.8 every script (the probe's
+      capacity bias, see the calibration).
+- [x] LAMBDA SWEEP run as registered and shown INVALID: all five scripts pick
+      1.1 monotonically; the ru control has the holdout preferring 1.1 by
+      +4.70 while REAL data prefers 2.0 by +1.20. lambda 2.0 adopted on the
+      only real evidence; all fixtures frozen there.
+- [x] phaseO-ru-initH REFUTED: warm start from the en ch80 is +0.88 on the
+      holdout and -0.14 on real (p=0.69). not promoted.
+- [x] FALSIFICATION: permuted key centres -> 0.00 t1 / 0.00 greedy on every
+      model and every script. geometry entirely load-bearing.
+- [x] O2(e) artifacts + goldens committed (5 x fp32 1,142,727 B + fp16w
+      589,406 B + golden at 1.05/2.0/0.2/0.3734/0.9882), sha256s in PHASE_O
+      2.6. fp32 argmax 100/100 all five; fp16w free at the decode (<=0.02).
+- [x] O3 CLOSE: PHASE_O.md complete (inventory, calibration, per-script
+      results, controls, export gates, artifact registry, evidence tiers,
+      app-integration notes + termux hand-off list, phase p order of work);
+      MODELS_TABLE 4.15; RESULTS head entry. pushed.
+- [ ] regenerate cache_ru/val.npz (clobbered and disclosed; see f0c7a66).
+      NOTE prepare_yandex.py also rewrites the vendored
+      layouts/ru_jcuken_default.json — check git status before committing.
+- [ ] PHASE P, in order: (1) fix the generator's word draw to corpus token
+      frequency (the length mix is 3.3% short vs real 38.7%); (2) re-run the
+      ru calibration — if rank-preservation is restored the holdout becomes a
+      usable probe, if not, stop reporting holdout numbers entirely;
+      (3) cause real non-latin data collection. Do NOT re-run capacity,
+      warm-starting or lambda sweeps against a synthesis holdout — all three
+      are now measured to be probe artefacts.
+
+## 2026-08-19 — SYNTH V2 DESIGN (foundation before the user's rework requirements arrive)
+
+Concurrent Phase O agent owns its runs/files — do not touch; its v1 results are
+baselines. Deliverable: ctc/SYNTH_V2_DESIGN.md + small measurement scripts.
+NO training beyond a tiny real-vs-synth classifier (GPU idle, use spare only).
+
+- [ ] read: cyrillic_synth.py, script_synth.py, layout_aug.py, PHASE_H.md,
+      PHASE_I_DATA.md, PHASE_O commits (short-word defect, probe inversion,
+      zero-shot control), ru real-data facts (~13 t1 real-over-synth; ru192
+      generator-artifact overfit)
+- [ ] Part 1a distributional gaps: real Yandex ru vs v1 synth, same words/layout
+      — length mix, duration, point counts, speed/accel, dwell, curvature,
+      start/end asymmetry (known start-side defect), transit shapes, sampling
+      artifacts
+- [ ] Part 1b discriminability: 2-layer MLP real-vs-synth classifier on the
+      campaign featurization; accuracy = quality metric; feature ablation
+- [ ] Part 1c downstream correlation: which gaps explain the 13-pt real gap +
+      the short-word inversion; audit v1 design assumptions (EN residual bank,
+      i.i.d. per-trace residual sampling loses user coherence, no
+      letter/bigram-conditioned dynamics)
+- [ ] Part 2 ranked v2 options: transplant fixes / learned generators
+      (license-clean VAE/diffusion, WordGesture-GAN note) / hybrid /
+      self-training loop (ru192 hazard addressed); each with expected gain,
+      cost, validation plan (ru real probe + classifier + downstream)
+- [ ] Part 3 recommended v2 spec (formulas, stages, gates, cost at this box's
+      throughput, expected ru-probe gain band) — marked awaiting user reqs
+- [ ] commit + push
