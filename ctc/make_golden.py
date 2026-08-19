@@ -55,6 +55,36 @@ VOCABS = {
     "ru": ([("кот", 137.0), ("кота", 122.0), ("коты", 96.0), ("котик", 93.0),
             ("что", 249.0), ("привет", 169.0), ("клавиатура", 88.0)],
            ["кот", "что", "привет", "клавиатура"]),
+    # ── Phase O. Weights below are read out of each script's real lexicon at
+    # the same 255 - rank CKDT scale (script_registry.ScriptSpec.load_lexicon),
+    # so the fixture ranks words exactly as the shipped decode would. For the
+    # wordfreq-sourced scripts (uk/bg/mk/he) the rank comes from the app's own
+    # build_dictionary.frequency_to_rank, replicated byte-exactly.
+    #
+    # el: note the family members end in ς, not σ. That is the whole point of
+    # the final-sigma repair (PHASE_O.md §1.3/§2.2) — a σ-final fixture would
+    # freeze a decode against the wrong key, in the wrong row.
+    "el": ([("γεια", 157.0), ("και", 255.0), ("καινουρια", 134.0),
+            ("καιρο", 167.0), ("καιρος", 156.0), ("υπολογιστης", 121.0)],
+           ["καιρος", "και", "γεια", "υπολογιστης"]),
+    "uk": ([("клавіатура", 90.0), ("на", 254.0), ("привіт", 162.0),
+            ("про", 230.0), ("просто", 209.0), ("проти", 195.0),
+            ("протягом", 179.0)],
+           ["про", "на", "привіт", "клавіатура"]),
+    "bg": ([("здравей", 151.0), ("клавиатура", 105.0), ("на", 255.0),
+            ("това", 218.0), ("товар", 118.0), ("товара", 105.0),
+            ("товари", 123.0)],
+           ["това", "на", "здравей", "клавиатура"]),
+    "mk": ([("дека", 225.0), ("декада", 104.0), ("декември", 161.0),
+            ("декрет", 110.0), ("здраво", 155.0), ("на", 255.0),
+            ("тастатура", 94.0)],
+           ["дека", "на", "здраво", "тастатура"]),
+    # he: authored in logical (memory) order, which is what the decoder and the
+    # trie see. The app has no RTL branch anywhere in the geometry or swipe path
+    # (APP_INTEGRATION_AUDIT §5), so display direction never enters the fixture.
+    "he": ([("את", 255.0), ("הוא", 238.0), ("הואיל", 123.0), ("הוארך", 104.0),
+            ("הואשם", 112.0), ("מקלדת", 115.0), ("שלום", 187.0)],
+           ["הוא", "את", "שלום", "מקלדת"]),
 }
 BEAM_WIDTH = 32
 TOP_K = 4
