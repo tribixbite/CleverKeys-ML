@@ -106,6 +106,10 @@ def main() -> int:
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--progress", type=int, default=1000)
     ap.add_argument("--out-json", type=Path, default=None)
+    ap.add_argument("--dump", type=Path, default=None,
+                    help="per-row JSONL {row, target, rank, greedy_hit} so two "
+                         "models can be compared with a PAIRED test (McNemar) "
+                         "instead of two independent point estimates")
     args = ap.parse_args()
 
     spec = SR.get(args.code)
@@ -142,6 +146,10 @@ def main() -> int:
     if args.rows:
         row_lo, row_hi = (int(v) for v in args.rows.split(":"))
     src = iter_jsonl(probe) if probe.suffix == ".jsonl" else iter_npz(probe)
+    dump = None
+    if args.dump is not None:
+        args.dump.parent.mkdir(parents=True, exist_ok=True)
+        dump = open(args.dump, "w", encoding="utf-8")
     t0 = time.time()
     for row_i, (feats, raw_word) in enumerate(src):
         if row_i < row_lo:
@@ -171,6 +179,10 @@ def main() -> int:
         r = rank_of(target, words)
         b_tal.add(r)
         strat[len_stratum(target)].add(r)
+        if dump is not None:
+            dump.write(json.dumps({"row": row_i, "target": target, "rank": r,
+                                   "greedy_hit": int(greedy == target)},
+                                  ensure_ascii=False) + "\n")
         if args.progress and b_tal.n % args.progress == 0:
             print(f"  {b_tal.n} decoded  t1 {b_tal.t1 / b_tal.n * 100:.2f} "
                   f"greedy {g_tal.t1 / g_tal.n * 100:.2f} "
@@ -192,6 +204,8 @@ def main() -> int:
         "ge4_t1": round(strat["4+"].t1 / max(strat["4+"].n, 1) * 100, 2),
         "seconds": round(time.time() - t0, 1),
     }
+    if dump is not None:
+        dump.close()
     print(json.dumps(res, ensure_ascii=False, indent=1))
     if args.out_json:
         args.out_json.parent.mkdir(parents=True, exist_ok=True)

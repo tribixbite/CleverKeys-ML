@@ -223,5 +223,84 @@ number against a lexicon the app does not yet have.
 
 ---
 
-*(§2 per-script results and §3 app-integration notes follow as each script
-completes.)*
+## 2. O2 — PER-SCRIPT RESULTS
+
+### 2.1 The calibration that governs every number below — and inverts one claim
+
+Phase O's probe for a corpus-less script is a **synthesis holdout**: 10,000 rows
+from the same generator as the training set, but over a **disjoint half of the
+English donor pool** (a 90/10 stride split, so a holdout trace carries motor
+noise from a human trace training never saw) and an **independent word draw**
+(seed 777 vs 1234). It is the best probe that can exist without a corpus. The
+first thing Phase O did was find out what such a number is worth — on Russian,
+the one script that has **both** a synthesis holdout and a real corpus.
+
+Four cells, one preset (the app's CKDT preset γ 1.05 / **λ 2.0** / β 0.2 /
+0.3734 / 0.9882), one harness, one trie (`langpack-ru` 50 k), one geometry
+(`ru_jcuken_default`). `eval_script.py`; the real probe is the untouched Yandex
+valid-10k on the eval-only footing `YANDEX_LICENSE_RESEARCH.md` permits.
+
+| model | ru **synthesis holdout** (n = 10,000) | ru **REAL** swipes (n = 8,471 in-dict) |
+|---|---|---|
+| `ru_synth_ch80` — the script-trained model | 81.10 | **77.41** |
+| `phaseM_kd_fresh_w1` — the shipped **English** model, zero-shot | **83.38** | 76.32 |
+| Δ (script − English) | **−2.28** | **+1.09** |
+| paired exact McNemar | p = **7.1e-12** (English wins) | p = **0.0099** (script wins) |
+
+**Both deltas are significant and they have opposite signs.** The synthesis
+holdout does not merely flatter models — for the comparison that actually
+matters (is a per-script model worth building?) **it returns the wrong answer,
+with high confidence.**
+
+Why: the holdout traces are English motor residuals re-anchored onto the target
+script's polylines. A model trained on English motor statistics is, by
+construction, *at home* on that distribution; a model trained on the same
+synthetic distribution should be equally at home, but it has also spent capacity
+on the generator's artefacts (PHASE_J §6.5 found the same overfitting-to-the-
+generator effect when ru capacity was raised). Real human swipes in the target
+script are a third distribution, and the two models' distance to it does not
+order the same way.
+
+Three consequences, applied throughout §2:
+
+1. **No synthesis-holdout number in this phase is a quality claim.** Each is
+   reported next to the zero-shot English control on the identical probe, and
+   the pair is read only as "these two models differ by X **on the generator**",
+   never as "this script decodes at X".
+2. **The zero-shot English control is not a straw man — it is the deployment
+   alternative.** On real Russian the model the app already ships reaches
+   **76.32** with nothing but the right layout and the right trie. Purpose-built
+   synthesis training bought **+1.09** on top of that. By contrast, Phase I-B's
+   *real-data* Russian arm reached 89.64 at λ 1.1 (≈ 90+ at λ 2.0). So on the
+   only script where this can be checked: **real data is worth ~13 points;
+   synthesis training is worth ~1.** The expensive half of "a script needs its
+   own model" is the data, not the model.
+3. **The guide's flat claim needs narrowing.** `ctc-architecture-and-multiscript-guide.md`
+   §3.1 says "a model trained on Latin-arrangement geometry with English lexicon
+   statistics does not zero-shot another script … do not route a non-Latin
+   layout at CTC and hope." Measured, that is **too strong**: the shipped model
+   zero-shots Cyrillic at 76.32 in-dict top-1 on real swipes — the same band as
+   the shipped geometric engine's cross-layout anchors (71–77) and within 1.1 of
+   the purpose-trained model. What survives of the claim is the *emissions*
+   half: zero-shot greedy is **18.62** against the script-trained model's
+   **37.13**, i.e. the English model is leaning almost entirely on the trie. The
+   accurate statement is: *a Latin-trained model transfers to another script's
+   geometry far better than expected, because layout-alt augmentation taught it
+   to read key positions rather than slot indices — but its emissions are poor,
+   so it needs a strong lexicon and it degrades faster than a script-trained
+   model would when the lexicon is weak.*
+
+This is genuinely out-of-distribution transfer, not a hidden in-distribution
+case: the English model was trained with `k = 26` active slots drawn as a random
+26-subset of the 64 (`train.py` slot-permutation augmentation), so it had never
+seen 31 simultaneously-active slots nor ЙЦУКЕН key positions.
+
+**Honesty limits of this calibration.** It is one script, one pair of models,
+one preset. The ru synthesis holdout re-uses donor traces that the ru model saw
+during its own training (paired with different words — `cyrillic_synth.py` used
+the full donor pool, before Phase O introduced the 90/10 split), which if
+anything inflates the ru model's holdout column and therefore *understates* the
+sign reversal. And the script-trained side is the *synthesis*-trained ru model,
+not the real-data one; a real-data model would win both columns comfortably.
+
+*(§2.2 onward: per-script results, added as each script completes.)*
