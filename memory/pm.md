@@ -1479,3 +1479,30 @@ NEXT (app side, NOT this agent): the termux agent must make the same edit to
 the app-repo copy of ctc-architecture-and-multiscript-guide.md — the ML mirror
 here has the v2 synthesis section and the v2 artifact table, the app repo does
 not. App repo was read-only for this phase.
+
+## 2026-08-19 — PHASE P6: THE FIVE NON-RU SCRIPTS ONTO THE FULL DONOR POOL
+
+Scope fence: ONLY the donor-footing change §5/§4.1 registered. No lambda sweep,
+no ru re-touch, no new generator levers. Recipe, preset, seed, probe all held.
+
+- [ ] P6a regenerate el/uk/bg/mk/he v2 with `--train-donor-side all` into
+      cache_<code>_v2full; assert each holdout.npz is BIT-IDENTICAL to the P4
+      cache_<code>_v2/holdout.npz (the holdout side is independent of the flag,
+      so P4 vs P6 is an exactly paired comparison on the same 10,000 rows)
+- [ ] P6b retrain five ch80 models, Phase-O/P recipe VERBATIM, detached
+      --workers 0, 4-5 concurrent
+- [ ] P6c re-run each script's battery on the unchanged holdout: fp32 + fp16w
+      at the adopted preset, permuted-geometry falsification (seed 4242), and
+      the ch192-EN / ch80-EN zero-shot controls; paired McNemar P4 vs P6
+- [ ] P6d export fp32 + fp16w, parity gates (watch he's --parity-tol 2e-3),
+      golden fixtures at the adopted preset, sha256; supersede the P4 artifacts
+      in the registry, keep every generation tiered
+- [ ] P6e docs: PHASE_P.md §P6, MODELS_TABLE, RESULTS one-liner, pm.md; push
+
+Caveat to carry, stated up front: `--train-donor-side all` puts the holdout's
+donor half INSIDE the training pool, so the P6 holdout is no longer
+donor-disjoint. Its delta over P4 therefore mixes "more donors" with "these
+donors were seen". On ru, where both footings were read on a REAL probe, the
+same change is worth +0.86 (p 0.0023) — that is the only calibrated bound on
+the honest part of whatever the five holdouts show, and it is the number the
+five-script table must be read against.
