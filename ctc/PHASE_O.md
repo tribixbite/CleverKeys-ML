@@ -642,3 +642,94 @@ decode; the campaign's ALT_LAYOUT §3 policy. From `script_registry.py`:
 * **uk** — no folds; words containing ї or ґ are **rejected as untypeable**
   (4.03 % of the vocabulary, §1.5). If the app wants them, it needs the
   corner-alias path, and that is a *different input mode* (flick), not a swipe.
+
+### 3.5 What the Termux agent needs, per script, in one list
+
+For each script: the layout XML is already in the app; the model, the fixture and
+the preset are in `ctc/artifacts/`; the alphabet string is §3.2; the projection is
+§3.4. What is *missing* is the lexicon for four of the six.
+
+| script | model asset | golden fixture | preset | lexicon status | blocking app work |
+|---|---|---|---|---|---|
+| ru | `ru_synth_ch80_fp16w.onnx` | `ru_synth_ch80_fp16w_golden.json` | `tunedRuCkdt` | `langpack-ru.zip` exists (import) | §3.1 items 1–6 |
+| el | `el_synth_ch80_fp16w.onnx` | `el_synth_ch80_fp16w_golden.json` | same numbers as `tunedRuCkdt` | `langpack-el.zip` exists, **needs the ς repair** | §3.1 items 1–6 **+ the `script="latin"` fix** |
+| uk | `uk_synth_ch80_fp16w.onnx` | `uk_synth_ch80_fp16w_golden.json` | same | **must be built** (`build_wordlist.py --lang uk`) | §3.1 items 1–6 |
+| bg | `bg_synth_ch80_fp16w.onnx` | `bg_synth_ch80_fp16w_golden.json` | same | **must be built** | §3.1 items 1–6 |
+| mk | `mk_synth_ch80_fp16w.onnx` | `mk_synth_ch80_fp16w_golden.json` | same | **must be built** | §3.1 items 1–6 |
+| he | `he_synth_ch80_fp16w.onnx` (**flagged**, §2.2) | `he_synth_ch80_fp16w_golden.json` | same | **must be built**, plus a `hebrew` branch in `build_wordlist._is_script_word` | §3.1 items 1–6 |
+
+Sizes: every model is **589,406 B** as fp16w — a fifth of the shipped English
+model's 2.91 MB. Six scripts is 3.5 MB of assets, which is the argument for
+gating them behind the langpack import rather than bundling all of them.
+
+**And the cheaper option, which the evidence supports:** items 1–6 of §3.1 plus a
+layout and a trie get a non-Latin script to ≈ 76 real top-1 **with the model the
+app already ships** (measured on Russian, §2.1). The per-script models add ≈ +1.6
+on top of that (measured on Russian, p = 1.4e-4; inferred elsewhere). If the app
+work has to be staged, stage the wiring first and the per-script models second —
+the wiring is where all the accuracy is.
+
+---
+
+## 4. O3 — CLOSE
+
+### 4.1 What Phase O delivered
+
+* **An inventory** (§1) that answers "which non-Latin scripts can the app serve"
+  with evidence rather than a guess, including four categories of *cannot* with
+  the reason measured for each.
+* **A validated geometry extractor** (§1.2) that reproduces the training frame
+  from the app's own XML to 4.7e-4, retro-validating the ru model's deployability
+  as a by-product.
+* **Five new per-script models**, trained, gated, exported with fp16w ship bytes
+  and golden fixtures (§2.2, §2.5, §2.6): el, uk, bg, mk, he.
+* **A calibration** (§2.1) that tells anyone reading those five numbers exactly
+  how much to trust them — which turned out to be the most valuable thing in the
+  phase, because the answer is "less than you would have assumed".
+* **Two app defects** found and quantified (§1.3), one of which would have
+  silently corrupted a quarter of all Greek decodes.
+* **Two registered arms refuted** with the rule applied as written (§2.1b,
+  §2.1c), and **one campaign claim narrowed** by measurement (§2.1, point 3).
+
+### 4.2 The ledger of what is NOT established
+
+1. **No accuracy number for any of the five new scripts.** Only generator numbers
+   and a Russian-derived expectation. Nothing here says Greek swipe typing works.
+2. **Single seed everywhere.** The campaign's own resolution floor (~1 pt,
+   Phase C) exceeds several of the deltas in §2.3.
+3. **Four lexicons are not the app's.** uk/bg/mk/he ride wordfreq lists without
+   `build_wordlist.py`'s oracles; a real pack would differ in word selection
+   (though not in frequency scale, which is replicated byte-exactly).
+4. **No on-device anything.** No latency, no memory, no instrumented test.
+5. **Hebrew is below the registered gate** at the adopted preset and is exported
+   flagged rather than withheld, because the gate is defined on a probe this
+   phase discredited — withholding it would over-trust the same probe in the
+   opposite direction.
+6. **The ru synthesis holdout reuses donor traces** the ru model trained on
+   (paired with different words) because `cyrillic_synth.py` predates the 90/10
+   donor split. This inflates the ru holdout column and therefore *understates*
+   the sign reversal — the finding is conservative, not flattered.
+7. **A Phase I-B runtime cache was clobbered** and disclosed rather than quietly
+   repaired: `cache_ru/train_synth.npz` was restored byte-identical from
+   `cache_ru_synth/`, `cache_ru/val.npz` (the 5,000-row real-data selection val)
+   was not regenerated. `python3 prepare_yandex.py --val-rows 5000` rebuilds it,
+   but that command also rewrites the vendored `layouts/ru_jcuken_default.json`,
+   so run it and then check `git status` before committing anything.
+
+### 4.3 What a Phase P should do first, in order
+
+1. **Fix the generator's word draw** — weight by corpus token frequency instead
+   of the compressed dictionary rank, so the synthesis has a realistic length mix
+   (§2.1). This is the cheapest change with the clearest expected payoff, and it
+   is testable against real Russian.
+2. **Re-run the ru calibration after (1).** If a length-correct generator
+   restores rank-preservation against the real corpus, the synthesis holdout
+   becomes a usable probe and every corpus-less script gets a trustworthy number
+   for the first time. If it does not, stop reporting holdout numbers at all and
+   report only the capacity-matched zero-shot delta.
+3. **Collect real data for one non-Latin script.** Everything above is
+   downstream of the fact that ~13 of the ~15 available points live in real data
+   (`DATASET_SCOUT.md` §4.4 makes the case that causing collection at
+   `swipe.futo.org` is the only clean route).
+4. **Do not** re-run capacity, warm-starting, or per-script λ sweeps against a
+   synthesis holdout. All three are now measured to be probe artefacts.
