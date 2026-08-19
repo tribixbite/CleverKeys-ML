@@ -68,13 +68,12 @@ from futo_decoder_eval import load_layout  # noqa: E402
 from layout_aug import retime_global, retime_segment, warp_path  # noqa: E402
 from paths import DEFAULT_WORKDIR, resolve  # noqa: E402
 from prepare_yandex import RU_LETTERS_31  # noqa: E402
-from synth_gap_audit import feature_views, ks_stat, trace_metrics  # noqa: E402
+from synth_gap_audit import (METRIC_KEYS_17, feature_views,  # noqa: E402
+                             ks_stat, trace_metrics)
 
-#: The 17 metrics `synth_gap_audit.trace_metrics` returns, in report order.
-METRIC_KEYS = ("step_cv", "step_max", "sharp_turns", "turn_mean", "turn_total",
-               "straightness", "key_cover", "dwell_frac", "start_dwell",
-               "end_dwell", "start_d", "end_d", "path_len", "step_mean",
-               "dup_frac", "dwell_run_max", "speed_asym")
+#: This harness's tables are the ones the research audit quotes, so it stays on
+#: the frozen 17-metric battery even though `trace_metrics` now returns more.
+METRIC_KEYS = METRIC_KEYS_17
 
 # ── warp_path, instrumented ─────────────────────────────────────────────────────
 
@@ -494,6 +493,7 @@ def stage_enen(args: argparse.Namespace) -> int:
     the SAME word on the SAME QWERTY geometry.  Every difference is generator
     error with no cross-script and no cross-population component.
     """
+    import script_synth as SS
     import synth_gap_audit as sga
     out_dir = resolve(args.workdir, Path("synth_gap"))
     _, qw = load_layout(HERE / "en_qwerty.json")
@@ -501,6 +501,8 @@ def stage_enen(args: argparse.Namespace) -> int:
     with np.load(cache / args.enen_corpus) as d:
         F = np.array(d["features"])
         W = [str(w) for w in d["words"]]
+        DUR = (np.asarray(d["duration_ms"], np.float32) if "duration_ms" in d
+               else np.zeros(len(W), np.float32))
     rng = np.random.default_rng(4242)
     perm = rng.permutation(len(W))
     real_side, donor_side = perm[: len(W) // 2], perm[len(W) // 2:]
@@ -511,7 +513,22 @@ def stage_enen(args: argparse.Namespace) -> int:
         by[len(seq[i])].append(int(i))
     pools = {k: np.array(v) for k, v in by.items()}
 
-    real, v1, retimed, words = [], [], [], []
+    # The v2 arm runs the SHIPPED generator over the same donor half, so the
+    # en->en footing measures the thing that will actually be trained on.  The
+    # bank is the full corpus indexed by row (only `donor_side` rows are ever
+    # drawn, via `pools`), and its duration law is fit on this MIT corpus.
+    bank = SS.DonorBank(
+        feats=F, seqs=[seq[i] for i in range(len(W))],
+        by_count=pools, duration_ms=DUR, group=np.full(len(W), -1, np.int32),
+        seg_len=[np.hypot(*np.diff(qw[seq[i]].astype(np.float64), axis=0).T)
+                 if len(seq[i]) >= 2 else np.zeros(0) for i in range(len(W))])
+    bank.dur_exponent, dur_fit = SS.fit_duration_law(bank)
+    opts_v2 = SS.GenOpts.parse("c,b,s5")
+    draw_v2 = SS._Draw(bank, opts_v2)
+    st_v2 = SS._blank_stats()
+    rng_v2 = np.random.default_rng(4242)
+
+    real, v1, retimed, v2, words = [], [], [], [], []
     for i in real_side[: args.rows or len(real_side)]:
         S = len(seq[i])
         pool = pools.get(S)
@@ -524,17 +541,22 @@ def stage_enen(args: argparse.Namespace) -> int:
         words.append(W[i])
         v1.append(warped)
         retimed.append(np.clip(retime_segment(warped, F[di], j, 0.5), 0, 1))
+        dst_seg = bank.seg_len[int(i)]
+        d2 = draw_v2.donor(rng_v2, S, dst_seg, st_v2)
+        v2.append(SS.transplant(bank, d2, seq[i], dst_seg, qw, qw, opts_v2,
+                                st_v2)[0])
         if len(words) >= 9416:
             break
-    real, v1, retimed = np.stack(real), np.stack(v1), np.stack(retimed)
-    print(f"en->en matched pairs: {len(words)}")
+    real, v1 = np.stack(real), np.stack(v1)
+    retimed, v2 = np.stack(retimed), np.stack(v2)
+    print(f"en->en matched pairs: {len(words)}  (v2 arm {st_v2})")
 
     # trace_metrics indexes letters through the module-level alphabet.
     saved, sga.RU_LETTERS_31 = sga.RU_LETTERS_31, "abcdefghijklmnopqrstuvwxyz"
     try:
         mr = trace_metrics(real, words, qw)
-        res: Dict[str, object] = {"n": len(words)}
-        for nm, X in (("en_v1", v1), ("en_B_seg_a05", retimed)):
+        res: Dict[str, object] = {"n": len(words), "duration_law": dur_fit}
+        for nm, X in (("en_v1", v1), ("en_B_seg_a05", retimed), ("en_v2", v2)):
             ms = trace_metrics(X, words, qw)
             res[nm + "_ks"] = {k: ks_stat(mr[k], ms[k]) for k in METRIC_KEYS}
             print(f"{nm:<14} " + "  ".join(
@@ -542,7 +564,7 @@ def stage_enen(args: argparse.Namespace) -> int:
                 ("step_cv", "step_max", "sharp_turns", "turn_mean")))
     finally:
         sga.RU_LETTERS_31 = saved
-    for nm, X in (("en_v1", v1), ("en_B_seg_a05", retimed)):
+    for nm, X in (("en_v1", v1), ("en_B_seg_a05", retimed), ("en_v2", v2)):
         g = run_gate(real, X, words, args.seed)
         res[nm + "_gate"] = g
         print(f"{nm:<14} gate speed {g['speed']['max']:.4f}/{g['speed']['final']:.4f}"
