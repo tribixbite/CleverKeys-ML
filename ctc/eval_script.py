@@ -104,6 +104,14 @@ def main() -> int:
                          "halves; applied before every other filter so the two "
                          "halves are disjoint by construction")
     ap.add_argument("--limit", type=int, default=0)
+    ap.add_argument("--permute-layout", type=int, default=0,
+                    dest="permute_layout",
+                    help="FALSIFICATION CONTROL: shuffle the key centres with "
+                         "this RNG seed before decoding, so slot c gets some "
+                         "OTHER key's position. A model that reads geometry "
+                         "must collapse; one that scores well anyway was never "
+                         "using the layout, and the layout json was never "
+                         "load-bearing. 0 = off.")
     ap.add_argument("--progress", type=int, default=1000)
     ap.add_argument("--out-json", type=Path, default=None)
     ap.add_argument("--dump", type=Path, default=None,
@@ -133,6 +141,14 @@ def main() -> int:
 
     letters, centers = load_layout(HERE / spec.layout_json)
     n_letters = len(letters)
+    if args.permute_layout:
+        rng = np.random.default_rng(args.permute_layout)
+        perm = rng.permutation(n_letters)
+        while np.any(perm == np.arange(n_letters)):     # no key left in place
+            perm = rng.permutation(n_letters)
+        centers = np.asarray(centers)[perm]
+        print(f"[{spec.code}] FALSIFICATION CONTROL: key centres permuted "
+              f"(seed {args.permute_layout})", flush=True)
     keys = np.zeros((MAX_KEYS, 2), np.float32)
     keys[:n_letters] = centers
     mask = np.zeros((MAX_KEYS,), bool)
