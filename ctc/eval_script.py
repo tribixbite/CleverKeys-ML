@@ -123,7 +123,10 @@ def main() -> int:
         preset[1] = args.lam
     gamma, lam_w, beta, gamma_prune, beta_prune = preset
 
-    cache = resolve(args.workdir, Path(args.cache or f"cache_{spec.code}"))
+    # ru's Phase-O synthesis lives in its own dir; cache_ru holds Phase I-B's
+    # real-data caches (script_synth.py carries the same rule).
+    default_cache = "cache_ru_phaseO" if spec.code == "ru" else f"cache_{spec.code}"
+    cache = resolve(args.workdir, Path(args.cache or default_cache))
     probe = Path(args.probe)
     if not probe.is_absolute():
         probe = cache / probe

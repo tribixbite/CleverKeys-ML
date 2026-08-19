@@ -276,6 +276,34 @@ generator effect when ru capacity was raised). Real human swipes in the target
 script are a third distribution, and the two models' distance to it does not
 order the same way.
 
+**A third defect of the probe, measured: its length mix is wrong.** Words are
+drawn by lexicon weight (`255 − rank`, the compressed CKDT scale), not by corpus
+token frequency, so the holdout is **3.3 % short words (≤3 letters)** against the
+real corpus's **38.7 %**. Stratified, the inversion is sharpest exactly where the
+probe is thinnest:
+
+| probe | model | ≤3 t1 | 4+ t1 |
+|---|---|---|---|
+| ru synthesis holdout | ru-synth ch80 | 62.31 (n = 329) | 81.74 |
+| ru synthesis holdout | ch192 EN zero-shot | **73.86** | **83.70** |
+| ru REAL | ru-synth ch80 | **86.44** (n = 3,281) | **71.70** |
+| ru REAL | ch192 EN zero-shot | 85.22 | 70.69 |
+| ru REAL | ch80 EN zero-shot | 83.11 | 71.16 |
+
+Re-weighting the holdout to the real corpus's 38.7/61.3 length mix does **not**
+rescue it (ru-synth 74.22 vs English 79.89) — the probe is wrong on short words
+in *level*, not merely in *proportion*. Against real short Russian swipes the
+script-trained model leads by +1.2/+3.3; against *synthetic* short Russian
+"swipes" it trails by −11.6. Short synthetic words are short English traces with
+their few vertices re-anchored, and that is evidently a distribution the English
+model owns and the script-trained model has partly un-learned.
+
+**Recipe consequence carried forward (not actioned this phase):** the synthesis
+word draw should be weighted by corpus token frequency rather than by the
+compressed dictionary rank, so that the generated corpus has a realistic length
+mix. Re-generating and re-training all six scripts to test that was out of
+budget here; it is the first thing a Phase P should do.
+
 Three consequences, applied throughout §2:
 
 1. **No synthesis-holdout number in this phase is a quality claim.** Each is
