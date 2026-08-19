@@ -1385,3 +1385,37 @@ NO training beyond a tiny real-vs-synth classifier (GPU idle, use spare only).
       >=78.9 floor, band +2..+5 over 77.41), cost ~10 GPU-h + 3 days;
       EXPLICITLY awaiting user requirements before any build
 - [x] commit + push (ctc/SYNTH_V2_DESIGN.md + ctc/synth_gap_audit.py)
+
+## 2026-08-19 — SYNTH V2 RESEARCH AUDIT (audit the committed v2 design vs the state of the art)
+
+Clones to ~/ctc-train/research/ (read-only reference). NO training. Deliverable:
+ctc/SYNTH_V2_RESEARCH_AUDIT.md + the A/B harness that produced its numbers.
+
+- [x] read the audit target: SYNTH_V2_DESIGN.md, synth_gap_audit.py,
+      cyrillic_synth.py, layout_aug.py, PHASE_O §2.1
+- [x] BUILD the proposed fixes and measure them (ctc/synth_retime_probe.py,
+      asserts bit-identical v1 reproduction, n=9,416): fix B as specified
+      (global arc-progress) speed gate 0.904 -> 0.775; amended vertex-aligned
+      per-segment form -> 0.742; fix C p95 segment ratio 3.63 -> 1.72
+- [x] measure the time-allocation law the design guesses at: T_k ~ L_k^alpha,
+      alpha = 0.460 (HWS) / 0.493 (FUTO) / 0.447 (real ru) / 0.271 (v1) —
+      script-invariant, so it is fit on MIT English and only CHECKED on ru
+- [x] two controls the design lacked: real-vs-real floor = 0.50 (923 pairs)
+      and an en->en transplant arm (speed gate 0.599 after re-timing vs ru's
+      0.748) which PRICES hypothesis A1 at ~0.15 of the residual separability
+- [x] find the largest unaddressed gap: the 60 Hz acquisition asymmetry.
+      Oracle duration-matched re-featurization takes sharp_turns KS
+      0.380 -> 0.293 and the angles gate 0.728 -> 0.675. NEW v2 stage S5.
+- [x] gate instrument audit: HistGBM on 17 metrics reads 0.914 (v1) / 0.853
+      (after B) where the committed MLP reads 0.904 / 0.775 — the MLP
+      under-reads, and max-over-epochs is a test-set selection (H0 arm 0.525)
+- [x] literature/code review: 42 repos cloned, licences recorded; FUTO
+      arXiv:2606.25247 Appendix A verified verbatim; two-thirds power law
+      measured NON-discriminative (beta -0.373/-0.390 real vs -0.377 synth);
+      sigma-lognormal parked (no licence-clean implementation, and fix B
+      already reaches step_cv KS 0.010 on the matched-population control)
+- [x] amended spec + re-registered gates (G2 was self-contradictory, G3's
+      sharp_turns 0.25 unreachable even with an oracle, G4's 0.70 unreachable
+      because ~0.15 of it is donor-population mismatch; G4 restated as
+      gap-closure against the measured 0.50 floor)
+- [x] commit + push (ctc/SYNTH_V2_RESEARCH_AUDIT.md + ctc/synth_retime_probe.py)
