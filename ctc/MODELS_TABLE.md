@@ -742,19 +742,52 @@ holdout margin (+3.87) matches the real margin (+3.41).
 *(every cell read from `ctc/phase_p_scripts.json`; the ru holdout row is the
 calibration anchor and its real column is the ship-gate table above.)*
 
+**P6 — the same five on the full donor pool** (`PHASE_P.md` §8). The five were
+regenerated with `--train-donor-side all`, the footing the shipped ru arm uses
+and the one §4.1 prices at +0.86 real top-1, and retrained on the same recipe
+with nothing else changed. The holdout is provably the **same 10,000 rows**
+(`--train-donor-side` cannot reach the holdout split; asserted bit-identical),
+so this is an exact paired comparison — and re-decoding the P4 models on it
+reproduces every published number to the digit.
+
+| arm | in-dict t1, P4 → **P6** | Δ, exact McNemar (n = 10,000) | greedy | vs ch192 EN | permuted | fp16w cost |
+|---|---|---|---|---|---|---|
+| `phaseP6-el-v2full` = `el_synth_v2full_ch80` | 90.69 → **90.78** | +0.09 (p 0.70) | 69.01 → 69.16 | +6.11 | 0.00 | −0.02 |
+| `phaseP6-uk-v2full` = `uk_synth_v2full_ch80` | 87.97 → **87.67** | −0.30 (p 0.23) | 55.09 → 55.28 | +5.09 | 0.02 | +0.01 |
+| `phaseP6-bg-v2full` = `bg_synth_v2full_ch80` | 82.26 → **82.52** | +0.26 (p 0.36) | 55.97 → 55.65 | +5.47 | 0.00 | +0.01 |
+| `phaseP6-mk-v2full` = `mk_synth_v2full_ch80` | 89.02 → **88.68** | −0.34 (p 0.13) | 64.56 → 64.21 | +5.23 | 0.01 | +0.01 |
+| `phaseP6-he-v2full` = `he_synth_v2full_ch80` | 77.00 → **76.86** | −0.14 (p 0.64) | 56.88 → **57.72** (p 0.015) | +7.92 | 0.01 | +0.01 |
+| **pooled** | — | **−0.086, p 0.443** (50,000 paired rows) | +0.102, p 0.501 | — | — | — |
+
+**A null, and an informative one.** The P6 arm trains on 11 % more donors *and*
+loses the holdout's donor-disjointness (the reserved half is now inside the
+training pool), so both confounds point up — and the pooled effect is −0.09 with
+p = 0.44. The change that is worth **+0.86 real top-1 on ru** is invisible to
+this probe, which is the third independent demonstration (after capacity and λ
+in Phase O) that a synthesis holdout does not rank what real swipes rank. The
+P6 bytes are promoted on ru's real measurement plus the holdout's evidence that
+the change costs nothing — **not** on the holdout showing a gain. Cells from
+`ctc/phase_p6_scripts.json`.
+
 **Export gates.** Every fp32 export is **100/100 argmax** on the sliced contract
 view against real traces on the real layout. fp16w ship bytes cost ≤ 0.03 t1 and
-are exactly free on uk, mk and he. **he is flagged**: its fp32 sliced residue is
-1.16e-03 against a historical envelope of 0.8e-4…7.6e-4, so its export needed
-`--parity-tol 2e-3`; argmax is 100/100 on both probes and the exceedance is
-disclosed, not smoothed. Every graph is the standard 1,142,727-byte resbn80;
-fp16w 589,406 B. Hashes in `PHASE_P.md` §6.1.
+are exactly free on uk, mk and he. **he's P4 bytes are flagged**: their fp32
+sliced residue is 1.16e-03 against a historical envelope of 0.8e-4…7.6e-4, so
+that export needed `--parity-tol 2e-3`; argmax is 100/100 on both probes and the
+exceedance is disclosed, not smoothed. **The P6 he export needed no relaxation**
+— 4.04e-04 at the default 1e-3, back inside the envelope — so the flag does not
+carry to `he_synth_v2full_ch80`. Every graph is the standard 1,142,727-byte
+resbn80; fp16w 589,406 B. Hashes in `PHASE_P.md` §6.1 (v2) and §8.4 (v2full).
 
-**Both generations stay in the registry.** The v1 artifacts (`*_synth_ch80*`) are
-the bytes every Phase-O row above was measured on and are not deleted; the v2
-artifacts (`*_synth_v2_ch80*`) supersede them for deployment. Alphabet strings,
-projection rules and the app-side wiring of `PHASE_O.md` §3.2–3.4 are unchanged —
-v2 changes the training distribution, not the contract.
+**All three generations stay in the registry.** The v1 artifacts
+(`*_synth_ch80*`) are the bytes every Phase-O row above was measured on; the v2
+artifacts (`*_synth_v2_ch80*`) are the bytes §5 / the P4 table was measured on;
+the v2full artifacts (`{el,uk,bg,mk,he}_synth_v2full_ch80*`) supersede them for
+deployment. ru has only two generations, because `ru_synth_v2_ch80` is already
+the full-pool arm and P6 left it untouched. Alphabet strings, projection rules
+and the app-side wiring of `PHASE_O.md` §3.2–3.4 are unchanged throughout — the
+generator and its donor footing change the training distribution, not the
+contract.
 
 
 ## 5. Configurations — mixes, pairs and blends, with their member composition

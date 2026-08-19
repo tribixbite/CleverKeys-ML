@@ -352,6 +352,10 @@ same 94 k schedule, same seed, **different training distribution**. The app-side
 unchanged: same alphabet string, same slot order, same preset, same fixture shape, so swapping
 generations is a model-and-fixture swap and nothing else. The five other scripts have the same
 pair of generations (`{el,uk,bg,mk,he}_synth_v2_ch80*`); hashes in `PHASE_P.md` §6.1.
+Those five then gained a **third** generation in P6 — `*_synth_v2full_ch80*`, the same
+generator on the full donor pool, which is what should be wired if any of them is —
+hashes in `PHASE_P.md` §8.4. ru has no third generation: `ru_synth_v2_ch80` is already
+the full-pool arm.
 
 
 Source checkpoint `~/ctc-train/ckpt/phaseIB-ru-synth/best.pt` — `resbn:80`, dil `1,2,4,8`,

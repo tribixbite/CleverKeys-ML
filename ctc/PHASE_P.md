@@ -412,7 +412,8 @@ full-pool arm because its gate is real data; the five keep the split because
 their holdout *is* their probe and donor-disjointness is what makes it worth
 anything. The −1.69 real points §4.1 measures for that split is therefore left
 on the table for these five, and is the registered recommendation for whoever
-regenerates next.)
+regenerates next.) **§8 executes that recommendation and reports what it is
+worth: nothing this probe can see.**
 
 Probe: each script's own 10,000-row v2 synthesis holdout, disjoint donor half,
 independent word draw (seed 777), decoded through the exported fp32 graph at
@@ -572,6 +573,11 @@ prior number in `MODELS_TABLE.md` was measured on. Every graph is the standard
 | `he_synth_v2_ch80_fp16w.onnx` (**flagged**) | 589,406 | `943ab4e36297c686a2af00a5bd5ec622a9671b9d2258b49297513aefe85f0c26` |
 | `he_synth_v2_ch80_fp16w_golden.json` | 140,434 | `c0ff01294eccfefc54040b1ff8cf9d8266dd645f65305534bf0ab588d4f9e4b0` |
 
+**§8.4 adds a third generation for the five non-ru scripts**
+(`{el,uk,bg,mk,he}_synth_v2full_ch80*`), which supersedes the v2 rows above for
+deployment. The v2 rows are **not** deleted — they are the bytes §5 was measured
+on. ru is unaffected: `ru_synth_v2_ch80` is already the full-pool arm.
+
 Every fixture is frozen at **γ 1.05 / λ 2.0 / β 0.2 / 0.3734 / 0.9882** on the
 script's own lexicon weights, 10 cases each (5 pure-featurizer branch probes, 1
 word-path featurizer case, 4 model-backed beam cases) — the same shape as Phase
@@ -602,3 +608,187 @@ contract.
    are what is left, in that order, and §2.5 says only one of them is reachable.
 8. **λ was not re-tuned** for a strong-emission model, and §4.2 argues it
    probably wants re-tuning. Deliberately left, to avoid spending the validator.
+9. **The donor footing for the five is a transfer argument, not a measurement.**
+   §8 puts them on the full pool and measures −0.09 pooled, p = 0.44, on 50,000
+   paired holdout rows; the +0.86 that justifies the change is ru's, on real
+   data. Their own probe cannot see it, which §8.2 argues is a fact about the
+   probe.
+
+---
+
+## 8. P6 — the five scripts on the full donor pool
+
+The one item §7 left as a registered recommendation rather than a finding: §4.1
+priced Phase O's 90/10 donor split at **−1.69 real top-1** on Russian, and §5
+left the five corpus-less scripts riding it. P6 puts them on
+`--train-donor-side all`, the footing the shipped ru arm uses, and changes
+**nothing else** — v2 stages `a,c,b,s5`, 1,000,000 train rows, the Phase-O
+recipe verbatim (`resbn:80`, dil 1,2,4,8, embed_hid 96, feat_v1, 94,000 steps,
+batch 256, lr 3e-3, wd 0.01, warmup 1,000, coupled affine sampler, no
+layout-alt, greedy selection, patience 40, seed 1234, `--workers 0`), the same
+CKDT preset, no λ sweep, no new lever. The donor side goes **904,155 →
+1,004,617** traces, exactly as it did for ru.
+
+**The comparison is exactly paired, and that is a fact rather than an
+assumption.** `script_synth`'s `side_of` maps the *holdout* split to the
+reserved donor half whatever `--train-donor-side` says, and each split's RNG is
+seeded independently, so the flag cannot touch `holdout.npz`.
+`phaseP6_assert_holdout.py` asserts it on all five: `features`, `targets`,
+`target_lengths`, `words`, `donor_row`, `donor_group` and `drawn_duration_ms`
+**bit-identical** to the P4 caches, 10,000 rows each. Every P4 and P6 number
+below is therefore read off the *same rows*, and the McNemar cells are real
+discordant pairs. As a free by-product, re-decoding the five P4 models on those
+rows reproduces `phase_p_scripts.json` **to the last digit** (90.69 / 87.97 /
+82.26 / 89.02 / 77.00), and the two English zero-shot controls reproduce to the
+last digit as well.
+
+### 8.1 The result: a null, on 50,000 paired rows
+
+| script | in-dict t1, P4 → **P6** | Δ (exact McNemar, n = 10,000) | greedy, P4 → P6 | Δ greedy | ≤3 | ≥4 | vs ch192 EN | vs ch80 EN | permuted |
+|---|---|---|---|---|---|---|---|---|---|
+| **el** Greek | 90.69 → **90.78** | **+0.09** (b/c 209/218, p 0.70) | 69.01 → 69.16 | +0.15 (p 0.65) | 95.79 → 95.99 | 86.70 → 86.70 | +6.02 → **+6.11** | **+7.01** | 0.00 |
+| **uk** Ukrainian | 87.97 → **87.67** | **−0.30** (302/272, p 0.23) | 55.09 → 55.28 | +0.19 (p 0.60) | 92.73 → 92.40 | 85.88 → 85.59 | +5.39 → **+5.09** | **+6.92** | 0.02 |
+| **bg** Bulgarian | 82.26 → **82.52** | **+0.26** (360/386, p 0.36) | 55.97 → 55.65 | −0.32 (p 0.37) | 85.64 → 85.64 | 80.12 → 80.54 | +5.21 → **+5.47** | **+7.55** | 0.00 |
+| **mk** Macedonian | 89.02 → **88.68** | **−0.34** (255/221, p 0.13) | 64.56 → 64.21 | −0.35 (p 0.29) | 93.52 → 93.18 | 85.83 → 85.49 | +5.57 → **+5.23** | **+6.32** | 0.01 |
+| **he** Hebrew | 77.00 → **76.86** | **−0.14** (395/381, p 0.64) | 56.88 → **57.72** | **+0.84 (p 0.015)** | 85.83 → 85.34 | 71.47 → 71.55 | +8.06 → **+7.92** | **+10.51** | 0.01 |
+
+| pooled over the five (not one model — five models on five probes) | n | b/c | Δ | p |
+|---|---|---|---|---|
+| **in-dict t1** | 50,000 | 1,521 / 1,478 | **−0.086** | **0.443** |
+| greedy | 50,000 | 2,740 / 2,791 | +0.102 | 0.501 |
+| ≤3 stratum | 19,325 | 383 / 349 | −0.176 | 0.223 |
+| ≥4 stratum | 30,675 | 1,138 / 1,129 | −0.029 | 0.867 |
+
+Not one per-script top-1 delta is significant; three of five are negative; the
+pooled estimate is **−0.09 points with p = 0.44**. The only cell that moves is
+he's greedy, +0.84 (p = 0.015), and a single nominally-significant cell out of
+twenty is what a null looks like. t3/t5 move by the same nothing (el 96.34 →
+96.63 / 97.24 → 97.40, uk 94.76 → 94.68 / 96.02 → 95.95, bg 94.25 → 94.03 /
+96.15 → 96.25, mk 95.86 → 95.78 / 96.87 → 96.85, he 90.16 → 90.29 / 93.27 →
+93.36), the ch192 margins stay in the +5.1 … +7.9 band that §5's sign flip
+established, and the permuted-geometry falsification still collapses every model
+to 0.00–0.02.
+
+### 8.2 What the null does and does not mean
+
+**It is not evidence that the donor pool does not matter.** It is evidence that
+*this probe cannot see whether it matters*, and P6 makes that case stronger than
+§5.1 could, because the P6 arm holds two advantages at once and still reads
+flat:
+
+1. it trains on 11 % more donors, the change §4.1 measured as worth +0.86 real
+   top-1 on ru (p = 0.0023) and whose absence costs −1.69 on the v1 arm
+   (p = 5.2e-07);
+2. `--train-donor-side all` puts the holdout's reserved donor half **inside the
+   training pool**, so the P6 holdout is no longer donor-disjoint and its
+   numbers carry whatever a seen-donor advantage is worth here — an advantage
+   the P4 arm did not have.
+
+Both point the same way, both should inflate P6, and the measured pooled effect
+is −0.09. The clean reading is the one Phase O and §5.1 already argued from two
+other directions: a synthesis holdout measures *fit to the generator*, and the
+donor pool's contribution to real-swipe accuracy is not in its field of view.
+This is now the third independent demonstration — capacity (Phase O), λ
+(Phase O), and donor footing (here) — and the first where the real-probe answer
+for the *identical* change is known to be non-zero and the holdout still reads
+zero.
+
+**Why the P6 bytes are promoted anyway, stated as the transfer argument it is.**
+Nothing in §8.1 argues for shipping P6 on its own evidence. The argument is
+ru's: on the one script with a real corpus, this exact flag on this exact
+generator, donor bank, architecture and recipe is worth **+0.86 real top-1**,
+and the five scripts differ from ru only in alphabet, layout and lexicon. The
+holdouts add the one thing they *can* establish — that the change costs nothing
+measurable on the generator's own distribution, in either the ≤3 or the ≥4
+stratum. Ship on the real measurement, not on the holdout; and if a real corpus
+ever appears for any of the five, this is one of the first things it should
+re-read.
+
+### 8.3 Export gates — and the he flag retires for the new bytes
+
+Every fp32 export clears at the **default 1e-3** tolerance with **100/100**
+argmax agreement on the sliced contract view against real traces on the real
+layout. **he needed no relaxation this time**: its sliced residue reads
+**4.04e-04**, back inside the historical 0.8e-4…7.6e-4 envelope, against the
+1.16e-03 that forced `--parity-tol 2e-3` in P4. The P4 `he_synth_v2_ch80` bytes
+keep their flag — the exceedance was real and is a property of that checkpoint
+— and the P6 bytes do not inherit it.
+
+| script | BN fold (sliced) | fp32 vs torch (sliced) | argmax | parity tol | fp16w vs fp32 (white noise) | argmax | fp16w decode cost |
+|---|---|---|---|---|---|---|---|
+| el | 1.49e-04 | 1.04e-04 | **100/100** | 1e-3 | 5.49e-02 | 96/100 | 90.78 → 90.76 (−0.02) |
+| uk | 1.16e-04 | 1.11e-04 | **100/100** | 1e-3 | 6.11e-02 | 97/100 | 87.67 → 87.68 (+0.01) |
+| bg | 4.20e-04 | 7.78e-04 | **100/100** | 1e-3 | 1.15e-01 | 97/100 | 82.52 → 82.53 (+0.01) |
+| mk | 1.79e-04 | 1.35e-04 | **100/100** | 1e-3 | 1.05e-01 | 97/100 | 88.68 → 88.69 (+0.01) |
+| he | 3.20e-04 | **4.04e-04** | **100/100** | **1e-3** | 4.08e-02 | **100/100** | 76.86 → 76.87 (+0.01) |
+
+The fp16w decode cost is ≤ 0.02 t1 everywhere and is *positive* on four of five,
+which is the same noise floor P4 reported from the other side.
+
+### 8.4 The P6 artifact registry
+
+Generation-3 bytes for the five non-ru scripts. They **supersede** the
+`*_synth_v2_ch80*` set for deployment; that set stays in the registry because
+§5 was measured on it, exactly as the v1 set stays because Phase O was. ru is
+absent by design — `ru_synth_v2_ch80` is already trained on the full pool
+(§4.1), so P6 has nothing to change and its hash is untouched. Every graph is
+the standard 1,142,727-byte resbn80 export; every fp16w is 589,406 B.
+
+| file | bytes | sha256 |
+|---|---|---|
+| `el_synth_v2full_ch80.onnx` | 1,142,727 | `b5b94e541d5a5ab50bd24d084f43bf0e0d59210c054b788c4b771f6383c09fb7` |
+| `el_synth_v2full_ch80_fp16w.onnx` | 589,406 | `6b82b4db9eb8bad9f9c075e5fcdf99a6a0f7fac5a076aebf647ee8f79b14eece` |
+| `el_synth_v2full_ch80_fp16w_golden.json` | 144,407 | `d35b14e010512642765cae048fab2c2280c12c3a499f625d6f81e1a2bdcceb30` |
+| `uk_synth_v2full_ch80.onnx` | 1,142,727 | `b39ae11291fbc4417b2d4036beae659204cb135d619508a4366bb25d3623ed09` |
+| `uk_synth_v2full_ch80_fp16w.onnx` | 589,406 | `e3e6ff1cce3599c3d8299480bc6786cf1fb87f8970ca5d349dea3055bcdec50b` |
+| `uk_synth_v2full_ch80_fp16w_golden.json` | 155,663 | `5afe7fd42cff3d81ab388872e23ca2361df2146dd6a8e12ef20cf54dd3746be8` |
+| `bg_synth_v2full_ch80.onnx` | 1,142,727 | `84a2ce16ad0c0d43994425fd81d568114c44de8e203b18d6bc2521aaf28abbaa` |
+| `bg_synth_v2full_ch80_fp16w.onnx` | 589,406 | `0345f222ca3e845b01a4f7d96ca4756c796cd38fbbe5eeb772bcc7da8aad558b` |
+| `bg_synth_v2full_ch80_fp16w_golden.json` | 154,670 | `028b5ea8e2ebaccd978f84b97cd16dfb5eb15026bfb239fccf95f9fac65e1839` |
+| `mk_synth_v2full_ch80.onnx` | 1,142,727 | `55dafbad9a2d4d2786de403db6ddb1c5775d00d53f1086edd79259cfea5c352f` |
+| `mk_synth_v2full_ch80_fp16w.onnx` | 589,406 | `82d8eda4ee7739178187aab4ac5086ba2eda681e9e47ae413f6b6019a6dca57d` |
+| `mk_synth_v2full_ch80_fp16w_golden.json` | 160,122 | `6000f88ba16ce742b13e94fae3818404999aefc494c70a8ddf3e8a916ec7cf74` |
+| `he_synth_v2full_ch80.onnx` | 1,142,727 | `13a968d8114ae8f3c32a0eaa25af8943cc7ac6bd55e09f7f14289bca21f6a0e8` |
+| `he_synth_v2full_ch80_fp16w.onnx` | 589,406 | `0835d3f575de5378ba78829b9249c22e81e8f7231e414c15682d3f33f9b45ffa` |
+| `he_synth_v2full_ch80_fp16w_golden.json` | 140,247 | `adb5ea334fdff34fff378ce1edcedb9e2d6707b115c6c3a6649a5c28e28b7ae5` |
+
+Fixtures are frozen at the same **γ 1.05 / λ 2.0 / β 0.2 / 0.3734 / 0.9882**, 10
+cases each, same shape as P4's — the app-side row is a model-and-fixture swap
+and nothing else. Alphabet strings, projection rules and the per-script wiring
+of `PHASE_O.md` §3.2–3.4 remain unchanged.
+
+### 8.5 Reproduction
+
+Every driver is committed under `ctc/`, unlike Phase O's, which stayed in the
+workdir:
+
+```bash
+# regenerate on the full donor pool (the only changed flag)
+ctc/phaseP6_gen.sh el uk bg mk he                    # --train-donor-side all
+python3 ctc/phaseP6_assert_holdout.py el uk bg mk he # must PASS before anything
+ctc/phaseP6_train.sh el uk bg mk he                  # Phase-O recipe verbatim
+ctc/phaseP6_eval.sh el uk bg mk he                   # exports, decodes, controls
+ctc/phaseP6_paired.sh el uk bg mk he                 # P4 dumps on the same rows
+python3 ctc/phaseP6_paired.py el uk bg mk he
+python3 ctc/phaseP6_collect.py                       # -> phase_p6_scripts.json
+ctc/phaseP6_artifacts.sh el                          # …and uk/bg/mk/he
+```
+
+Committed evidence: `ctc/phase_p6_scripts.json` — both footings per script, the
+paired cells, the pooled test and the export gates, all parsed from the run's
+own logs rather than transcribed by eye.
+
+### 8.6 What P6 did NOT establish
+
+1. **That the full donor pool helps these five.** It does not show that; it
+   shows the probe cannot tell. The reason to believe it does is ru's real
+   probe, and that reason is transfer, not measurement.
+2. **Anything about real Greek, Ukrainian, Bulgarian, Macedonian or Hebrew
+   swiping.** §5.1 carries over word for word: a v2 holdout is generated by v2,
+   and four of the six scripts still have no accuracy measurement of any kind.
+3. **A seed story.** Single seed 1234, as everywhere in this campaign, and the
+   pooled ±0.09 is well inside the ~1 pt resolution floor a seed change would
+   move things by.
+4. **Anything about λ.** Not swept, not touched; §4.2's argument that λ 2.0 was
+   tuned against a weak-emission model is still open and still waiting on a
+   second real corpus.

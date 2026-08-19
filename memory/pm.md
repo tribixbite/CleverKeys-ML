@@ -1485,19 +1485,19 @@ not. App repo was read-only for this phase.
 Scope fence: ONLY the donor-footing change §5/§4.1 registered. No lambda sweep,
 no ru re-touch, no new generator levers. Recipe, preset, seed, probe all held.
 
-- [ ] P6a regenerate el/uk/bg/mk/he v2 with `--train-donor-side all` into
+- [x] P6a regenerate el/uk/bg/mk/he v2 with `--train-donor-side all` into
       cache_<code>_v2full; assert each holdout.npz is BIT-IDENTICAL to the P4
       cache_<code>_v2/holdout.npz (the holdout side is independent of the flag,
       so P4 vs P6 is an exactly paired comparison on the same 10,000 rows)
-- [ ] P6b retrain five ch80 models, Phase-O/P recipe VERBATIM, detached
+- [x] P6b retrain five ch80 models, Phase-O/P recipe VERBATIM, detached
       --workers 0, 4-5 concurrent
-- [ ] P6c re-run each script's battery on the unchanged holdout: fp32 + fp16w
+- [x] P6c re-run each script's battery on the unchanged holdout: fp32 + fp16w
       at the adopted preset, permuted-geometry falsification (seed 4242), and
       the ch192-EN / ch80-EN zero-shot controls; paired McNemar P4 vs P6
-- [ ] P6d export fp32 + fp16w, parity gates (watch he's --parity-tol 2e-3),
+- [x] P6d export fp32 + fp16w, parity gates (watch he's --parity-tol 2e-3),
       golden fixtures at the adopted preset, sha256; supersede the P4 artifacts
       in the registry, keep every generation tiered
-- [ ] P6e docs: PHASE_P.md §P6, MODELS_TABLE, RESULTS one-liner, pm.md; push
+- [x] P6e docs: PHASE_P.md §P6, MODELS_TABLE, RESULTS one-liner, pm.md; push
 
 Caveat to carry, stated up front: `--train-donor-side all` puts the holdout's
 donor half INSIDE the training pool, so the P6 holdout is no longer
@@ -1506,3 +1506,44 @@ donors were seen". On ru, where both footings were read on a REAL probe, the
 same change is worth +0.86 (p 0.0023) — that is the only calibrated bound on
 the honest part of whatever the five holdouts show, and it is the number the
 five-script table must be read against.
+
+### PHASE P6 CLOSE (2026-08-19)
+
+Holdout invariance asserted first: `--train-donor-side` cannot reach the holdout
+split, and all five cache_<code>_v2full/holdout.npz came out BIT-IDENTICAL to
+the P4 caches. So the whole comparison is paired on the same 10,000 rows, and
+re-decoding the P4 models reproduced 90.69 / 87.97 / 82.26 / 89.02 / 77.00 and
+both EN controls to the digit.
+
+  script   P4 (90/10) -> P6 (full pool)   delta (exact McNemar)
+  el            90.69 -> 90.78              +0.09  p 0.70
+  uk            87.97 -> 87.67              -0.30  p 0.23
+  bg            82.26 -> 82.52              +0.26  p 0.36
+  mk            89.02 -> 88.68              -0.34  p 0.13
+  he            77.00 -> 76.86              -0.14  p 0.64
+  pooled, 50,000 paired rows                -0.086 p 0.443
+
+A null. And an informative one: the P6 arm has 11% more donors AND has lost the
+holdout's donor-disjointness (the reserved half is inside the training pool now),
+so both confounds push up, and it still reads flat. The change is worth +0.86
+real top-1 on ru (p 0.0023). Third independent demonstration — after capacity and
+lambda in phase o — that this probe does not rank what real swipes rank.
+
+Shipped anyway, and the reason is stated as transfer rather than measurement:
+ru's real probe measured this exact flag on this exact generator/donor
+bank/architecture/recipe, and the holdouts add only that the change costs nothing
+(neither stratum moves). New bytes `{el,uk,bg,mk,he}_synth_v2full_ch80*`; the v2
+and v1 generations stay in the registry.
+
+he's parity flag did NOT recur: fp32 sliced 4.04e-04 at the default 1e-3 tol,
+inside the 0.8e-4..7.6e-4 envelope, argmax 100/100. The flag stays on the P4
+bytes (that exceedance was real) and does not carry to the v2full bytes. All
+five exports 100/100 argmax at default tol; fp16w costs <= 0.02 t1 and is
+positive on four of five.
+
+Not touched, per the scope fence: lambda, ru, generator levers, fix D.
+
+NEXT (app side, NOT this agent): if any of the five is ever wired, use
+`*_synth_v2full_ch80*`, not `*_synth_v2_ch80*`. The app-repo copy of
+ctc-architecture-and-multiscript-guide.md still lacks BOTH the v2 and the v2full
+sections; the ML mirror has both.
