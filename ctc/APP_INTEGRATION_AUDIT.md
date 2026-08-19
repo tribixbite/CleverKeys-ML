@@ -776,3 +776,144 @@ disk, not copied from a doc. Every accuracy figure was checked against `MODELS_T
 rows rather than against the app's own citation of them — which is how the `sw2345`
 misattribution surfaced, since the app's prose was internally plausible and only the row
 lookup disambiguated it.
+
+---
+
+## 5. RE-VERIFICATION at app `9a6ffdd2` (2026-08-18)
+
+**Re-audited**: `/home/will/git/swype/CleverKeys` @ **`9a6ffdd2`** (`feat(ctc): serve it/pt/sv
+on CTC`), pulled 2026-08-18. Tree read-only for the re-check; the only app write in this
+session was the new `docs/specs/ctc-architecture-and-multiscript-guide.md`, committed
+separately with the user's explicit authorisation.
+
+Between `a474ddf9` and `9a6ffdd2` the app landed the **neural swipe engine removal**
+(`54b3bd59` plan, then `a7d03bc8`, `6f9b56fa`, `64f401d2`, `018d94f7`, `eb430fa0`, `6e982d56`,
+`83220634`, `d32b6c25`, `f4c981a4`) and then `9a6ffdd2`, which adds `it`/`pt`/`sv`. Every line
+number in §1–§3 above is stale; everything below was re-located by grep.
+
+**Score: of 23 findings, 12 persist unchanged, 5 are partially addressed, 1 REGRESSED, 0 are
+fully closed.** Three new findings the original audit could not have seen.
+
+### 5.0 Ship state at the new head — unchanged where it matters
+
+| item | value |
+|---|---|
+| `src/main/assets/models/ctc_swipe_encoder.onnx` | sha256 `84718e6e…e88e5`, 3,052,318 B — **identical** to `a474ddf9` |
+| `ctc_golden.json` (both copies, byte-identical) | sha256 `2a449c4f…7559c`, 140,462 B, preset `tunedV2` |
+| `CtcLanguageSupport.SUPPORTED` | `en`→EN_JSON; `fr, de, es, it, pt, sv`→CKDT_BIN. `PROVISIONAL = {it, pt, sv}`, `NEEDS_VALIDATION = ∅` |
+| **`Defaults.SWIPE_ENGINE_MODE`** | **`"ctc"`** (`Config.kt:300`) — was `"neural"`. **CTC is now every user's default.** |
+| `Mode.fromPref` | `"geometric" → GEOMETRIC; else → CTC` — legacy `neural`/`hybrid` prefs migrate INTO ctc |
+| `CtcScoringParams.tunedRuCkdt` | unchanged: γ 1.05, λ `LAMBDA_CKDT_SCALE` = 2.0, β 0.2, γp 0.3734, βp 0.9882; still unreachable (`presetFor` branches on `LexiconSource`, `ru` ∉ `SUPPORTED`) |
+| Russian dictionary in the APK | **none.** `assets/dictionaries/` is Latin only (`en_enhanced.json` + `{en,de,es,fr,it,pt,sv}_enhanced.bin`). `ru` exists only as the importable langpack `scripts/dictionaries/langpack-ru.zip` (533,916 B; `dictionary.bin` 2,088,865 B, magic `CKDT` v2, lang `ru`) |
+
+### 5.1 Persistence table
+
+| finding | status | where it is now |
+|---|---|---|
+| **HIGH-1** latched-load kills swipe typing | **PERSISTS — escalated** | latch `CtcEngineAdapter.kt:145-177` byte-identical, log line still claims a disable that does not happen; decode-null path `:667-671` unchanged; dispatch guard `InputCoordinator.kt:690` still only `supportsLayout`; prewarm `:753-755` unguarded; no `isModelPermanentlyUnavailable` anywhere. See §5.2. |
+| **HIGH-2** `sw2345` misattribution | **FIXED in `src/main`**, persists in 4 sites | Router now carries 91.82 / 91.10 (`:24, :68-69, :109`) and the correct euro set. New guard `CoreImeHygieneDriftTest.sourceQuotesTheShippedModelsAccuracyNotItsSupersededPredecessors` (`:601-636`) bans the six figures — **but scans `File("src/main/kotlin")` only** (`:23`). Survivors: `src/test/.../SwipeEngineRouterTest.kt:20`; `docs/eval/2026-08-15-ctc-per-language-lambda.md:101, 112`; `docs/audit/2026-08-17-neural-vs-ctc-parity.md:619-623` (finding 13 still unstruck). |
+| **HIGH-3** dead-code / blocked-on-retrain KDoc | **PERSISTS verbatim**, all four blocks | `CtcSwipeDecoder.kt:6-15, 35-39, 41`; `CtcEmissions.kt:12-16`; `CtcLayout.kt:12`. §2's proposed diffs still apply unchanged. |
+| **HIGH-4** fixture rule's behavioural half never runs | **PERSISTS in full** | 7 workflows, none runs `connectedAndroidTest` or `ew-cli`; `ci.yml:39` / `release.yml:38` are `runPureTests`; `ui-testing.yml` is `adb install` + `dumpsys` greps. `CtcParityTest.kt:38` still hardcodes `MODEL_ASSET_PATH`; preset pin `:148-158` still omits `beamWidth`. No device-only caveat in the spec. |
+| **MEDIUM-1** ORT session leak | PERSISTS | `CtcEngineAdapter.kt:761-763`; `OnnxCtcEmissionModel.close()` (`:100-106`) zero callers; no `shutdownGracefully`. |
+| **MEDIUM-2** settle probes on the decode thread | PERSISTS | `CtcEngineAdapter.kt:425, 429, 467` all still `settle = true`. Every `LOCAL_BUILD=true` latency measurement is inflated ~720 ms. |
+| **MEDIUM-3** unbannered execution brief | PERSISTS | `docs/audit/remediation-plans/ctc-integration-execution-brief.md` — still no banner, `:86` still `Q1 model choice: SUPERSEDED-PENDING`, `:21` still cites `resbn80g_s1234.onnx`, `:74` still "Default engine stays `neural`". Still the highest-value doc fix. |
+| **MEDIUM-4** 11.0 MB superseded bench ONNX | PERSISTS | four files in `src/androidTest/assets/ctc_bench/`; `CtcOnnxLatencyBenchmarkTest.kt:45-48` still "the ship candidate"; `:351` still `fullDecodePath_ch128_beam100_tunedV2` with E1 constants; `CtcBenchFixture.kt:9` still cites `a18ea58c…`. |
+| **MEDIUM-5** settings scope text | **HALF FIXED** | `CtcSettingsActivity.kt:89-91` now says "Latin layouts" — QWERTY gone. Still hardcoded English, no language list, `:101`'s "100 is the validated default" still decoupled from `Defaults.CTC_BEAM_WIDTH`. The `Config.kt` / `SettingsDefaults.kt` QWERTY phrasings are gone. |
+| **MEDIUM-6** import validation | PERSISTS, **inverted** | `SettingsValidation.kt` has no `ctc_beam_width` (`else -> true`, `:278`) and no `swipe_engine_mode` (`:355`), while `:97` still validates `neural_beam_width` — a pref of the deleted engine. |
+| **MEDIUM-7** no unsupported-language feedback | **REGRESSED — from mis-gated to ABSENT** | `ui/settings/sections/NeuralPredictionSection.kt` was deleted (`eb430fa0`). Its replacement `SwipeTypingSection.kt` (103 lines) has the engine dropdown (`:47-62`) and **no warning card of any kind**. Its own KDoc `:41-42` says "en/fr/de/es" — already stale. |
+| **MEDIUM-8** doc/UI scope | **QWERTY FIXED, language set now stale everywhere** | `9a6ffdd2` made 7 languages true while `README.md:168, 243`, `docs/ARCHITECTURE_MASTER.md:226`, `docs/wiki/layouts/multi-language.md:46`, `docs/wiki/specs/typing/swipe-typing-spec.md:41, 61`, `docs/wiki/typing/swipe-typing.md:80`, `SwipeTypingSection.kt:41-42`, `memory/todo.md:260-262` and **all 22 `swipe_engine_mode_desc` strings** still say four. Two original sub-rows also survive: `ARCHITECTURE_MASTER.md:245` (lexicon = `en_enhanced.json` only, omits the CKDT `.bin` path) and `:237` (λ as a single 4.0; it is per-scale). |
+| **MEDIUM-9** stale `memory/todo.md` | **1 of 3 FIXED** | `:178-179` "the CTC engines are demo-only" PERSISTS. `:263-266` P2 doc item PERSISTS (both halves done). **The Russian section `:223-259` is FIXED** — it now leads with "all Cyrillic numbers are val-tier permanently" and "no sealed Cyrillic split has ever existed", which is exactly the framing §2's MEDIUM-9 asked for. New staleness `:260-262` (it/pt/sv described as dead). `docs/eval/2026-08-15-ctc-per-language-lambda.md:78` still lists "(and ru per the prior sweep)" with no footing caveat. |
+| **LOW-1** `MappedLayout.padded` unread | PERSISTS | declared `:184`, built `:299-301`, zero readers. |
+| **LOW-2** phantom `weight` term in the KDoc formula | PERSISTS | `CtcScoringParams.kt:12` vs `CtcBeamDecoder.kt:163`. |
+| **LOW-3** `normalizeRawX/Y` trap | PERSISTS | `CtcFeaturizer.kt:163, 171-172`, no `@Deprecated`. |
+| **LOW-4** bare `globalConfig()` on the decode path | PERSISTS | guarded at `:154-158`, bare at `:676`. |
+| **LOW-5** null-keyboard asymmetry | **PARTLY MOOT** | the `Mode.NEURAL` contrast is gone with neural. The overload divergence remains (`SwipeEngineRouter.kt:100` returns `Engine.CTC` for a null layout; the string overload returns `GEOMETRIC`), pinned only for the string form. Downstream both paths now `?: return` symmetrically, so nothing is lost relative to any alternative. |
+| **LOW-6** dev absolute path in the fixture | PERSISTS | both copies still carry `/home/will/ctc-train/ckpt/v2kd-fresh-w1/kd_fp16w.onnx`. |
+| **LOW-7** no proguard keep for `swipe.ctc.**` | PERSISTS | `minifyEnabled false` both types, so still inert. |
+| **LOW-8** `"futo"` settings search keyword | PERSISTS | `SettingsActivity.kt:568`. |
+| **LOW-9** no ЙЦУКЕН `supportsLayout` negative test | PERSISTS | nothing in `src/test` or `src/androidTest` feeds a Cyrillic `KeyboardData` to `CtcEngineAdapter.supportsLayout`. See NEW-2 — there is now a *real* mis-tagged layout for it to catch. |
+| **LOW-10** gate ordering enforced by source scan | PERSISTS | `CoreImeHygieneDriftTest.kt:208, 251, 286-294, 342`. |
+
+### 5.2 HIGH-1 — why the refactor made it worse, and the re-anchored diff
+
+The mechanism is unchanged. What changed is who it hits and where they land:
+
+1. **`Defaults.SWIPE_ENGINE_MODE` went `"neural"` → `"ctc"`** (`Config.kt:300`). At audit time a
+   latched session hurt only opt-in users; now it hurts everyone on defaults.
+2. **`Mode.fromPref` maps every non-`"geometric"` value — including the removed `"neural"` and
+   `"hybrid"` — to `Mode.CTC`.** Users who had explicitly chosen neural are migrated into the
+   affected mode.
+3. **Neural is deleted**, so there is no second ML engine to fall back to. Three of the four
+   gates now hand off to geometric (language `InputCoordinator.kt:666-678`, layout `:690-696`,
+   router `SwipeEngineRouter.kt:115`); the model/lexicon gate is the **only remaining way a
+   swipe reaches no engine at all**, and MEDIUM-7's regression means nothing tells the user.
+
+The adapter half of §2's proposed diff applies **verbatim** (the `modelLoadAttempts`
+declaration, the `catch` block and the log expression are unchanged text). The two
+`InputCoordinator` hunks need re-anchoring only — `:686-696` for the dispatch guard (whose
+comment lost its neural sibling) and `:753-755` for the prewarm, where the `val ctc` binding the
+audit introduced **already exists**, shrinking that hunk to one line. Both re-anchored diffs are
+written out in full in
+`ctc-architecture-and-multiscript-guide.md` §6.1 (mirrored into the app at
+`docs/specs/ctc-architecture-and-multiscript-guide.md`).
+
+**A constraint §2 could not know about**: `CoreImeHygieneDriftTest` (`:208, 251-263, 286-294`)
+source-scans these blocks for the literal substrings `CtcEngineAdapter.supportsLanguage(`,
+`supportsLayout(` and `performGeometricSwipeTyping` and asserts their relative index order. The
+re-anchored diffs preserve all three and their ordering; any further reshaping must too.
+
+### 5.3 New findings
+
+**NEW-1 — `docs/specs/ctc-swipe-engine.md`, the CTC engine's own spec, was not touched by a
+single removal commit.** `git log a7d03bc8~1..HEAD -- docs/specs/ctc-swipe-engine.md` is empty,
+while the *wiki* copy got a proper banner. The spec for the now-**default** engine still reads:
+title "(`ctc` mode — WIRED, **opt-in**)"; `:2-3` "default stays `neural`"; `:10`
+"(QWERTY→CTC, other layouts→geometric hedge)"; `:41-44` a four-row routing table with
+`neural (default)` and `hybrid` rows and a `ctc`-row cell reading "NEURAL (M1 fallthrough)";
+`:52` "`Engine.NEURAL` takes"; `:34-36` the router gate as `Config.isSwipeTypingSupportedForLayout`
+(now referenced only in dead comments); `:168-169` missing-letter layouts as "unexpected behind
+the router's QWERTY gate"; `:243` an `it, pt, sv | none | none` row. This is a strictly worse
+MEDIUM-8 than the audit described, in the document `CLAUDE.md`'s spec-driven workflow points a
+maintainer at first. **Belongs beside MEDIUM-3 in the anti-confusion set.**
+
+**NEW-2 — `src/main/layouts/grek_qwerty.xml` declares `script="latin"`.** Its sibling
+`srcs/layouts/grek_qwerty.xml` was corrected to `script="greek"` in `6af11da7` ("closes
+neural-swipe allowlist leak") — but `srcs/layouts/` is **not referenced by any build task**;
+`copyLayoutDefinitions` copies `src/main/layouts/*.xml`. The fix landed in the tree the build
+does not read, so the shipped Greek layout passes the router's script gate and is stopped only
+by the alphabet gate. No user-visible harm (geometric either way), but gate 1 of 3 is being
+relied on and one of the 86 shipped layouts defeats it. Measured census of
+`src/main/layouts/` at this head, which also disposes of the "37 undeclared layouts" premise:
+
+| bucket | count |
+|---|---|
+| `script="latin"` and a–z-complete → CTC | 46 |
+| `script="latin"` but a–z-incomplete (router passes, alphabet gate stops) | 3 — `grek_qwerty` (all 26 missing), `latn_qwerty_az` (`w`), `latn_qwerty_tly` (`w`) |
+| non-Latin declared, 15 distinct scripts | 35 |
+| **no `script` attribute at all** | **2** — `numeric.xml`, `pin.xml`, neither a letter layout |
+
+**NEW-3 — the new sw2345 drift guard has a blind spot a live offender already occupies.**
+`CoreImeHygieneDriftTest.kt:23` walks `File("src/main/kotlin")`; `SwipeEngineRouterTest.kt:20`
+quotes 89.87 / 88.98 and sits outside it. The guard was written *because* a KDoc rewrite
+reintroduced those numbers, and it cannot catch the copy that is there today.
+
+**NEW-4 (minor)** — `InputCoordinator.kt:525` still documents `beginSwipeCapture`'s `engine`
+parameter as `ENGINE_NEURAL`/`ENGINE_GEOMETRIC`; both call sites now pass `ENGINE_CTC` (`:700`)
+or `ENGINE_GEOMETRIC`. `SwipeMLData.ENGINE_NEURAL` is correctly retained for reading historical
+exports.
+
+### 5.4 Revised ship-order
+
+1. **HIGH-1** — now a default-path bug on a keyboard with no second ML engine. Unchanged as #1,
+   more urgent than when written.
+2. **MEDIUM-3 + NEW-1** — banner the execution brief *and* rewrite `ctc-swipe-engine.md`. The
+   two documents most likely to mislead the next reader, and the spec is worse than the brief
+   because the workflow points at it.
+3. **HIGH-3** — delete the four dead-code KDoc blocks.
+4. **HIGH-2 + NEW-3** — the four surviving `sw2345` citations, and widen the drift guard past
+   `src/main/kotlin`.
+5. **NEW-2** — the `grek_qwerty` attribute, plus the layout-census test and LOW-9's negative
+   test.
+6. **MEDIUM-8 + MEDIUM-5 + MEDIUM-7** — the language set is stale in 8 doc sites, 22 strings and
+   one settings KDoc, and there is now *no* surface that tells a user their language is unserved.
+7. **MEDIUM-2**, then **HIGH-4** — as before.
