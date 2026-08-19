@@ -346,7 +346,229 @@ anything inflates the ru model's holdout column and therefore *understates* the
 sign reversal. And the script-trained side is the *synthesis*-trained ru model,
 not the real-data one; a real-data model would win both columns comfortably.
 
-*(§2.2 onward: per-script results, added as each script completes.)*
+### 2.1b The calibration grid, completed — and the warm-start arm
+
+Two more models were trained/measured to fill the grid out. `phaseO-ru-initH` is
+the ru synthesis recipe **warm-started from the English ch80 `phaseH-p50`**
+(`--init-from`, weights only, same cache, same seed, same 94 k schedule — the
+only difference is the initialisation). It is the one *recipe* change Phase O can
+validate against real data, and it is the obvious thing to try once you know the
+English model transfers.
+
+| model (all ch 80 except where noted) | ru synthesis holdout | ru **REAL** | paired vs cold-start ru-synth on REAL |
+|---|---|---|---|
+| `ru_synth_ch80` — cold start | 81.10 | **77.41** | — |
+| `phaseO-ru-initH` — warm start from English | **81.98** | 77.26 | **−0.14, p = 0.69 (a wash)** |
+| `phaseH-p50` — English ch80, zero-shot | 76.24 | 75.79 | −1.62, p = 1.4e-4 |
+| `phaseM_kd_fresh_w1` — English **ch192**, zero-shot | **83.38** | 76.32 | −1.09, p = 0.0099 |
+
+* **Warm-starting from English is worth nothing on real data** (−0.14, p = 0.69)
+  while looking like a +0.88 gain on the holdout. Registered as tried and
+  refuted; do not warm-start.
+* **The holdout over-credits capacity, and that is what flips the ranking.**
+  English ch192 beats English ch80 by **+7.14 on the holdout** and by **+0.53
+  (n.s.) on real swipes**. Every other pairwise sign is preserved between the two
+  probes; only the capacity axis inverts, and it inverts hard enough to reorder
+  the top of the table. Real ordering: ru-synth > initH > ch192-en > ch80-en.
+  Holdout ordering: ch192-en > initH > ru-synth > ch80-en.
+
+### 2.1c The λ sweep was run as registered — and the sweep itself is invalid
+
+O2(e) registered a per-script λ sweep on a synthesis-val half (the PHASE_J §6.9
+pattern). It was run for all five scripts, tune half `0:5000`, confirm half
+`5000:10000`. **All five picked λ = 1.1, monotonically, with λ = 2.0 several
+points worse** — flatly contradicting PHASE_J §6.9's finding that a CKDT
+`255 − rank` lexicon wants λ = 2.0.
+
+The control settles it. Same ru model, same trie, same code, two probes:
+
+| λ | ru **synthesis holdout** (confirm half) | ru **REAL** (confirm half) |
+|---|---|---|
+| 1.1 | **85.98** | 76.72 |
+| 2.0 | 81.28 | **77.92** |
+| | holdout says 1.1, by **+4.70** | real says 2.0, by **+1.20** |
+
+**The holdout's λ preference is inverted relative to real data**, and the
+mechanism is plain: on the holdout the emissions are in-distribution and strong,
+so a frequency prior only adds noise; on real swipes the emissions are degraded
+and the prior carries real information. PHASE_I_DATA §6 saw the same shape from
+the other side (λ worth +7.6 t1 to the synth-trained arm on real data vs +0.9 to
+the real-trained arm).
+
+**Adopted: λ = 2.0 for every Phase-O script**, i.e. the app's existing CKDT-scale
+preset `1.05, 2.0, 0.2, 0.3734, 0.9882`, because it is the only λ any *real* data
+has ever endorsed and every Phase-O lexicon is on the same CKDT scale. The
+per-script sweeps are reported and discarded. All golden fixtures are frozen at
+λ = 2.0.
+
+### 2.2 The five new scripts — results
+
+Recipe, identical for all five and **verbatim from `phaseIB-ru-synth`'s stored
+args**: `resbn:80` dil 1,2,4,8, embed_hid 96, feat_v1, 94,000 steps, batch 256,
+lr 3e-3, wd 0.01, warmup 1,000, coupled affine sampler, **no layout-alt** (single
+geometry), greedy checkpoint selection (`--beam-val-rows 0`), patience 40,
+seed 1234, single seed. Only `--workers` differs (0 vs 8, per the ops protocol),
+which changes the augmentation RNG stream but not its distribution.
+
+Probe: each script's own 10,000-row synthesis holdout, disjoint donor half,
+independent word draw, decoded at the adopted preset (λ = 2.0) through the
+exported fp32 graph. **Read every row of this table through §2.1: these are
+generator numbers, and the generator over-credits capacity and misranks models.**
+
+| script | K | greedy | **in-dict t1** | t3 | t5 | ≤3 t1 | 4+ t1 | ≥70 gate |
+|---|---|---|---|---|---|---|---|---|
+| **el** Greek | 25 | 35.87 | **82.54** | 92.97 | 94.93 | 58.44 | 83.14 | pass |
+| **uk** Ukrainian | 31 | 31.98 | **79.27** | 91.91 | 94.05 | 62.30 | 79.93 | pass |
+| **bg** Bulgarian | 30 | 26.86 | **71.80** | 88.56 | 92.18 | 49.09 | 72.57 | pass |
+| **mk** Macedonian | 31 | 29.39 | **71.69** | 88.33 | 91.80 | 46.15 | 72.65 | pass |
+| **he** Hebrew | 27 | 37.91 | **65.36** | 85.10 | 90.13 | 50.31 | 66.39 | **FAIL** (70.28 at λ 1.1) |
+| *(ru, for scale)* | 31 | 29.73 | *81.10* | *92.16* | *94.08* | *62.31* | *81.74* | *pass* |
+
+**Hebrew is the one gate failure**, and it fails only at the adopted preset — at
+the holdout-optimal λ = 1.1 it reads 70.28/71.12 and would pass. Since §2.1c
+established that the holdout's λ choice is not to be trusted, the honest
+statement is that **he sits at or just below the registered band and is the
+weakest of the five**; its artifacts are produced and registered, flagged. Its
+≤3 stratum (50.31) is the likely cause: Hebrew is an abjad, its words are short,
+and short words are where a 27-key board with a 49,915-word lexicon has least
+evidence to work with.
+
+### 2.3 Every script against its controls — the comparison that is actually meaningful
+
+Same probe, same preset, three models per script: the script's own model, the
+shipped English ch192 zero-shot, and the capacity-matched English ch80 zero-shot.
+
+| script | script model | ch192 EN zero-shot | Δ vs ch192 | **ch80 EN zero-shot** | **Δ vs ch80 (matched)** | greedy: script / ch192 / ch80 |
+|---|---|---|---|---|---|---|
+| el | 82.54 | 83.10 | −0.56 | 76.56 | **+5.98** | 35.87 / 16.60 / 9.71 |
+| uk | 79.27 | 81.41 | −2.14 | 74.20 | **+5.07** | 31.98 / 15.24 / 7.77 |
+| bg | 71.80 | 74.09 | −2.29 | 66.53 | **+5.27** | 26.86 / 12.97 / 7.28 |
+| mk | 71.69 | 72.67 | −0.98 | 65.19 | **+6.50** | 29.39 / 13.70 / 6.90 |
+| he | 65.36 | 69.11 | −3.75 | 58.04 | **+7.32** | 37.91 / 26.19 / 16.36 |
+| ru (calibrated) | 81.10 | 83.38 | −2.28 | 76.24 | **+4.86** | 29.73 / 14.27 / 7.07 |
+
+The pattern is the same in all six scripts, ru included, and ru is the one where
+we know what it means on real data:
+
+* **against the capacity-matched control the script model wins everywhere**, by
+  +4.9 to +7.3 on the holdout; on real Russian that same comparison is **+1.62,
+  p = 1.4e-4** — same sign, magnitude deflated ~3×;
+* **against the 3×-capacity ship model the script model loses everywhere**, by
+  −0.6 to −3.8 on the holdout; on real Russian that same comparison is **+1.09,
+  p = 0.0099** — *opposite* sign, because the holdout over-credits capacity
+  (§2.1b);
+* **greedy is 2–4× higher for every script model than for either English
+  control.** The emissions really are script-specific; the lexicon beam is what
+  lets English keep up.
+
+Every el/uk/bg/mk/he number above sits inside the band the ru calibration would
+predict, so nothing here is anomalous — but nothing here is a measurement of
+Greek, Ukrainian, Bulgarian, Macedonian or Hebrew swipe accuracy either. **What
+these five rows license is exactly one claim: each script's model behaves, on its
+own generator, the way the Russian model behaved on the Russian generator — and
+the Russian model turned out to be worth +1.6 real points over the
+capacity-matched English alternative.**
+
+### 2.4 Falsification: the geometry is load-bearing, decisively
+
+`eval_script.py --permute-layout 4242` shuffles the key centres so slot *c* gets
+some other key's position, with no key left in place, and decodes again. If a
+model were reading slot indices rather than geometry, or if a layout json were
+merely decorative, this would barely move.
+
+| probe | in-dict t1 | greedy |
+|---|---|---|
+| ru model, **real** Yandex traces, true geometry | 77.41 | 37.13 |
+| ru model, **real** Yandex traces, permuted geometry | **0.00** | **0.00** |
+| el / uk / bg / mk / he, own holdout, permuted geometry | **0.00** each | **0.00** each |
+
+Zero, in every case, on every script. The endpoint-proximity control of §1.4 says
+the *traces* are on the claimed frame; this says the *model* cannot function
+without it. Together they close O2(a): a Phase-O layout json is a testable claim
+and it passes.
+
+### 2.5 Export gates
+
+`export_onnx.py` with `--parity-features cache_<code>/val.npz` — the assertion
+runs on the **sliced contract view** with **real traces on the real layout**, and
+argmax agreement is the binding gate. Then `quantize_onnx.py --mode fp16w`.
+
+| script | BN fold (sliced) | fp32 vs torch (sliced) | argmax | fp16w vs fp32 (sliced) | argmax | fp16w decode cost |
+|---|---|---|---|---|---|---|
+| el | 1.35e-04 | 1.54e-04 | **100/100** | 6.86e-02 | 99/100 | 82.54 → 82.55 (**+0.01**) |
+| uk | 2.14e-04 | 1.26e-04 | **100/100** | 1.78e-01 | 95/100 | 79.27 → 79.27 (**0.00**) |
+| bg | 6.03e-04 | 5.11e-04 | **100/100** | 2.85e-02 | 97/100 | 71.80 → 71.81 (**+0.01**) |
+| mk | 3.72e-04 | 2.62e-04 | **100/100** | 5.65e-02 | 98/100 | 71.69 → 71.71 (**+0.02**) |
+| he | 5.84e-04 | 2.10e-04 | **100/100** | 2.19e-04\* | 99/100 | 65.36 → 65.36 (**0.00**) |
+
+\* he's fp16w residue printed 8.39e-02; the 2.10e-04 column is its fp32 probe.
+
+Every fp32 export clears the 1e-3 tolerance with **100/100 argmax**. The fp16w
+residues are large (2.9e-2 … 1.8e-1) and 95–99/100 on argmax — **disclosed, not
+hidden**, exactly as the ru export disclosed 1.16e-01 / 98-100. Note also that
+`quantize_onnx.parity_vs_source` probes with **white noise**, which PHASE_J §5.2
+established is not a calibrated stand-in in either direction. The binding
+evidence is therefore the decode, and the decode is free: **on 10,000-row
+holdouts the fp16w bytes move top-1 by at most 0.02 points on any script**, and
+uk and he move it by exactly zero.
+
+### 2.6 Artifacts
+
+`ctc/artifacts/`, all five at the standard 1,142,727-byte resbn80 graph (the
+alphabet is data, not architecture — the same graph size ru, and every other
+resbn80 in the campaign, produces):
+
+| file | bytes | sha256 |
+|---|---|---|
+| `el_synth_ch80.onnx` | 1,142,727 | `857f8b7c710ec4ef3615b83eb9382a6355794ad1157c811be43709f2ddb23417` |
+| `el_synth_ch80_fp16w.onnx` | 589,406 | `c8bff5d9cdf16428f99010d8b2414d5e27556339583760278fa3afb300520580` |
+| `el_synth_ch80_fp16w_golden.json` | 144,593 | `9321eeda90a3d0ada68cf1720c8fedcf6154a11f3ddf36d0b961b0d8b0f38fa5` |
+| `uk_synth_ch80.onnx` | 1,142,727 | `c466de5c4ba2a83728249db1e37bb64f4f9a6a27f7b7de851cf158684a28e201` |
+| `uk_synth_ch80_fp16w.onnx` | 589,406 | `02246bbdd95682c45f432fbf7f8e51b51ad590a76f4a2091fe1bd65d3a282511` |
+| `uk_synth_ch80_fp16w_golden.json` | 156,073 | `c5e2a3d37e9e90db80b9bfd8d4dd0e085f81faff609c85bae1773e143ac3fad0` |
+| `bg_synth_ch80.onnx` | 1,142,727 | `f6fd179e7b634d8a04fb9c86de4380546a93940dc2277c9ab735e23b57440e40` |
+| `bg_synth_ch80_fp16w.onnx` | 589,406 | `947dd44f8c122cfdb5d1ddeb270b94e938afddddddc4868f3b0706e29ec2ddd0` |
+| `bg_synth_ch80_fp16w_golden.json` | 155,130 | `53901d76a4447aa055f11e712d586c51c955e61743821e04b5d6165d8ca57056` |
+| `mk_synth_ch80.onnx` | 1,142,727 | `6f14cf78ac7fc473dc4178d8432f428cc6cc281622f8daefc27778bd770a0fd3` |
+| `mk_synth_ch80_fp16w.onnx` | 589,406 | `be98fcc32ef9e9182915a0504e22b0390dce019ff83603dbc6caa2ae054eb682` |
+| `mk_synth_ch80_fp16w_golden.json` | 160,894 | `ed852963cd018e3133281a29a3182f3c4c1fc9ae8380503fee471efee8b29374` |
+| `he_synth_ch80.onnx` | 1,142,727 | `37a0518b466265c5a429879648674b186ee77cd6a2a095635a153cd5458ef149` |
+| `he_synth_ch80_fp16w.onnx` | 589,406 | `384608660170cdfe7b77c730a255ad046041ba9ddee7e934668ee539a8cef202` |
+| `he_synth_ch80_fp16w_golden.json` | 140,235 | `7950e656b1ac3767582416ed3d231f39202f7a71f34a5e20faf8ee9f463cb7b7` |
+
+Every golden fixture is frozen at **γ 1.05 / λ 2.0 / β 0.2 / 0.3734 / 0.9882**
+(§2.1c) on the script's real lexicon weights, with 10 cases each (5 pure-featurizer
+branch probes + 1 word-path featurizer case + 4 model-backed beam cases).
+
+`phaseO-ru-initH` is **not** promoted to `artifacts/` — it is a refuted arm
+(§2.1b) and lives only at `~/ctc-train/ckpt/phaseO-ru-initH/`.
+
+### 2.7 Evidence tier — say it exactly this way
+
+> Greek, Ukrainian, Bulgarian, Macedonian and Hebrew CTC are
+> **synthesis-trained, synthesis-holdout-only, single-seed, and calibrated
+> against Russian rather than measured on their own script.**
+
+Unpacked, and none of it is negotiable:
+
+* **No real swipe data exists in any of these scripts.** `DATASET_SCOUT.md` §4.4
+  searched and came up empty for Arabic, Hebrew, Greek, Thai, Hangul, Devanagari,
+  Japanese and Chinese; Yandex-ru is the only real non-Latin corpus in existence
+  under any terms, and it is eval-only.
+* **The only probe available is one this phase proved unreliable** — it inverts
+  the capacity axis (§2.1b), inverts the λ choice (§2.1c), and carries a length
+  mix 12× off real usage (§2.1). Its numbers are reported because suppressing
+  them would be worse, not because they measure accuracy.
+* **Single seed (1234).** Every other campaign bar is a seed-mean bar; these are
+  not.
+* **Four of the five lexicons are not the app's.** uk/bg/mk/he run on wordfreq
+  top-N lists put on the app's rank formula, with none of `build_wordlist.py`'s
+  spell-check oracles or allow/block lists. el is the app's own pack, repaired.
+* **No test split, ever.** There is no sealed Cyrillic/Greek/Hebrew test set and
+  none can be created. These models can never be called "test-validated".
+* **No on-device measurement.** No latency, no memory, no instrumented run. The
+  graphs are byte-identical in size to the ru model, which is half the ship
+  model, so the expectation is favourable — expectation is not measurement.
 
 ---
 
