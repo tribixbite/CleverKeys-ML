@@ -226,15 +226,33 @@ def main() -> int:
                     help="final-read rows (disjoint draw AND disjoint donor half)")
     ap.add_argument("--donors", default="train_t3futo.npz,train_t3hws.npz",
                     help="comma-separated cache npz names for the donor pool")
-    ap.add_argument("--cache", default="", help="cache dir name (default cache_<code>)")
+    ap.add_argument("--cache", default="", help="cache dir name (default: "
+                    "cache_<code>, except ru -> cache_ru_phaseO because "
+                    "cache_ru already holds Phase I-B's real-data caches)")
     ap.add_argument("--splits", default="train,val,holdout")
+    ap.add_argument("--force", action="store_true",
+                    help="allow overwriting existing split files. Off by "
+                         "default: the first Phase-O ru run silently clobbered "
+                         "Phase I-B's cache_ru/val.npz (the real-data selection "
+                         "val) before this guard existed")
     ap.add_argument("--validate-rows", type=int, default=2000)
     args = ap.parse_args()
 
     spec = SR.get(args.code)
     cache_en = resolve(args.workdir, Path("cache"))
-    cache = resolve(args.workdir, Path(args.cache or f"cache_{spec.code}"))
+    default_cache = "cache_ru_phaseO" if spec.code == "ru" else f"cache_{spec.code}"
+    cache = resolve(args.workdir, Path(args.cache or default_cache))
     cache.mkdir(parents=True, exist_ok=True)
+    want_files = {"train": "train_synth.npz", "val": "val.npz",
+                  "holdout": "holdout.npz"}
+    if not args.force:
+        clash = [want_files[s] for s in
+                 [x.strip() for x in args.splits.split(",") if x.strip()]
+                 if (cache / want_files[s]).exists()]
+        if clash:
+            raise SystemExit(
+                f"{cache} already holds {clash} — refusing to overwrite. Pass "
+                f"--force if that is really what you want, or --cache <dir>.")
 
     letters, centers = load_layout(HERE / spec.layout_json)
     if "".join(letters) != spec.letters:
