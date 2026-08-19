@@ -351,6 +351,91 @@ def _pick_donor_geo(cand: np.ndarray, bank: DonorBank,
     return best
 
 
+class _Draw:
+    """Donor-draw state: fix C's reservoir and fix D's contributor block."""
+
+    __slots__ = ("bank", "opts", "cur_group", "block_left")
+
+    def __init__(self, bank: DonorBank, opts: GenOpts) -> None:
+        self.bank, self.opts = bank, opts
+        self.cur_group, self.block_left = -1, 0
+
+    def donor(self, rng: np.random.Generator, S: int, dst_seg: np.ndarray,
+              st: Dict[str, object]) -> int:
+        """Draw one donor row for a target of *S* vertices.
+
+        The v1 branch is a single ``rng.integers`` on the count-matched pool, in
+        exactly that position of the stream, so ``--generator v1`` reproduces the
+        Phase-O byte stream.
+        """
+        pool = self.bank.by_count[S]
+        if self.opts.is_v1:
+            return int(pool[rng.integers(len(pool))])
+        if self.opts.group_block:
+            if self.block_left <= 0:
+                gids = list(self.bank.by_group_count)
+                self.cur_group = gids[int(rng.integers(len(gids)))]
+                self.block_left = int(rng.integers(*GROUP_BLOCK))
+            self.block_left -= 1
+            gpool = self.bank.by_group_count.get(self.cur_group, {}).get(S)
+            if gpool is None or len(gpool) == 0:
+                st["group_fallback"] = int(st["group_fallback"]) + 1
+            else:
+                pool = gpool
+        if self.opts.geo_donor:
+            cand = pool[rng.integers(len(pool), size=min(K_CANDIDATES, len(pool)))]
+            return _pick_donor_geo(cand, self.bank, dst_seg)
+        return int(pool[rng.integers(len(pool))])
+
+
+def transplant(bank: DonorBank, di: int, seq: np.ndarray, dst_seg: np.ndarray,
+               qwerty: np.ndarray, centers: np.ndarray, opts: GenOpts,
+               st: Dict[str, object]) -> Tuple[np.ndarray, float]:
+    """S3–S5 for one row: warp, re-time, band-limit.  ``-> (path [2,64], T_ms)``.
+
+    This is the whole generator mechanism; both the lexicon-draw driver
+    (:func:`synthesize`) and the word-matched driver used by the gate battery
+    (:func:`synthesize_matched`) call it, so the gated mechanism *is* the shipped
+    mechanism rather than a re-implementation of it.
+    """
+    S = len(seq)
+    dseq = bank.seqs[di]
+    # Virtual per-vertex alphabet: id i is vertex i of BOTH polylines, so
+    # warp_path's monotone-DP correspondence, endpoint pins, arc remap and
+    # movement-frame residual transfer run byte-for-byte unchanged and every
+    # Phase-H exactness invariant carries over. Letter identity never enters.
+    src_virtual = qwerty[dseq]                        # [S,2]
+    dst_virtual = centers[seq]                        # [S,2]
+    target = np.arange(S, dtype=np.int64)
+    if opts.retime and S >= 2:
+        warped, jseg = warp_path(bank.feats[di], target, src_virtual,
+                                 dst_virtual, return_assign=True)
+        np.clip(warped, 0.0, 1.0, out=warped)
+        warped = np.clip(retime_segment(warped, bank.feats[di], jseg,
+                                        RETIME_ALPHA), 0.0, 1.0)
+        st["retimed"] = int(st["retimed"]) + 1
+    else:
+        warped = warp_path(bank.feats[di], target, src_virtual, dst_virtual)
+        np.clip(warped, 0.0, 1.0, out=warped)         # the training loop's
+    t_target = 0.0                                    # post-noise clip range
+    if opts.bandwidth and S >= 2:
+        t_donor = float(bank.duration_ms[di])
+        l_src = float(bank.seg_len[di].sum())
+        l_dst = float(dst_seg.sum())
+        if t_donor > 1.0 and l_src > 1e-6 and l_dst > 1e-6:
+            t_target = t_donor * (l_dst / l_src) ** bank.dur_exponent
+            before = warped
+            warped = resample_bandwidth(warped, t_target)
+            if warped is not before:
+                st["band_limited"] = int(st["band_limited"]) + 1
+    return warped, t_target
+
+
+def _blank_stats() -> Dict[str, object]:
+    return dict(drawn=0, no_donor=0, made=0, retimed=0, band_limited=0,
+                group_fallback=0)
+
+
 def synthesize(n_rows: int, rng: np.random.Generator,
                lexicon: Sequence[Tuple[str, float]], letters: str,
                bank: DonorBank, qwerty: np.ndarray, centers: np.ndarray,
@@ -360,7 +445,7 @@ def synthesize(n_rows: int, rng: np.random.Generator,
     """Draw words, transplant donor residuals, re-time, band-limit.
 
     :param draw_weights: fix-A weights aligned to *lexicon*; ``None`` keeps the
-        CKDT ``255 − rank`` weights the lexicon carries.
+        CKDT ``255 - rank`` weights the lexicon carries.
     :returns: ``(features [N,2,64], words, stats, per-row provenance arrays)``.
     """
     idx = {c: i for i, c in enumerate(letters)}
@@ -371,85 +456,76 @@ def synthesize(n_rows: int, rng: np.random.Generator,
     seqs = [collapse(np.array([idx[c] for c in w], np.int64)) for w in words_arr]
     dst_segs = [np.hypot(*np.diff(centers[s].astype(np.float64), axis=0).T)
                 if len(s) >= 2 else np.zeros(0) for s in seqs]
-    st: Dict[str, object] = dict(drawn=0, no_donor=0, made=0, retimed=0,
-                                 band_limited=0, group_fallback=0)
+    st = _blank_stats()
+    draw = _Draw(bank, opts)
     out_feats = np.empty((n_rows, 2, 64), np.float32)
     out_words: List[str] = []
     prov_donor = np.full(n_rows, -1, np.int32)
     prov_group = np.full(n_rows, -1, np.int32)
     prov_dur = np.zeros(n_rows, np.float32)
-    cur_group, block_left = -1, 0
     t0 = time.time()
     while len(out_words) < n_rows:
         k = rng.choice(len(words_arr), p=weights)
-        st["drawn"] += 1
+        st["drawn"] = int(st["drawn"]) + 1
         seq = seqs[k]
-        S = len(seq)
-        pool = bank.by_count.get(S)
+        pool = bank.by_count.get(len(seq))
         if pool is None or len(pool) == 0:
-            st["no_donor"] += 1
+            st["no_donor"] = int(st["no_donor"]) + 1
             continue
-        if opts.is_v1:
-            di = int(pool[rng.integers(len(pool))])
-        else:
-            if opts.group_block:
-                if block_left <= 0:
-                    gids = list(bank.by_group_count)
-                    cur_group = gids[int(rng.integers(len(gids)))]
-                    block_left = int(rng.integers(*GROUP_BLOCK))
-                block_left -= 1
-                gpool = bank.by_group_count.get(cur_group, {}).get(S)
-                if gpool is None or len(gpool) == 0:
-                    st["group_fallback"] += 1
-                else:
-                    pool = gpool
-            if opts.geo_donor:
-                cand = pool[rng.integers(len(pool),
-                                         size=min(K_CANDIDATES, len(pool)))]
-                di = _pick_donor_geo(cand, bank, dst_segs[k])
-            else:
-                di = int(pool[rng.integers(len(pool))])
-        dseq = bank.seqs[di]
-        # Virtual per-vertex alphabet: id i is vertex i of BOTH polylines, so
-        # warp_path's monotone-DP correspondence, endpoint pins, arc remap and
-        # movement-frame residual transfer run byte-for-byte unchanged and every
-        # Phase-H exactness invariant carries over. Letter identity never enters.
-        src_virtual = qwerty[dseq]                        # [S,2]
-        dst_virtual = centers[seq]                        # [S,2]
-        target = np.arange(S, dtype=np.int64)
-        if opts.retime and S >= 2:
-            warped, jseg = warp_path(bank.feats[di], target, src_virtual,
-                                     dst_virtual, return_assign=True)
-            np.clip(warped, 0.0, 1.0, out=warped)
-            warped = np.clip(retime_segment(warped, bank.feats[di], jseg,
-                                            RETIME_ALPHA), 0.0, 1.0)
-            st["retimed"] += 1
-        else:
-            warped = warp_path(bank.feats[di], target, src_virtual, dst_virtual)
-            np.clip(warped, 0.0, 1.0, out=warped)         # the training loop's
-        if opts.bandwidth and S >= 2:                     # post-noise clip range
-            t_donor = float(bank.duration_ms[di])
-            l_src = float(bank.seg_len[di].sum())
-            l_dst = float(dst_segs[k].sum())
-            if t_donor > 1.0 and l_src > 1e-6 and l_dst > 1e-6:
-                t_target = t_donor * (l_dst / l_src) ** bank.dur_exponent
-                prov_dur[len(out_words)] = t_target
-                before = warped
-                warped = resample_bandwidth(warped, t_target)
-                if warped is not before:
-                    st["band_limited"] += 1
-        out_feats[len(out_words)] = warped
-        prov_donor[len(out_words)] = di
-        prov_group[len(out_words)] = int(bank.group[di])
+        di = draw.donor(rng, len(seq), dst_segs[k], st)
+        warped, t_target = transplant(bank, di, seq, dst_segs[k], qwerty,
+                                      centers, opts, st)
+        i = len(out_words)
+        out_feats[i] = warped
+        prov_donor[i], prov_group[i], prov_dur[i] = di, int(bank.group[di]), t_target
         out_words.append(str(words_arr[k]))
-        st["made"] += 1
-        if progress and st["made"] % progress == 0:
+        st["made"] = int(st["made"]) + 1
+        if progress and int(st["made"]) % progress == 0:
             print(f"  {st['made']}/{n_rows} "
-                  f"({st['made'] / (time.time() - t0):.0f}/s)", flush=True)
+                  f"({int(st['made']) / (time.time() - t0):.0f}/s)", flush=True)
     rows = {"donor_row": prov_donor, "donor_group": prov_group,
             "drawn_duration_ms": prov_dur}
     st["seconds"] = round(time.time() - t0, 1)
     return out_feats, out_words, st, rows
+
+
+def synthesize_matched(words: Sequence[str], rng: np.random.Generator,
+                       letters: str, bank: DonorBank, qwerty: np.ndarray,
+                       centers: np.ndarray, opts: GenOpts,
+                       ) -> Tuple[np.ndarray, np.ndarray, Dict[str, object],
+                                  Dict[str, np.ndarray]]:
+    """One synthetic trace per GIVEN word — the gate battery's word-matched arm.
+
+    The word draw is the one thing this driver does not do: the words come from
+    the real Yandex partners, so every difference between the two sets is
+    generator error with no word, layout or lexicon confound
+    (``SYNTH_V2_DESIGN.md`` §1.1).  Rows whose vertex count has no donor are
+    reported in ``ok`` rather than dropped, so the arrays stay row-aligned with
+    the real set.
+    """
+    idx = {c: i for i, c in enumerate(letters)}
+    st = _blank_stats()
+    draw = _Draw(bank, opts)
+    out = np.zeros((len(words), 2, 64), np.float32)
+    ok = np.zeros(len(words), bool)
+    prov_dur = np.zeros(len(words), np.float32)
+    prov_donor = np.full(len(words), -1, np.int32)
+    for i, w in enumerate(words):
+        seq = collapse(np.array([idx[c] for c in w], np.int64))
+        st["drawn"] = int(st["drawn"]) + 1
+        pool = bank.by_count.get(len(seq))
+        if pool is None or len(pool) == 0:
+            st["no_donor"] = int(st["no_donor"]) + 1
+            continue
+        dst_seg = (np.hypot(*np.diff(centers[seq].astype(np.float64), axis=0).T)
+                   if len(seq) >= 2 else np.zeros(0))
+        di = draw.donor(rng, len(seq), dst_seg, st)
+        out[i], prov_dur[i] = transplant(bank, di, seq, dst_seg, qwerty, centers,
+                                         opts, st)
+        prov_donor[i] = di
+        ok[i] = True
+        st["made"] = int(st["made"]) + 1
+    return out, ok, st, {"donor_row": prov_donor, "drawn_duration_ms": prov_dur}
 
 
 def endpoint_stats(feats: np.ndarray, words: Sequence[str], letters: str,
@@ -552,6 +628,16 @@ def main() -> int:
                          "Phase I-B's cache_ru/val.npz (the real-data selection "
                          "val) before this guard existed")
     ap.add_argument("--validate-rows", type=int, default=2000)
+    ap.add_argument("--train-donor-side", choices=["train", "all"], default="train",
+                    help="donor half the train/val splits draw from. 'train' is "
+                         "Phase O's 90/10 discipline, which keeps the synthesis "
+                         "HOLDOUT donor-disjoint. 'all' is Phase I-B's footing "
+                         "(cyrillic_synth.py predates the split) and is what the "
+                         "77.41 ru real-probe baseline was trained on, so it is "
+                         "the only footing on which a v2 number is comparable to "
+                         "that baseline — at the cost of a holdout that shares "
+                         "donors with training, which for ru does not matter "
+                         "because ru is read on a REAL probe")
     ap.add_argument("--generator", choices=["v1", "v2"], default="v2",
                     help="v1 = the Phase-O mechanism, bit-exact (the paired "
                          "ablation control); v2 = the amended generator")
@@ -630,7 +716,9 @@ def main() -> int:
     want = [s.strip() for s in args.splits.split(",") if s.strip()]
 
     # Vertex-count coverage of the lexicon against each donor side.
-    for side in sorted({"holdout" if s == "holdout" else "train" for s in want}):
+    side_of = {"train": args.train_donor_side, "val": args.train_donor_side,
+               "holdout": "holdout"}
+    for side in sorted({side_of[s] for s in want}):
         bank = build_donor_index(donor_paths, side, qwerty=qwerty,
                                  need_groups=opts.group_block)
         by_count = bank.by_count
@@ -665,7 +753,7 @@ def main() -> int:
               flush=True)
 
         for split in want:
-            if ("holdout" if split == "holdout" else "train") != side:
+            if side_of[split] != side:
                 continue
             n = {"train": args.rows, "val": args.val_rows,
                  "holdout": args.holdout_rows}[split]
