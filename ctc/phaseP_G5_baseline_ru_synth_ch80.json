@@ -1,0 +1,29 @@
+{
+ "script": "ru",
+ "onnx": "artifacts/ru_synth_ch80.onnx",
+ "probe": "/home/will/ctc-train/data/yandex_val10k.jsonl",
+ "layout": "layouts/ru_jcuken_default.json",
+ "lexicon_tier": "app-importable langpack-ru (CKDT v2, 50,000 words)",
+ "rows_slice": "all",
+ "preset": [
+  1.05,
+  2.0,
+  0.2,
+  0.3734,
+  0.9882
+ ],
+ "rows": 9416,
+ "decoded": 8471,
+ "unprojectable": 0,
+ "oov": 945,
+ "greedy_t1": 37.07,
+ "indict_t1": 77.42,
+ "indict_t3": 89.06,
+ "indict_t5": 91.76,
+ "allrows_t1": 69.65,
+ "le3_n": 3281,
+ "le3_t1": 86.47,
+ "ge4_n": 5190,
+ "ge4_t1": 71.7,
+ "seconds": 105.4
+}

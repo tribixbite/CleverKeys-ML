@@ -1,0 +1,29 @@
+{
+ "script": "ru",
+ "onnx": "/home/will/ctc-train/ckpt/phaseP-ru-v2full/ctc_swipe_encoder.onnx",
+ "probe": "/home/will/ctc-train/data/yandex_val10k.jsonl",
+ "layout": "layouts/ru_jcuken_default.json",
+ "lexicon_tier": "app-importable langpack-ru (CKDT v2, 50,000 words)",
+ "rows_slice": "all",
+ "preset": [
+  1.05,
+  2.0,
+  0.2,
+  0.3734,
+  0.9882
+ ],
+ "rows": 9416,
+ "decoded": 8471,
+ "unprojectable": 0,
+ "oov": 945,
+ "greedy_t1": 56.12,
+ "indict_t1": 79.73,
+ "indict_t3": 90.77,
+ "indict_t5": 93.26,
+ "allrows_t1": 71.73,
+ "le3_n": 3281,
+ "le3_t1": 85.77,
+ "ge4_n": 5190,
+ "ge4_t1": 75.92,
+ "seconds": 104.0
+}
