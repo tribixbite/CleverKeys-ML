@@ -14,6 +14,26 @@ Audit fixes applied here:
         zeroed by ``zero_infinity=True`` and would waste the sample).
   * #16 ``--workdir`` pathing; the layout defaults to the script's directory.
   * #17 provenance JSON embedded in every npz.
+
+Phase-P addition — the donor bank keeps its acquisition facts
+--------------------------------------------------------------
+``featurize`` throws the time axis away: it resamples to a 60 Hz grid and then
+to 64 index-uniform points, so a cached ``[2,64]`` row carries *shape* but not
+*tempo*.  The v2 synthetic generator's S5 stage (SYNTH_V2_RESEARCH_AUDIT §2.1)
+has to push a synthetic path back through the same 60 Hz chain at a plausible
+target duration, which means the donor bank must retain **``duration_ms``** per
+row.  Two further per-row facts are recorded at the same time because they are
+free once the JSONL is being read anyway:
+
+* ``n_points`` — the raw sample count, the other half of the acquisition
+  bandwidth story (``dt = duration/(n-1)``);
+* ``group`` — a contributor/session id when a ``--group-index`` is supplied
+  (``scan_futo_sessions.py``'s hash → session table), ``-1`` otherwise.  This
+  is what the v2 generator's optional session-coherent donor draw consumes.
+
+All three are *additive*: ``features``/``targets``/``target_lengths``/``words``
+are produced by the identical code path and are asserted bit-identical to the
+pre-Phase-P caches by ``--verify-against``.
 """
 from __future__ import annotations
 
@@ -24,7 +44,7 @@ import multiprocessing as mp
 import sys
 import time
 from pathlib import Path
-from typing import Dict, List, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 import numpy as np
 
@@ -106,17 +126,47 @@ def _featurize_batch(batch):
     return [featurize(xs, ys, ts) for xs, ys, ts in batch]
 
 
+def load_group_index(path: Path) -> Tuple[Dict[bytes, int], List[str]]:
+    """``scan_futo_sessions.py`` output -> (geometry-hash → group id, vocabulary).
+
+    The scanner keys on ``(normalized word, x bytes, y bytes)`` — no timestamps —
+    so the lookup is reproduced here rather than reusing :func:`trace_hash`.
+    """
+    with np.load(path, allow_pickle=False) as d:
+        raw = np.asarray(d["hashes"]).tobytes()
+        sess = np.asarray(d["session"], np.int64)
+        vocab = [str(v) for v in d["session_vocab"]]
+    table = {raw[i * 16:(i + 1) * 16]: int(sess[i]) for i in range(len(sess))}
+    return table, vocab
+
+
+def geometry_hash(word: str, xs: List[float], ys: List[float]) -> bytes:
+    """``scan_futo_sessions.trace_hash`` — normalized word + float64 x/y bytes."""
+    h = hashlib.blake2b(digest_size=16)
+    h.update(normalize_word(word).encode("utf-8"))
+    h.update(b"\0")
+    h.update(np.asarray(xs, np.float64).tobytes())
+    h.update(np.asarray(ys, np.float64).tobytes())
+    return h.digest()
+
+
 def prepare(jsonl_path: Path, out_path: Path, exclude: Set[bytes],
             dedup_self: bool, provenance_extra: Dict[str, object],
-            jobs: int = 1) -> Set[bytes]:
+            jobs: int = 1,
+            group_table: Optional[Dict[bytes, int]] = None,
+            group_vocab: Optional[List[str]] = None) -> Set[bytes]:
     """Featurize one split into ``out_path``; return the split's trace hashes.
 
     :param exclude: hashes whose rows must be dropped (cross-split leakage).
     :param dedup_self: drop exact duplicates appearing twice inside this split.
     :param provenance_extra: static provenance fields merged into the npz record.
+    :param group_table: optional geometry-hash → contributor/session id map.
     """
     feats: List[np.ndarray] = []
     words: List[str] = []
+    durations: List[float] = []
+    n_points: List[int] = []
+    groups: List[int] = []
     hashes: Set[bytes] = set()
     seen: Set[bytes] = set()
     pending: List[tuple] = []          # rows awaiting parallel featurization
@@ -148,6 +198,10 @@ def prepare(jsonl_path: Path, out_path: Path, exclude: Set[bytes],
         else:
             feats.append(featurize(xs, ys, ts))      # [2, 64] float32
         words.append(w)
+        durations.append(float(ts[-1] - ts[0]) if len(ts) > 1 else 0.0)
+        n_points.append(len(ts))
+        groups.append(-1 if group_table is None else
+                      group_table.get(geometry_hash(raw_word, xs, ys), -1))
 
     if jobs > 1 and pending:
         # Featurization is pure Python and dominates a ~700 k-row tier; fan it out.
@@ -178,14 +232,44 @@ def prepare(jsonl_path: Path, out_path: Path, exclude: Set[bytes],
         "dropped_self_duplicate": d_self,
         "t_out_frames": T_OUT,
     })
+    grp = np.asarray(groups, np.int32)
+    prov["group_index_hits"] = int((grp >= 0).sum())
+    prov["group_index_distinct"] = int(len(np.unique(grp[grp >= 0])))
     out_path.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(out_path, features=features, targets=tgt_flat,
                         target_lengths=tgt_len, words=np.array(words),
+                        duration_ms=np.asarray(durations, np.float32),
+                        n_points=np.asarray(n_points, np.int32), group=grp,
+                        group_vocab=np.array(group_vocab or [], dtype=object
+                                             ).astype("U") if group_vocab
+                        else np.zeros(0, "U1"),
                         provenance=np.array(json.dumps(prov, sort_keys=True)))
     print(f"{jsonl_path.name}: {n_total} in -> {len(words)} cached "
           f"(empty {d_empty}, infeasible {d_infeasible}, cross-split-dup {d_leak}, "
-          f"self-dup {d_self}) in {time.time() - t0:.1f}s -> {out_path}")
+          f"self-dup {d_self}; duration p50 {np.median(durations):.0f} ms, "
+          f"group ids {prov['group_index_hits']}/{len(words)}) "
+          f"in {time.time() - t0:.1f}s -> {out_path}")
     return hashes
+
+
+def verify_against(new_path: Path, old_path: Path) -> None:
+    """Assert the four pre-Phase-P arrays are bit-identical in the two caches.
+
+    The Phase-P rebuild exists to *add* ``duration_ms``/``n_points``/``group``.
+    If it changed a feature by one ULP, every model in the campaign would be
+    sitting on a different cache than the one its provenance names, so the swap
+    is gated on exact equality rather than a tolerance.
+    """
+    with np.load(new_path, allow_pickle=False) as a, \
+            np.load(old_path, allow_pickle=False) as b:
+        for k in ("features", "targets", "target_lengths", "words"):
+            x, y = np.asarray(a[k]), np.asarray(b[k])
+            if x.shape != y.shape or not np.array_equal(x, y):
+                raise SystemExit(
+                    f"{new_path.name}: {k} differs from {old_path} "
+                    f"(shapes {x.shape} vs {y.shape}) — refusing the swap")
+    print(f"verify: {new_path.name} features/targets/words bit-identical to "
+          f"{old_path}")
 
 
 def collect_hashes(path: Path) -> Set[bytes]:
@@ -212,6 +296,13 @@ def main() -> int:
                     help="npz basename for --extra-train (default: input stem)")
     ap.add_argument("--jobs", type=int, default=1,
                     help="parallel featurization workers for --extra-train")
+    ap.add_argument("--group-index", default="",
+                    help="scan_futo_sessions.py npz: geometry-hash -> session, "
+                         "recorded per row as `group` for the v2 generator's "
+                         "session-coherent donor draw (Phase P)")
+    ap.add_argument("--verify-against", default="",
+                    help="assert features/targets/words are bit-identical to an "
+                         "existing npz before declaring the rebuild good")
     args = ap.parse_args()
 
     data_dir = resolve(args.workdir, args.data)
@@ -241,6 +332,15 @@ def main() -> int:
         holdout |= h
     print(f"  holdout union: {len(holdout)} unique traces", flush=True)
 
+    group_table: Optional[Dict[bytes, int]] = None
+    group_vocab: Optional[List[str]] = None
+    if args.group_index:
+        gi = resolve(args.workdir, Path(args.group_index))
+        group_table, group_vocab = load_group_index(gi)
+        static_prov["group_index"] = str(gi)
+        print(f"[groups] {len(group_table)} hashed rows, {len(group_vocab)} "
+              f"distinct groups from {gi}", flush=True)
+
     if args.extra_train:
         # Tier mode: featurize one externally-built training pool. The same
         # holdout exclusion and self-dedup apply, so a tier can never smuggle a
@@ -248,8 +348,12 @@ def main() -> int:
         src = resolve(args.workdir, args.extra_train)
         name = args.out_name or src.stem
         static_prov["tier_source"] = str(src)
-        prepare(src, cache_dir / f"{name}.npz", exclude=holdout, dedup_self=True,
-                provenance_extra=static_prov, jobs=args.jobs)
+        out = cache_dir / f"{name}.npz"
+        prepare(src, out, exclude=holdout, dedup_self=True,
+                provenance_extra=static_prov, jobs=args.jobs,
+                group_table=group_table, group_vocab=group_vocab)
+        if args.verify_against:
+            verify_against(out, resolve(args.workdir, Path(args.verify_against)))
         return 0
 
     # val/test are cached verbatim (never filtered), train is deduped against them.
@@ -257,7 +361,8 @@ def main() -> int:
         prepare(paths[s], cache_dir / f"{s}.npz",
                 exclude=holdout if s == "train" else set(),
                 dedup_self=(s == "train"),
-                provenance_extra=static_prov)
+                provenance_extra=static_prov,
+                group_table=group_table, group_vocab=group_vocab)
     return 0
 
 

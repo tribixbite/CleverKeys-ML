@@ -181,7 +181,7 @@ def _polyline_letters(target: np.ndarray) -> np.ndarray:
 
 
 def warp_path(feats: np.ndarray, target: Sequence[int], src_centers: np.ndarray,
-              dst_centers: np.ndarray) -> np.ndarray:
+              dst_centers: np.ndarray, return_assign: bool = False):
     """Warp a cached ``[2,64]`` path for ``target`` from src onto dst geometry.
 
     :param feats: ``[2,64] float32`` — x row then y row (the cached featurized
@@ -189,8 +189,15 @@ def warp_path(feats: np.ndarray, target: Sequence[int], src_centers: np.ndarray,
     :param target: letter indices 0..25 of the word, in order (the CTC target).
     :param src_centers: ``[26,2]`` a..z key centers the path was swiped on.
     :param dst_centers: ``[26,2]`` a..z key centers to warp onto.
+    :param return_assign: also return the monotone-DP per-point **source segment
+        index** ``j [N] int64``.  The correspondence is computed internally
+        either way; exposing it is what lets :func:`retime_segment` put the
+        donor's dwells and corner decelerations on the *target's* vertices
+        instead of at a global arc fraction (SYNTH_V2_RESEARCH_AUDIT §1.2).
+        The returned path is byte-for-byte the same in both modes.
     :returns: warped ``[2,64] float32`` (NOT clipped — the training loop clips
-        after its noise stage, matching the existing augmentation order).
+        after its noise stage, matching the existing augmentation order), or
+        ``(warped, j)`` when *return_assign*.
 
     Exactness invariants (asserted by ``--selftest``):
       * ``dst_centers is src_centers``-equal → identity to float32 precision;
@@ -201,14 +208,16 @@ def warp_path(feats: np.ndarray, target: Sequence[int], src_centers: np.ndarray,
     P = np.stack([feats[0], feats[1]], axis=1).astype(np.float64)   # [N,2]
     n_pts = P.shape[0]
     if len(letters) == 0:
-        return feats.astype(np.float32, copy=True)
+        out = feats.astype(np.float32, copy=True)
+        return (out, np.zeros(n_pts, np.int64)) if return_assign else out
     if len(letters) == 1:
         # Single-key word: the "polyline" is a point; transfer the residual
         # cloud by pure translation.
         shift = dst_centers[letters[0]].astype(np.float64) - \
             src_centers[letters[0]].astype(np.float64)
         Pd = P + shift
-        return np.stack([Pd[:, 0], Pd[:, 1]]).astype(np.float32)
+        out = np.stack([Pd[:, 0], Pd[:, 1]]).astype(np.float32)
+        return (out, np.zeros(n_pts, np.int64)) if return_assign else out
 
     A_s = src_centers[letters[:-1]].astype(np.float64)              # [S,2]
     B_s = src_centers[letters[1:]].astype(np.float64)
@@ -277,7 +286,150 @@ def warp_path(feats: np.ndarray, target: Sequence[int], src_centers: np.ndarray,
                  hj + (s_src - hj) * mid_ratio))
     frac = s_dst / np.maximum(Ldj, 1e-12)
     Pd = A_d[j] + frac[:, None] * d_d[j] + a[:, None] * u_d[j] + b[:, None] * v_d[j]
-    return np.stack([Pd[:, 0], Pd[:, 1]]).astype(np.float32)
+    out = np.stack([Pd[:, 0], Pd[:, 1]]).astype(np.float32)
+    return (out, j) if return_assign else out
+
+
+# ── re-timing (v2 generator stage S4) and acquisition emulation (S5) ────────────
+#
+# `warp_path` fixes the GEOMETRY of a transplanted trace and says nothing about
+# WHEN its 64 time-uniform samples sit along that geometry.  v1 inherited the
+# donor's sample spacing scaled by the per-segment length ratio `mid_ratio`,
+# which multiplies the implicit speed profile by that ratio and produces the
+# campaign's single largest measured generator defect (step_cv KS 0.60,
+# step_max 3.2x real — SYNTH_V2_DESIGN §1.2).  The two functions below are the
+# measured repair, and they are shared by the generator (`script_synth.py`) and
+# the audit harness (`synth_retime_probe.py`) so there is exactly one
+# implementation of each.
+
+def polyline_resample(Q: np.ndarray, g: np.ndarray) -> np.ndarray:
+    """``Q [N,2]`` polyline, ``g [M]`` arc positions → ``[M,2]`` points on Q."""
+    seg = np.diff(Q, axis=0)
+    slen = np.hypot(seg[:, 0], seg[:, 1])
+    cum = np.concatenate([[0.0], np.cumsum(slen)])
+    gi = np.clip(np.searchsorted(cum, g, "right") - 1, 0, len(seg) - 1)
+    f = (g - cum[gi]) / np.maximum(slen[gi], 1e-12)
+    return Q[gi] + f[:, None] * seg[gi]
+
+
+def retime_global(warped: np.ndarray, donor: np.ndarray) -> np.ndarray:
+    """Re-time at the donor's GLOBAL cumulative arc-length fractions.
+
+    ``SYNTH_V2_DESIGN`` §3.1's original S4.  Kept because the audit's A/B table
+    quotes it and because it is the control the vertex-aligned form is measured
+    against — it is **not** the shipped stage: copying a global arc fraction puts
+    the donor's dwell spans wherever they happen to land on the target polyline,
+    which drives the speed–curvature coupling slope through zero
+    (SYNTH_V2_RESEARCH_AUDIT §2.3).
+    """
+    Q = warped.T.astype(np.float64)
+    Pd = donor.T.astype(np.float64)
+    a = np.concatenate([[0.0], np.cumsum(np.hypot(*np.diff(Pd, axis=0).T))])
+    if a[-1] <= 1e-12:
+        return warped
+    Lq = float(np.hypot(*np.diff(Q, axis=0).T).sum())
+    return polyline_resample(Q, (a / a[-1]) * Lq).T.astype(np.float32)
+
+
+def retime_segment(warped: np.ndarray, donor: np.ndarray, j: np.ndarray,
+                   alpha: float) -> np.ndarray:
+    """Vertex-aligned per-segment re-timing — the shipped S4 (fix B′).
+
+    WITHIN a polyline segment the donor's own arc-progress curve is copied, so
+    its dwells and corner decelerations land on the corresponding **target**
+    vertices.  ACROSS segments the 63 sample intervals are reallocated by
+    ``m_k ∝ n_k · rho_k^alpha`` with ``rho_k = dC_k/dA_k`` the target/donor
+    traversed-arc ratio: ``alpha = 0`` reproduces v1's allocation, ``alpha = 1``
+    traverses every target segment at the donor's own speed, and the measured
+    human value is ``alpha ≈ 0.46–0.49`` on three real corpora across two
+    scripts (`synth_retime_probe.py --stage law`; CLC's independently measured
+    line exponent is 0.394–0.469).  0.5 is that value rounded.
+
+    :param j: the monotone-DP per-point source segment index from
+        ``warp_path(..., return_assign=True)``.
+    """
+    Q = warped.T.astype(np.float64)
+    Pd = donor.T.astype(np.float64)
+    n = len(Q)
+    C = np.concatenate([[0.0], np.cumsum(np.hypot(*np.diff(Q, axis=0).T))])
+    A = np.concatenate([[0.0], np.cumsum(np.hypot(*np.diff(Pd, axis=0).T))])
+    if C[-1] <= 1e-12 or A[-1] <= 1e-12:
+        return warped
+    segs = np.unique(j)
+    edges = [int(np.nonzero(j == k)[0][0]) for k in segs] + [n - 1]
+    dC = np.array([C[edges[k + 1]] - C[edges[k]] for k in range(len(segs))])
+    dA = np.array([A[edges[k + 1]] - A[edges[k]] for k in range(len(segs))])
+    nk = np.array([edges[k + 1] - edges[k] for k in range(len(segs))], np.float64)
+    live = nk > 0
+    rho = np.where((dA > 1e-9) & (dC > 1e-9), dC / np.maximum(dA, 1e-9), 1.0)
+    w = np.where(live, nk * rho ** alpha, 0.0)
+    if w.sum() <= 0:
+        return warped
+    w = w / w.sum()
+    total = n - 1                              # intervals to distribute
+    raw = w * total
+    m = np.floor(raw).astype(int)
+    m[live] = np.maximum(m[live], 1)
+    while m.sum() > total:
+        m[np.argmax(m)] -= 1
+    rem = total - m.sum()
+    if rem > 0:
+        order = np.argsort(-(raw - np.floor(raw)))
+        for t in range(rem):
+            m[order[t % len(order)]] += 1
+    g: List[float] = [0.0]
+    for k in range(len(segs)):
+        if m[k] <= 0:
+            continue
+        i0, i1 = edges[k], edges[k + 1]
+        a0, a1 = A[i0], A[i1]
+        c0, c1 = C[i0], C[i1]
+        if a1 - a0 <= 1e-12:
+            prog = np.linspace(0.0, 1.0, m[k] + 1)[1:]
+        else:
+            ti = np.arange(i0, i1 + 1, dtype=np.float64)
+            ai = (A[i0:i1 + 1] - a0) / (a1 - a0)
+            prog = np.interp(np.linspace(i0, i1, m[k] + 1)[1:], ti, ai)
+        g.extend(list(c0 + prog * (c1 - c0)))
+    gv = np.array(g[:n], np.float64)
+    if len(gv) < n:
+        gv = np.concatenate([gv, np.full(n - len(gv), C[-1])])
+    gv = np.maximum.accumulate(np.clip(gv, 0.0, C[-1]))
+    return polyline_resample(Q, gv).T.astype(np.float32)
+
+
+#: The featurizer's acquisition grid — `futo_decoder_eval.resample_to_60hz`.
+HZ_INTERVAL_MS = 1000.0 / 60.0
+
+
+def resample_bandwidth(path: np.ndarray, dur_ms: float) -> np.ndarray:
+    """Re-run the acquisition chain at a target duration — the v2 stage S5.
+
+    ``futo_decoder_eval.featurize`` resamples a raw trace to 60 Hz
+    (``n60 = max(2, round(dur/16.667)+1)`` nodes) and only THEN to 64
+    index-uniform points.  A 701 ms real Russian trace is therefore an
+    *upsampled* 43-node polyline — piecewise linear, smooth at the step scale —
+    while a 1,117 ms English donor carries ≥68 nodes and is *downsampled*,
+    keeping its per-step jitter.  Half of the residual cornering gap between v1
+    synthesis and real ru traces is that asymmetry rather than motor behaviour
+    (SYNTH_V2_RESEARCH_AUDIT §2.1), and pushing the synthetic path back through
+    a 60 Hz grid at the target script's duration reproduces the band-limiting.
+
+    A duration at or above 64 nodes (≈ 1,050 ms) is a no-op: the chain would
+    *upsample* to 64 and the extra nodes carry no information the 64 samples do
+    not already have.
+    """
+    n60 = max(2, int(round(dur_ms / HZ_INTERVAL_MS)) + 1)
+    if n60 >= 64:
+        return path
+    P = path.T.astype(np.float64)
+    src = np.linspace(0.0, 1.0, len(P))
+    mid = np.linspace(0.0, 1.0, n60)
+    lo = np.stack([np.interp(mid, src, P[:, 0]), np.interp(mid, src, P[:, 1])], 1)
+    back = np.linspace(0.0, 1.0, 64)
+    hi = np.stack([np.interp(back, mid, lo[:, 0]),
+                   np.interp(back, mid, lo[:, 1])], 1)
+    return hi.T.astype(np.float32)
 
 
 class LayoutAugmenter:
