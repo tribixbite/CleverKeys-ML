@@ -645,6 +645,57 @@ after failing its rule.
 
 ---
 
+### 4.14 Phase N — beating FUTO on FUTO's own test
+
+Recorded in full in `PHASE_N.md` §19; no new promotable model. Terminal
+standing: B1 = 4 of 5 metrics outright on every seed on FUTO's official test
+(t1 +0.87, McNemar p ≤ 1.7e-18 all seeds), 4+ a statistical tie (−0.010
+seed-mean); B2 not closed (−0.365 seed-mean). Levers screened and all closed:
+`n2a`/`n2b` source reweighting **refuted on every prong**, `n2e`/`n2e-b`
+min-margin preset **refuted at an 88.63 dev-4+ emissions ceiling**, `n2d` ch256
+capacity **real (+0.29 dev-8k 4+, in band)** but `n3` students **fail the
+distillation gate** and `n3b` fails holdout confirmation. Two of three milestone
+reads unspent; test-2400 sealed at ledger 4 throughout.
+
+### 4.15 Phase O — per-script models for the non-Latin scripts (2026-08-18/19)
+
+**Footing:** each script's **own 10,000-row synthesis holdout** (disjoint donor
+half, independent word draw), decoded at the app CKDT preset
+`1.05 / 2.0 / 0.2 / 0.3734 / 0.9882` through the exported fp32 graph. **These
+are generator numbers and they are not comparable to any val/test row in this
+table** — `PHASE_O.md` §2.1 measures the probe inverting both the capacity axis
+and the λ choice against real data. Russian rows are the calibration anchor and
+carry a real-corpus column (Yandex, eval-only). All arms: `resbn:80` dil 1,2,4,8,
+embed_hid 96, 94 k steps, greedy selection, **single seed 1234**, no layout-alt.
+
+| arm | K | script holdout t1/t3/t5 | greedy | ch192-EN zero-shot (same probe) | ch80-EN zero-shot (same probe) | real-corpus column | verdict |
+|---|---|---|---|---|---|---|---|
+| **`phaseO-el-synth`** = `el_synth_ch80` | 25 | **82.54** / 92.97 / 94.93 | 35.87 | 83.10 (−0.56) | 76.56 (**+5.98**) | none exists | exported; the only new script with a bundled app lexicon |
+| **`phaseO-uk-synth`** = `uk_synth_ch80` | 31 | **79.27** / 91.91 / 94.05 | 31.98 | 81.41 (−2.14) | 74.20 (**+5.07**) | none exists | exported; ceiling from ї/ґ being corner-only (4.03 % of vocabulary) |
+| **`phaseO-bg-synth`** = `bg_synth_ch80` | 30 | **71.80** / 88.56 / 92.18 | 26.86 | 74.09 (−2.29) | 66.53 (**+5.27**) | none exists | exported |
+| **`phaseO-mk-synth`** = `mk_synth_ch80` | 31 | **71.69** / 88.33 / 91.80 | 29.39 | 72.67 (−0.98) | 65.19 (**+6.50**) | none exists | exported |
+| **`phaseO-he-synth`** = `he_synth_ch80` | 27 | **65.36** / 85.10 / 90.13 | 37.91 | 69.11 (−3.75) | 58.04 (**+7.32**) | none exists | exported **flagged** — the only ≥70-gate failure at the adopted preset (70.28 at λ 1.1) |
+| `phaseIB-ru-synth` = `ru_synth_ch80` (Phase I-B model, re-probed here) | 31 | 81.10 / 92.16 / 94.08 | 29.73 | 83.38 (−2.28) | 76.24 (**+4.86**) | **77.41** in-dict t1 (8,471 rows) | the calibration anchor |
+| `phaseO-ru-initH` | 31 | 81.98 / 92.95 / — | 30.72 | — | — | **77.26** | **REFUTED** — warm start from the English ch80 `phaseH-p50` is +0.88 on the holdout and **−0.14 on real (p = 0.69)**. Not promoted |
+| `phaseM_kd_fresh_w1` (ship model) zero-shot on ru | — | 83.38 | 14.27 | — | — | **76.32** | the deployment alternative: the shipped model reaches 76.32 on real Russian with only a layout and a trie |
+| `phaseH-p50` (English ch80) zero-shot on ru | — | 76.24 | 7.07 | — | — | **75.79** | capacity-matched control |
+
+**Paired tests on the real Russian probe** (n = 8,471, exact McNemar):
+ru-synth vs ch80-EN **+1.62, p = 1.4e-4** · ru-synth vs ch192-EN **+1.09,
+p = 0.0099** · ch192-EN vs ch80-EN +0.53, **p = 0.11 (n.s.)** · ru-initH vs
+ru-synth −0.14, **p = 0.69 (n.s.)**. On the *synthesis holdout* the second of
+those flips to **−2.28, p = 7.1e-12**.
+
+**Falsification, all six scripts:** with key centres permuted
+(`eval_script.py --permute-layout`), every model reads **0.00 t1 / 0.00 greedy**.
+
+**Export gates, all five new scripts:** fp32 vs torch on real traces at the real
+layout, sliced 1.26e-4 … 5.11e-4, **argmax 100/100 every script**; fp16w residues
+2.85e-2 … 1.78e-1 at 95–99/100 argmax, and **free at the decode** (10 k-row top-1
+moves ≤ 0.02 on every script). All five graphs are the standard 1,142,727-byte
+resbn80; fp16w 589,406 B.
+
+
 ## 5. Configurations — mixes, pairs and blends, with their member composition
 
 A **configuration** is not a model: it is a named set of members plus a rule for
