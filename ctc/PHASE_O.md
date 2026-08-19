@@ -319,3 +319,76 @@ sign reversal. And the script-trained side is the *synthesis*-trained ru model,
 not the real-data one; a real-data model would win both columns comfortably.
 
 *(§2.2 onward: per-script results, added as each script completes.)*
+
+---
+
+## 3. O3 — APP-INTEGRATION NOTES
+
+### 3.1 What is shared by every script (do this once)
+
+None of it is ML work; all of it is app work, and it dominates the cost of
+adding a script. Verified against the app at `9a6ffdd2` (the audit head).
+
+| # | change | file | today |
+|---|---|---|---|
+| 1 | per-script alphabet instead of `'a'..'z'` | `swipe/CtcEngineAdapter.kt` — `letterOf` returns `c.takeIf { it in 'a'..'z' }`, `buildMappedLayout` uses `FloatArray(26)`/`BooleanArray(26)` and returns null unless all 26 are `seen` | hard-codes 26 |
+| 2 | per-script routing | `swipe/SwipeEngineRouter.kt` — only `isSwipeTypingSupportedForLayout` (QWERTY-Latin) or `isLatinScript(script)` reach `Engine.CTC` | `script="cyrillic"`/`"greek"` fall to geometric |
+| 3 | per-language model asset | `CtcEngineAdapter.MODEL_ASSET` is a single constant | one model only |
+| 4 | per-script language support | `CtcLanguageSupport.SUPPORTED` is a compiled-in `linkedMapOf` of en/fr/de/es(/it/pt/sv) | not extensible at runtime |
+| 5 | per-script preset | `swipe/ctc/CtcScoringParams.kt` — `tunedRuCkdt` exists but `presetFor` can never return it | unreachable |
+| 6 | fixture↔model↔preset triple per script | `CtcParityTest` | one row |
+| 7 | trie width | `swipe/ctc/CtcLexiconTrie.kt` | **already done** — the 26-child clamp was removed and replaced by a constructor check against the emission-head width |
+| 8 | `CtcLayout` | `alphabet: CharArray` + parallel centre arrays | **already generic** |
+
+**The model's slot order IS the app's alphabet array.** Every Phase-O layout
+json lists its letters in **codepoint-sorted order**, and emission column *c* is
+`letters[c]`. The app's per-script `ALPHABET` must be that same string, in that
+same order, or every decode is silently permuted. The strings are given per
+script in §3.2.
+
+**The geometry needs no app-side change.** `app_layout.py` replicates
+`KeyboardGeometry.computeKeyRects` + `buildMappedLayout` exactly, and reproduces
+`en_qwerty.json` from the app's own QWERTY XML to 4.7e-4 (§1.2) — so the
+`layout_keys` the app computes at runtime for these layouts *is* the geometry the
+models were trained on. Locale extra keys and the bottom/number/numpad rows do
+not perturb it: extra keys land in corner slots (never `key0`), and the
+normalisation box is built from letter-centre rects only.
+
+### 3.2 Per-script wiring table
+
+| script | layout XML (`src/main/layouts/`) | alphabet / slot order (codepoint-sorted) | K | lexicon the app must have | preset |
+|---|---|---|---|---|---|
+| ru | `cyrl_jcuken_ru.xml` | `абвгдежзийклмнопрстуфхцчшщыьэюя` | 31 | `langpack-ru.zip` (importable today) | `tunedRuCkdt` = 1.05 / **2.0** / 0.2 / 0.3734 / 0.9882 |
+| el | `grek_qwerty.xml` | `αβγδεζηθικλμνξοπρςστυφχψω` | 25 | `langpack-el.zip` **with final sigma repaired** (§1.3) | CKDT preset, λ per §2.2 |
+| uk | `cyrl_jcuken_uk.xml` | `абвгдежзийклмнопрстуфхцчшщьюяєі` | 31 | **none — must be built** (`build_wordlist.py --lang uk`, the `cyrillic` script gate already exists) | CKDT preset |
+| bg | `cyrl_ueishsht.xml` | `абвгдежзийклмнопрстуфхцчшщъьюя` | 30 | **none — must be built** (`cyrillic` gate exists) | CKDT preset |
+| mk | `cyrl_lynyertdz_mk.xml` | `абвгдежзиклмнопрстуфхцчшѓѕјљњќџ` | 31 | **none — must be built** (`cyrillic` gate exists) | CKDT preset |
+| he | `hebr_1_il.xml` | `אבגדהוזחטיךכלםמןנסעףפץצקרשת` | 27 | **none — must be built**, and `build_wordlist._is_script_word` needs a **new `hebrew` branch** (0x0590–0x05FF); it currently `raise`s on any script but latin/greek/cyrillic | CKDT preset |
+
+### 3.3 Two app fixes that must land before any of this
+
+1. **`src/main/layouts/grek_qwerty.xml` declares `script="latin"`.** One-word
+   fix to `greek` (matching `srcs/layouts/`). Until then the Greek layout is
+   indistinguishable from Latin at the router.
+2. **Final sigma in the Greek lexicon.** Either regenerate `langpack-el` with ς
+   preserved, or apply the deterministic repair when the el trie is built:
+   a word ending in `σ` gets that `σ` rewritten to `ς`. 25.7 % of the pack's
+   words are affected. Without it, a Greek swipe model is scored against the
+   wrong key, in the wrong row, for one word in four — and the *user* will swipe
+   to ς because that is where Greek orthography puts it.
+
+### 3.4 Per-script projection rules the app must mirror
+
+The projection is applied to the lexicon **and** to anything compared against a
+decode; the campaign's ALT_LAYOUT §3 policy. From `script_registry.py`:
+
+* **all scripts** — lowercase; strip `- ' ’ ʼ ‘ \``.
+* **el, he** — NFD, drop combining marks (`Mn`), NFC. Safe here because no
+  letter's identity depends on a mark: Greek accents/diaeresis and Hebrew niqqud
+  are not keys.
+* **ru, bg, mk** — **no NFD** (it would decompose й into и + breve). Character
+  folds instead: ru ё→е, ъ→ь; bg ѝ→и; mk ѐ→е, ѝ→и.
+* **el only** — after mark stripping, word-final `σ` → `ς`.
+* **uk** — no folds; words containing ї or ґ are **rejected as untypeable**
+  (4.03 % of the vocabulary, §1.5). If the app wants them, it needs the
+  corner-alias path, and that is a *different input mode* (flick), not a swipe.
