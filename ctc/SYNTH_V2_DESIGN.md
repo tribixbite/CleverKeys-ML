@@ -1,8 +1,34 @@
 # Synthetic swipe-trace generator v2 — quality-gap analysis and design options
 
-**Date:** 2026-08-19 · **Status: foundation document, AWAITING THE USER'S
-DETAILED REQUIREMENTS before any implementation.** Nothing in Part 3 is
-authorized to build; it is a prepared plan the user can steer or overrule.
+**Date:** 2026-08-19 · **Status: SUPERSEDED AND DELIVERED.** Part 1's
+measurements stand and are still the reference for what v1 got wrong. Part 3's
+spec was **amended by `SYNTH_V2_RESEARCH_AUDIT.md`** — which built the proposed
+fixes and scored them before endorsing any — and the amended union was
+implemented, gated and shipped in **`PHASE_P.md`**. Where this document and the
+audit disagree the audit wins; where the audit and Phase P disagree Phase P
+wins, because it measured on the shipped code.
+
+**What changed against Part 3, in one place:**
+
+* **S4 is not the global-arc-fraction form specified in §3.1.** It is
+  vertex-aligned per-segment re-timing at α = 0.5 (audit §1.2). The specified
+  form drives the speed–curvature coupling slope through zero.
+* **S5 did not exist here.** Acquisition-bandwidth matching (audit §2.1) is the
+  stage that closes the cornering gap, and it is what makes G3's `sharp_turns`
+  bar reachable at all.
+* **G2 as written is self-contradictory** and was replaced by the wordfreq-mass
+  clause alone, with the register residual recorded (audit §1.1).
+* **G3 gained ac1, the stroke-count proxy and the two speed–curvature bars**, and
+  `sharp_turns` moved 0.25 → 0.32 because 0.25 is unreachable even with an
+  oracle.
+* **G4's τ = 0.70 was both too permissive and unreachable** and was restated as
+  instrument-named gap-closure against a *measured* 0.50 floor, with UCL₉₅ ≤ 0.60
+  recorded as an open shortfall (audit §3.4).
+* **G5 was met**: 79.73 real in-dict t1 against the 79.41 floor, +2.31 over the
+  77.42 baseline, p = 2.6e-09 — inside this document's own +2…+5 band. Its ≤3
+  corollary was **missed** at 85.77.
+* **Fix D was built and left off**; **fix A had a projection trap** this document
+  could not have seen (PHASE_P §1.1a).
 
 **Method note.** Every number in Part 1 is measured, not quoted from memory:
 the measurement script is `ctc/synth_gap_audit.py` (three stages: `data`,

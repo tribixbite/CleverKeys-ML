@@ -1,7 +1,15 @@
 # Synthetic swipe-generator v2 — research audit and amended spec
 
 **Date:** 2026-08-19 · **Audits:** `SYNTH_V2_DESIGN.md` (fixes A–D, gates G0–G5)
-· **Status:** amendments proposed, nothing built into the generator yet.
+· **Status: DELIVERED.** Every amendment in Part 4 was implemented, gated and
+shipped — see `PHASE_P.md`. The prototype numbers below were reproduced by the
+shipped generator to within the difference the prototypes' own footings predict
+(v1 gate 0.904 max-over-epochs / 0.8766 5-fold final-epoch; C+B′+S5 GBM₁₇ 0.8125
+against the prototype's 0.854 without S5). Three predictions were confirmed
+outright: α = 0.5 needed no tuning, the S5 stage landed within 0.013 of its own
+oracle bound on `sharp_turns`, and the GBM gap-closure came in at 22.6 % against
+the "23 % with S5" this document predicted. One thing it could not have seen:
+fix A's projection trap on Greek (PHASE_P §1.1a).
 
 **Method note — this audit measured, it did not only read.** The four proposed
 fixes were *implemented as prototypes and scored* on the same 9,416 word-matched

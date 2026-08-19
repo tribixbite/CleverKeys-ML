@@ -1427,24 +1427,55 @@ where they conflict. G5 (real ru probe, >= 79.41) is THE ONLY ship/no-ship gate.
 Ops: trainings detached with --workers 0, synchronous poll harvests, milestone
 commits, app repo READ-ONLY.
 
-- [ ] P0a donor bank carries raw duration (S5 prerequisite) + donor group ids
+- [x] P0a donor bank carries raw duration (S5 prerequisite) + donor group ids
       (D): prepare_data.py emits duration_ms/group; rebuild train_t3{futo,hws}
       with FEATURES BIT-IDENTICAL to the committed caches (verify before swap)
-- [ ] P1 amended generator (union of both docs, S0..S6):
+- [x] P1 amended generator (union of both docs, S0..S6):
       A wordfreq draw / C geometry-matched donor / D group-block draw /
       B' vertex-aligned per-segment re-timing alpha=0.5 / S5 acquisition-
       bandwidth matching (duration model fit on MIT English ONLY)
-- [ ] P1 unit gates: v1-compat bit-identical reproduction; stage assertions
-- [ ] P2 gate battery on ru (the only real-validated script): G1 endpoints,
+- [x] P1 unit gates: v1-compat bit-identical reproduction; stage assertions
+- [x] P2 gate battery on ru (the only real-validated script): G1 endpoints,
       G2 length mix (+-3 pts of wordfreq mass ONLY; record the register
       residual), G3 kinematics (step_cv<0.15, step_max<0.12, sharp_turns<0.32
       with S5, ac1 KS<0.12, minima/seg +-0.10, coupling slope KS<0.35 /
       R2 KS<0.40), G4 both instruments (MLP speed gap-closure >=35%, GBM
       metric gate >=20%, en->en >=65%; UCL95<=0.60 recorded as OPEN SHORTFALL)
-- [ ] P3 SHIP GATE G5: ru ch80 retrain on v2 (Phase-O recipe verbatim),
+- [x] P3 SHIP GATE G5: ru ch80 retrain on v2 (Phase-O recipe verbatim),
       decode the 9,416-row real Yandex probe at lambda 2.0.
       PASS = >= 79.41 (+2 over 77.41), band to +5. Paired v1-control if budget.
-- [ ] P4 (only on G5 pass) all six scripts regenerated + retrained + gated +
+- [x] P4 (on G5 pass) all six scripts regenerated + retrained + gated +
       exported with parity/fixtures/sha256; both generations in the registry
-- [ ] P5 docs: PHASE_P.md, SYNTH_V2_DESIGN status flip, RESULTS/MODELS_TABLE
+- [x] P5 docs: PHASE_P.md, SYNTH_V2_DESIGN status flip, RESULTS/MODELS_TABLE
       addenda, multiscript guide synthesis section (ML mirror only), push
+
+### PHASE P CLOSE (2026-08-19)
+
+G1-G4 all PASS; G5 PASS at 79.73 (bar 79.41) after ONE registered amendment
+round that changed no generator parameter — it put v2 on the 77.42 baseline's
+own donor footing, after the paired v1 control proved the entire shortfall was
+phase o's 90/10 donor split (-1.69 real t1, p 5.2e-07; --generator v1
+--train-donor-side all reproduces cache_ru_synth BIT-EXACTLY).
+
+Recorded as missed, not explained away:
+  * G5's le3 corollary: 85.77 vs a bar of 86.4 (paired p 0.27, and the whole
+    of it is the donor-side term, not v2)
+  * G4's UCL95 <= 0.60 standard: 0.7467 / 0.8331. Unreachable — the en->en
+    control puts ~0.19 of the residual on the donor bank's language.
+  * the register residual: wordfreq le3 mass 26.8% vs real usage 35.6%.
+
+Open, deliberately not actioned:
+  * lambda 2.0 was tuned against a WEAK-emission model (greedy 37). v2 reads
+    greedy 56. Re-tuning it needs a second real corpus; spending yandex again
+    is the trap this campaign keeps documenting.
+  * the five corpus-less scripts still ride the 90/10 donor split and are
+    therefore ~1.7 real points below what the full pool would give. First
+    thing a regeneration should change.
+  * fix D built, off by default, unmeasurable by construction.
+  * he's fp32 export needs --parity-tol 2e-3 (sliced 1.16e-03, argmax
+    100/100). Flagged in the registry.
+
+NEXT (app side, NOT this agent): the termux agent must make the same edit to
+the app-repo copy of ctc-architecture-and-multiscript-guide.md — the ML mirror
+here has the v2 synthesis section and the v2 artifact table, the app repo does
+not. App repo was read-only for this phase.

@@ -225,12 +225,42 @@ All tools live in `CleverKeys-ML/ctc/`.
    traces against the claimed geometry, **with a deliberately wrong geometry as a falsification
    control**. Russian measured start-hit 0.917 / end-hit 0.647 against a wrong-geometry control
    that collapsed to 0.008 / 0.004 (`PHASE_I_DATA.md` §4). Skipping this step is how a whole
-   training run gets wasted on a squashed frame.
-3. **Synthesize.** `cyrillic_synth.py` — despite the name it is the generic residual transplant.
-   English human traces are the donor pool; donor match is purely structural (collapsed-polyline
-   vertex count), the correspondence is geometric (`layout_aug.warp_path` verbatim through
-   per-vertex virtual indices), and **letter identity never enters**. Words are drawn from the
-   target script's lexicon with `weight = 255 − rank`.
+   training run gets wasted on a squashed frame. Endpoint statistics are necessary and **badly
+   insufficient**: they are the *least* discriminative view a real-vs-synthetic classifier has
+   (0.663 against the speed profile's 0.904), which is exactly why v1 passed its only gate while
+   carrying a KS-0.60 speed defect. Gate on the kinematics too — `synth_gap_audit.py --stage
+   gates` is the standing battery, and its cheapest high-value metric is **lag-1 speed
+   autocorrelation**, the largest single-statistic real-vs-synth gap found anywhere.
+3. **Synthesize.** `script_synth.py --code <script>` — the generic residual transplant, at
+   **generator v2** (`cyrillic_synth.py` remains as the historical record of the ru v1 run).
+   English human traces are the donor pool; the correspondence is geometric
+   (`layout_aug.warp_path` verbatim through per-vertex virtual indices) and **letter identity
+   never enters**. Five stages, all measured into place by `SYNTH_V2_DESIGN.md` /
+   `SYNTH_V2_RESEARCH_AUDIT.md` and gated in `PHASE_P.md`:
+   * **S0 word draw = wordfreq token mass**, not `255 − rank`. The rank scale is a 255:1
+     compression of frequencies that span 10⁵:1, and it produced a corpus with **3.3 % ≤3-letter
+     words against real usage's 35.6 %**. Accumulate each wordfreq *token's* mass into **its
+     projection** — querying `word_frequency` with the projected form returns zero for 90 % of
+     the Greek pack, because the projection strips accents and restores final ς.
+   * **S1/S2 geometry-matched donor draw**: index by (vertex count, log polyline length), take
+     k = 16 reservoir candidates and pick the one minimising `Σ_seg |log(L_dst/L_src)|`. Takes
+     the per-segment stretch p95 from 3.63 to 1.72.
+   * **S4 vertex-aligned per-segment re-timing** at α = 0.5. v1 let the arc remap scale the
+     donor's sample spacing by the segment length ratio, which multiplies the implicit speed
+     profile by that ratio and never re-times it — the single largest measured defect
+     (step_cv KS 0.60, peak per-step speed 3.2× real). Copy the donor's *within-segment*
+     arc-progress so its dwells land on the **target's** vertices, and reallocate the sample
+     budget across segments by `m_k ∝ n_k·ρ_k^α`. α is not tuned: the within-trace regression of
+     per-segment time share on ideal-length share reads 0.460 (HWS) / 0.493 (FUTO) / 0.447 (real
+     ru), an isochrony invariant that transfers across scripts, so it is fit on MIT English.
+   * **S5 acquisition-bandwidth matching**: predict a duration from the donor's own
+     (`T_target = T_donor·(L_dst/L_src)^0.262`, the exponent fit on MIT English only) and
+     re-featurize through the real 60 Hz chain. Half the residual "synthetic traces are jagged"
+     gap is a sampling artefact — fast target-script traces are *upsampled* to 64 points while
+     slower English donors are *downsampled* and keep their jitter — not motor behaviour.
+   * **Never fit any generator parameter against the validator's statistics.** Tempo, duration,
+     start-dwell and the length mix are all fit on MIT English and only *checked* on Russian.
+   `--generator v1` reproduces the old mechanism bit-exactly for paired ablations.
 4. **Train.** `train.py --layout <geometry.json> --cache <cache_dir> --beam-val-rows 0`. The
    `--beam-val-rows 0` matters: the in-training beam validator's vocab loader is a–z-hardcoded,
    so selection runs on greedy and the lexicon beam runs offline in `eval_cyrillic.py`. The rest
@@ -248,17 +278,37 @@ All tools live in `CleverKeys-ML/ctc/`.
 
 ### 3.3 What synthesis buys and what it costs
 
-The paired arms answer this exactly. Same recipe, same eval, same 9,416 real rows:
+The paired arms answer this exactly. Same recipe, same eval, same 9,416 real rows
+(8,471 in-dict; the v2 row is at the app CKDT preset λ 2.0, the two older rows at E1 λ 1.1):
 
-| arm | training data | in-dict t1 (E1) | greedy |
+| arm | training data | in-dict t1 | greedy |
 |---|---|---|---|
 | `phaseIB-ru-real` | 1 M **real** Yandex rows | 89.64 | 75.23 |
-| `phaseIB-ru-synth` | 1 M **synthetic** rows, zero real | **76.21** | 37.07 |
+| `phaseIB-ru-synth` — generator **v1** | 1 M synthetic rows, zero real | 76.21 (77.42 at λ 2.0) | 37.07 |
+| **`phaseP-ru-v2full`** — generator **v2** | 1 M synthetic rows, zero real | **79.73** | **56.12** |
 
-Real data is worth ~13 top-1 points. The synth arm's greedy collapses to 37 (English-magnitude
-start noise on a denser board), so a synth-trained ship **leans hard on its trie** — λ is worth
-+7.6 t1 there versus +0.9 on the real arm. Budget for that: a synth-launched script needs a
-good lexicon far more than a real-data one does.
+Two readings, and the second is the one that changed.
+
+**Real data is still worth ~10 top-1 points**, down from ~13. That gap is the honest price of
+having no corpus, and `DATASET_SCOUT.md` §4.4 argues causing collection is the only clean route
+to closing it.
+
+**But half of what looked like "the price of synthesis" was generator error.** v2 is +2.31 real
+top-1 over v1 (paired McNemar p = 2.6e-09) and **+19.05 real greedy** — the encoder's own
+emissions, with no real Cyrillic row in training. v1's greedy of 37 was read as "English-magnitude
+start noise on a denser board"; it was mostly a speed profile that made synthetic traces 90 %
+separable from real ones. Consequences for anyone launching a script:
+
+* a v2-trained model still leans on its trie, but far less — budget the lexicon accordingly,
+  and note that **λ = 2.0 was tuned against a weak-emission model** and probably wants revisiting
+  once a second real corpus exists to tune it on;
+* the gain lands on **long words** (≥4 letters: +4.22, p = 3.6e-17). Short words were already
+  carried by the lexicon prior and moved −0.70 (n.s.);
+* an English-donor transplant **cannot** be made statistically indistinguishable from real
+  target-script swipes. The English→English control — same generator, same script, disjoint
+  halves of one corpus — closes 84 % of the gap to a measured 0.50 floor, while the Russian arm
+  closes 36 %. The difference is the donor bank's population, and the only lever on it is
+  target-script motor data.
 
 ---
 
@@ -284,13 +334,25 @@ footing. `ru-real` is a research artifact and stays one.
 
 ### 4.2 The artifacts
 
-Committed in `CleverKeys-ML/ctc/artifacts/`:
+Committed in `CleverKeys-ML/ctc/artifacts/`. **Generation 2 supersedes generation 1 for
+deployment** (`PHASE_P.md` §6.1); the v1 bytes stay because every pre-Phase-P number was
+measured on them.
 
 | file | bytes | sha256 |
 |---|---|---|
-| `ru_synth_ch80.onnx` (fp32) | 1,142,727 | `d78a9fb9f8e170595a7714220cf5fd9dfc2324935900aec6cb6d7a2ec1a36666` |
-| `ru_synth_ch80_fp16w.onnx` (**ship bytes**) | 589,406 | `84ac284d4f0d0cb86061df9c557507e1489ab93a75b40885a4431976cee32469` |
-| `ru_synth_ch80_fp16w_golden.json` (fixture) | 160,876 | `041c20722a957d1341108eb969dc677a123363011094ad05b36fdc1baa1050b0` |
+| **`ru_synth_v2_ch80.onnx`** (fp32, **generator v2**) | 1,142,727 | `763190f9bc9854a3183f10d7dba7d8e1de1c101812b5958ee9bdbb403b93089b` |
+| **`ru_synth_v2_ch80_fp16w.onnx`** (**ship bytes**) | 589,406 | `9004befb6ff07b744c65d3c13481539e758ebe10d4f47cbeffe68d39d12b0e52` |
+| **`ru_synth_v2_ch80_fp16w_golden.json`** (fixture) | 160,282 | `a5ed2b9f62843d085779f5ab7457e6608f5c47e8994c224146ebdaf32fcdb82d` |
+| `ru_synth_ch80.onnx` (fp32, generator v1 — superseded) | 1,142,727 | `d78a9fb9f8e170595a7714220cf5fd9dfc2324935900aec6cb6d7a2ec1a36666` |
+| `ru_synth_ch80_fp16w.onnx` (v1 — superseded) | 589,406 | `84ac284d4f0d0cb86061df9c557507e1489ab93a75b40885a4431976cee32469` |
+| `ru_synth_ch80_fp16w_golden.json` (v1 fixture — superseded) | 160,876 | `041c20722a957d1341108eb969dc677a123363011094ad05b36fdc1baa1050b0` |
+
+The v2 source checkpoint is `~/ctc-train/ckpt/phaseP-ru-v2full/best.pt` — same architecture,
+same 94 k schedule, same seed, **different training distribution**. The app-side contract is
+unchanged: same alphabet string, same slot order, same preset, same fixture shape, so swapping
+generations is a model-and-fixture swap and nothing else. The five other scripts have the same
+pair of generations (`{el,uk,bg,mk,he}_synth_v2_ch80*`); hashes in `PHASE_P.md` §6.1.
+
 
 Source checkpoint `~/ctc-train/ckpt/phaseIB-ru-synth/best.pt` — `resbn:80`, dil `1,2,4,8`,
 embed_hid 96, feat_v1, `t_out` 32, 279,346 params, step 87,000 of a 94,000-step schedule,
