@@ -247,6 +247,21 @@ valid-10k on the eval-only footing `YANDEX_LICENSE_RESEARCH.md` permits.
 | Δ (script − English) | **−2.28** | **+1.09** |
 | paired exact McNemar | p = **7.1e-12** (English wins) | p = **0.0099** (script wins) |
 
+The English model there is the shipped ch192; the fair, **capacity-matched**
+control is `phaseH-p50` (ch 80, resbn, dil 1,2,4,8, embed_hid 96 — architecturally
+identical to the ru model, trained on English with layout-alt p 0.5). On the same
+real probe it reads **75.79** in-dict t1 (greedy 17.57), so:
+
+| pair, real Yandex probe, n = 8,471 | Δ t1 | paired exact McNemar |
+|---|---|---|
+| ru-synth ch80 **vs** ch80 English zero-shot (capacity-matched) | **+1.62** | p = **1.4e-4** |
+| ru-synth ch80 **vs** ch192 English zero-shot (the ship model) | +1.09 | p = 0.0099 |
+| ch192 English **vs** ch80 English, both zero-shot | +0.53 | p = 0.11 (**n.s.**) |
+
+Two clean reads: **per-script synthesis training is worth ≈ +1.6 real top-1 at
+matched capacity**, and **English capacity buys nothing cross-script** — tripling
+the English model's width moves zero-shot Cyrillic by half a point of noise.
+
 **Both deltas are significant and they have opposite signs.** The synthesis
 holdout does not merely flatter models — for the comparison that actually
 matters (is a per-script model worth building?) **it returns the wrong answer,
