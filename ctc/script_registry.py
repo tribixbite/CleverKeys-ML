@@ -352,7 +352,27 @@ HE = ScriptSpec(
           "kept distinct, exactly as Hebrew orthography requires.",
 )
 
-SCRIPTS: Dict[str, ScriptSpec] = {s.code: s for s in (EL, UK, BG, MK, SR, HE)}
+#: Russian — **already delivered** (Phase I-B / J, exported 2026-08-18).  It is
+#: reproduced here only so Phase O can run its synthesis holdout through the
+#: *identical* code path as the new scripts and thereby measure the one number
+#: nothing else can supply: how far a synthesis-holdout score sits from the same
+#: model's score on REAL swipes.  Alphabet, layout and projection are
+#: byte-for-byte what ``prepare_yandex.project_ru`` and
+#: ``layouts/ru_jcuken_default.json`` already use (no NFD — it would decompose
+#: й into и + breve).
+RU = ScriptSpec(
+    code="ru", name="Russian",
+    app_xml="cyrl_jcuken_ru.xml", layout_json="layouts/ru_jcuken_default.json",
+    letters="абвгдежзийклмнопрстуфхцчшщыьэюя",
+    corner_only="ъёєіїўґ",
+    folds={"ё": "е", "ъ": "ь"},
+    lexicon=Lexicon(kind="ckdt", path=APP_DICTS / "langpack-ru.zip",
+                    tier="app-importable langpack-ru (CKDT v2, 50,000 words)"),
+    notes="the Phase-O calibration anchor: the only script with BOTH a "
+          "synthesis holdout and a real eval corpus.",
+)
+
+SCRIPTS: Dict[str, ScriptSpec] = {s.code: s for s in (RU, EL, UK, BG, MK, SR, HE)}
 
 
 def get(code: str) -> ScriptSpec:
