@@ -1357,24 +1357,31 @@ Concurrent Phase O agent owns its runs/files — do not touch; its v1 results ar
 baselines. Deliverable: ctc/SYNTH_V2_DESIGN.md + small measurement scripts.
 NO training beyond a tiny real-vs-synth classifier (GPU idle, use spare only).
 
-- [ ] read: cyrillic_synth.py, script_synth.py, layout_aug.py, PHASE_H.md,
-      PHASE_I_DATA.md, PHASE_O commits (short-word defect, probe inversion,
-      zero-shot control), ru real-data facts (~13 t1 real-over-synth; ru192
-      generator-artifact overfit)
-- [ ] Part 1a distributional gaps: real Yandex ru vs v1 synth, same words/layout
-      — length mix, duration, point counts, speed/accel, dwell, curvature,
-      start/end asymmetry (known start-side defect), transit shapes, sampling
-      artifacts
-- [ ] Part 1b discriminability: 2-layer MLP real-vs-synth classifier on the
-      campaign featurization; accuracy = quality metric; feature ablation
-- [ ] Part 1c downstream correlation: which gaps explain the 13-pt real gap +
-      the short-word inversion; audit v1 design assumptions (EN residual bank,
-      i.i.d. per-trace residual sampling loses user coherence, no
-      letter/bigram-conditioned dynamics)
-- [ ] Part 2 ranked v2 options: transplant fixes / learned generators
-      (license-clean VAE/diffusion, WordGesture-GAN note) / hybrid /
-      self-training loop (ru192 hazard addressed); each with expected gain,
-      cost, validation plan (ru real probe + classifier + downstream)
-- [ ] Part 3 recommended v2 spec (formulas, stages, gates, cost at this box's
-      throughput, expected ru-probe gain band) — marked awaiting user reqs
-- [ ] commit + push
+- [x] read: cyrillic_synth.py, script_synth.py, layout_aug.py, PHASE_H.md,
+      PHASE_I_DATA.md, PHASE_O (§2.1 calibration, short-word defect, probe
+      inversion, zero-shot control), PHASE_J §6.5 (ru192), DATASET_SCOUT §3
+- [x] Part 1a distributional gaps (synth_gap_audit.py, 9,416 word-matched
+      pairs): top 3 = speed profile (step_cv KS 0.60, step_max 3.2x real —
+      mechanism pinned: vertex-count-only donor match leaves 25% of segments
+      >2x compressed / 12% >2x stretched and the arc remap scales spacing by
+      exactly that ratio, never re-timed), length mix (le3 3.3% vs 35.6%),
+      transit jaggedness (sharp turns 3.3x, incl. a 60Hz up/down-sampling
+      asymmetry between fast ru traces and slower EN donors)
+- [x] Part 1b classifier: word-matched + word-disjoint MLP = 90.4% on the
+      speed profile ALONE (coords 77.2, angles 75.9, endpoints 66.3 —
+      endpoint stats, v1's only gate, are the LEAST discriminative view);
+      unmatched (train-draw) footing 90.0
+- [x] Part 1c downstream chaining (13-pt gap, short-word inversion, ru192
+      artifact overfit, lambda/probe inversion) + design-assumption audit
+      (EN-only bank, i.i.d. residuals lose user coherence, no bigram
+      conditioning, no time axis, 255-rank draw, endpoint-only gating)
+- [x] Part 2 ranked options A-I with expected gains chained to measurements
+      (A corpus-freq draw / B kinematic re-timing / C geometry-matched donors
+      / D session coherence / E start-side / F segment bank / G learned
+      corrector / H VAE-diffusion / I self-training — I mostly blocked:
+      Yandex license + no real data elsewhere + ru192 hazard)
+- [x] Part 3 recommended spec: v2 transplant = A+B+C+D, gates G0-G5
+      pre-registered (classifier speed view <=0.70 from 0.904; ru real probe
+      >=78.9 floor, band +2..+5 over 77.41), cost ~10 GPU-h + 3 days;
+      EXPLICITLY awaiting user requirements before any build
+- [x] commit + push (ctc/SYNTH_V2_DESIGN.md + ctc/synth_gap_audit.py)
