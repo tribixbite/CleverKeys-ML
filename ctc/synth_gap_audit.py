@@ -511,21 +511,30 @@ def stage_classifier(args: argparse.Namespace) -> int:
         report[f"acc_{name}"] = acc
         print(f"  {name:<14} dim {X.shape[1]:>4}  test acc {acc:.4f}")
 
-    # Unmatched arm: the v1 TRAINING draw vs the real corpus — adds the
-    # word/length-mix gap to whatever the matched arm sees.
-    synth_train = resolve(args.workdir, Path("cache_ru_synth/train_synth.npz"))
+    # Unmatched arm — repaired (SYNTH_V2_RESEARCH_AUDIT §3.1 defect 7).  As
+    # originally written this split by random ROW across two classes with
+    # different word distributions, so it read 0.732 on coordinates from word
+    # memorisation alone and the "unmatched control 0.900" it produced was not
+    # interpretable as a style measurement at all.  Splitting on the union of
+    # words removes the memorisation channel while KEEPING the length-mix
+    # signal, which is what this arm is for: it sees the draw policy on top of
+    # whatever the matched arm sees.
+    synth_train = resolve(args.workdir, Path(args.unmatched_cache))
     if synth_train.exists():
         with np.load(synth_train) as d:
             sf = np.array(d["features"][:len(real)])
+            sw = [str(w) for w in d["words"][:len(real)]]
+        uniq = sorted(set(words) | set(sw))
+        test_u = set(np.array(uniq)[rng.permutation(len(uniq))[:len(uniq) // 5]])
+        te2 = np.array([w in test_u for w in words] + [w in test_u for w in sw])
         x2 = np.concatenate([real, sf]).reshape(len(real) + len(sf), -1)
         y2 = np.concatenate([np.zeros(len(real), np.int64),
                              np.ones(len(sf), np.int64)])
-        perm = rng.permutation(len(x2))
-        cut = int(0.8 * len(x2))
-        acc = train_mlp(x2[perm[:cut]], y2[perm[:cut]],
-                        x2[perm[cut:]], y2[perm[cut:]], seed=args.seed)
-        report["acc_unmatched_coords"] = acc
-        print(f"  unmatched (v1 train draw vs real), coords: test acc {acc:.4f}")
+        acc = train_mlp(x2[~te2], y2[~te2], x2[te2], y2[te2], seed=args.seed)
+        report["acc_unmatched_coords_word_disjoint"] = acc
+        report["unmatched_cache"] = str(synth_train)
+        print(f"  unmatched, WORD-DISJOINT (train draw vs real), coords: "
+              f"test acc {acc:.4f}  [{int(te2.sum())} test rows]")
 
     (out_dir / "classifier.json").write_text(json.dumps(report, indent=1))
     print(f"-> {out_dir / 'classifier.json'}")
@@ -1082,6 +1091,8 @@ def main() -> int:
                     help="the generated v2 cache dir, for the G2 length mix")
     ap.add_argument("--v1-cache", default="cache_ru_phaseO",
                     help="the v1 cache dir the G2 table compares against")
+    ap.add_argument("--unmatched-cache", default="cache_ru_synth/train_synth.npz",
+                    help="training draw for the unmatched classifier arm")
     args = ap.parse_args()
     return {"data": stage_data, "metrics": stage_metrics,
             "classifier": stage_classifier, "v2": stage_v2,

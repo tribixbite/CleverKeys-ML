@@ -261,6 +261,23 @@ Two notes on instruments, both load-bearing.
   statistically indistinguishable from real Russian swipes. The next section
   measures how much of that is the donor bank rather than the generator.
 
+**The unmatched arm, repaired and re-read.** The audit's defect 7 was that
+`acc_unmatched_coords` split by random *row* across two classes with different
+word distributions, so it read 0.732 on coordinates from word memorisation alone
+and its headline 0.900 was not interpretable as a style measurement. Splitting on
+the union of words removes the memorisation channel and keeps the length-mix
+signal, which is what the arm is for — it is the only view in the battery that
+sees **fix A**, because the matched arms hold words fixed:
+
+| training draw vs the real corpus, coords, word-disjoint | acc | gap-closure |
+|---|---|---|
+| v1 draw (`255 − rank`) | 0.8868 (0.900 with the leak) | — |
+| **v2 draw (wordfreq token mass)** | **0.7206** | **43.0 %** |
+
+That is a larger closure than the matched coords view (0.7507 → 0.6696, 21 %),
+and it is the measurement that says fix A is doing real work rather than merely
+satisfying its own gate.
+
 ### 2.5 The en→en control — where the residual actually lives
 
 Split HWS in half, treat one half as "real", transplant a donor from the
