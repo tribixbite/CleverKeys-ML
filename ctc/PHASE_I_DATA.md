@@ -395,3 +395,132 @@ char-generic). The extra-grid (33-letter) geometry is vendored but untrained;
   `eval_cyrillic.py`, vendored ru geometries
 * `50c561a` letter-area frame fix for the ru conversion
 * *(this file + results: pending)*
+
+---
+
+## 9. The Russian ONNX export (2026-08-18)
+
+`phaseIB-ru-synth` — the license-clean, synthesis-only Cyrillic bar-holder of §5–§6 —
+exported to the ship contract and validated through the exported bytes.
+
+**Why this arm and not the other two.** `phaseIB-ru-real` decodes at 89.64 and is
+**Yandex-license-blocked from shipping, permanently** (§4, `YANDEX_LICENSE_RESEARCH.md`):
+no grant exists, the corpus is a protected database under ГК РФ ст. 1334, and ст. 1335.1's
+carve-outs cover research and education but not a product. `phaseJ-joint` (the single en+ru
+model) is license-clean on data but was **rejected** — it cost −0.42 en top-1 against a 0.3
+tolerance, and its ru lead over this arm is +0.31 on the confirm half, inside one binomial SE
+(±0.64 at n = 4,240), while losing t3 and t5 on that same half (`PHASE_J.md` §6.9).
+`phaseIB-ru-synth` is trained on 1,000,000 rows containing **zero Yandex data** — Yandex is
+used here for **evaluation only**, which the license analysis permits.
+
+### 9.1 Checkpoint and export
+
+Source `~/ctc-train/ckpt/phaseIB-ru-synth/best.pt`: `resbn:80`, dil `1,2,4,8`, embed_hid 96,
+feat_v1, `t_out` 32, **279,346 params**, step 87,000 of the 94,000-step schedule, greedy
+selection (`--beam-val-rows 0`), seed 1234, layout `ru_jcuken_default.json`, cache
+`cache_ru_synth`.
+
+```
+python3 export_onnx.py --ckpt ckpt/phaseIB-ru-synth/best.pt \
+    --layout ctc/layouts/ru_jcuken_default.json \
+    --parity-features cache_ru_synth/val.npz \
+    --out ctc/artifacts/ru_synth_ch80.onnx
+python3 quantize_onnx.py --mode fp16w --layout ctc/layouts/ru_jcuken_default.json \
+    --onnx ctc/artifacts/ru_synth_ch80.onnx --out ctc/artifacts/ru_synth_ch80_fp16w.onnx
+```
+
+| gate | measured | bound |
+|---|---|---|
+| Conv+BN fold, sliced contract view | **1.60e-04** | `FOLD_TOL` 5e-3 |
+| fp32 export vs torch, **real traces on the real layout**, sliced `[32,32]` | **1.14e-04** | `PARITY_TOL` 1e-3 |
+| fp32 export vs torch, **argmax** (real + white-noise probes) | **100/100** and **100/100** | binding gate — must be 100/100 |
+| fp16w vs fp32, real traces, sliced | **1.16e-01** | disclosed, not gated (see below) |
+| fp16w vs fp32, **argmax**, real traces | **98/100** | disclosed, not gated |
+
+The head contract is unchanged: `[1,32,65]`, 64 geometry slots + blank. The 31-letter jcuken
+alphabet occupies 31 of the 64 slots, so the sliced contract view is `[32,32]` rather than the
+Latin `[32,27]`. **The 33-letter extra grid would also fit** — the constraint is 64 slots, and
+the model has no alphabet (§4).
+
+**On the fp16w residue.** 1.16e-01 sliced is two orders above the ch80 fp32 residue and ~5×
+the ch192 ship model's 2.30e-02 (`PHASE_J.md` §9). It is disclosed rather than gated because
+the campaign's own rule is that **the decode is the binding check** on a weight-storage lever
+(`PHASE_I.md` §7.3, `PHASE_J.md` §9) — and the decode is unchanged, below. The two argmax
+flips per hundred move greedy by +0.09 and the beam by nothing.
+
+Artifacts: `artifacts/ru_synth_ch80.onnx` 1,142,727 B sha256
+`d78a9fb9f8e170595a7714220cf5fd9dfc2324935900aec6cb6d7a2ec1a36666`;
+`artifacts/ru_synth_ch80_fp16w.onnx` 589,406 B sha256
+`84ac284d4f0d0cb86061df9c557507e1489ab93a75b40885a4431976cee32469`.
+The fp32 file is **byte-identical to the export the training run produced on 2026-08-09**
+(§6's `d78a9fb9…`) — an unplanned but welcome end-to-end determinism check on
+`encoder_from_checkpoint` → fold → `torch.onnx.export`.
+
+### 9.2 Validation on the real-val probe — the exported bytes reproduce the checkpoint
+
+`eval_cyrillic.py`, layout `ru_jcuken_default`, lexicon `app` (langpack-ru CKDT v2, 50 k,
+`freq = 255 − rank`), preset **1.05, 2.0, 0.2, 0.3734, 0.9882** — the app's
+`CtcScoringParams.tunedRuCkdt` verbatim — beam 100, top-k 8. Probe = the untouched Yandex
+valid-10k, the established **9,416** default-grid rows, **eval-only footing**.
+
+| artifact | rows slice | rows | decoded | OOV | in-dict t1 / t3 / t5 | all-rows t1 | ≤3 t1 | 4+ t1 | greedy |
+|---|---|---|---|---|---|---|---|---|---|
+| fp32 | 4708:9416 (confirm) | 4,708 | 4,240 | 468 | **77.92 / 89.50 / 92.00** | 70.18 | 86.78 | 72.32 | 37.62 |
+| **fp16w** | 4708:9416 (confirm) | 4,708 | 4,240 | 468 | **77.92 / 89.50 / 92.00** | 70.18 | 86.78 | 72.32 | 37.71 |
+| fp16w | 0:4708 (tune) | 4,708 | 4,231 | 477 | 76.88 / 88.63 / 91.52 | 69.10 | 86.09 | 71.06 | 36.54 |
+| **fp16w** | all | 9,416 | 8,471 | 945 | **77.41 / 89.07 / 91.76** | 69.64 | 86.44 | 71.70 | 37.13 |
+
+**The exported artifact reproduces the checkpoint's confirm-half 77.92 exactly** (`PHASE_J.md`
+§6.9; the tune half lands at 76.88 vs the published 76.91, −0.03, consistent with the fp16w
+rounding). The full-set **77.41** is the "honest ru number ≈ 77.4" of §6.9 and
+`MODELS_TABLE.md:512`, now measured on one run rather than derived from two halves.
+
+Raw JSON: `ckpt/phaseIB-ru-synth/export_{fp32,fp16w}_*.json` (runtime dir, not committed).
+
+### 9.3 The golden fixture
+
+`make_golden.py` gained a `--vocab` switch (`VOCABS`), additive: the `en` path is asserted
+**byte-identical** to the shipped `phaseM_kd_fresh_w1_fp16w_golden.json` `cases` array by
+regeneration, so no existing fixture moves.
+
+```
+python3 make_golden.py --onnx ctc/artifacts/ru_synth_ch80_fp16w.onnx \
+    --layout ctc/layouts/ru_jcuken_default.json --vocab ru \
+    --preset 1.05,2.0,0.2,0.3734,0.9882 \
+    --out ctc/artifacts/ru_synth_ch80_fp16w_golden.json
+```
+
+`artifacts/ru_synth_ch80_fp16w_golden.json`, 160,876 B, sha256
+`041c20722a957d1341108eb969dc677a123363011094ad05b36fdc1baa1050b0`. Ten cases: five pure
+resampler-branch probes (script-independent), one `feat_word_path_кот`, and four model-backed
+beam cases at `frames 32 / numClasses 32`.
+
+The ru vocabulary mirrors the en one structurally — a four-member shared-prefix family so the
+trie branching is exercised, the highest-frequency short word, a greeting, and one long word —
+and its frequencies are the **app's own CKDT scale** read out of `langpack-ru.zip`
+(`255 − rank`), not invented weights, because λ is scale-sensitive and a fixture on the wrong
+scale would validate a ranking the app never performs:
+`кот` 137, `кота` 122, `коты` 96, `котик` 93, `что` 249, `привет` 169, `клавиатура` 88.
+
+The four beam cases are a real test rather than a formality — greedy misses every one
+(`кот`→`кт`, `что`→`сто`, `привет`→`пивет`, `клавиатура`→`клвиатура`) and the beam recovers
+all four at top-1 with the prefix family ranked behind.
+
+### 9.4 Evidence tier — the exact sentence
+
+> Russian CTC is **val-tier, single-seed, license-clean-synthesis-trained, Yandex-eval-only**.
+
+No sealed Cyrillic split has ever existed and none can be created from a corpus that cannot be
+licensed, so these numbers can never become "test-validated". One seed (1234) against a
+campaign whose every other bar is a seed-mean bar. Only λ was ever swept for ru; γ, β and the
+prune constants are carried from E1. No on-device latency or memory measurement exists.
+
+### 9.5 What is NOT done
+
+The export is not the wiring. App-side, Russian still needs: the ru langpack bundled or gated
+(it is an import today, not an asset); a per-script `ALPHABET` and `buildMappedLayout` in
+`CtcEngineAdapter` (both are 26-hardcoded, and `letterOf` filters to `'a'..'z'`); a
+language→model mapping (the adapter has exactly one `MODEL_ASSET`); the fixture rule extended
+to a second (model, fixture, preset) triple; and a device latency/memory read. The trie is
+**not** a blocker — the app's `MAX_CHILDREN = 26` clamp was already removed and the bound moved
+to a constructor check against the emission-head width.

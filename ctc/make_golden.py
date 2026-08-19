@@ -37,6 +37,25 @@ from paths import (DEFAULT_LAYOUT, DEFAULT_WORKDIR, resolve,  # noqa: E402
 LEXICON = [("cat", 150.0), ("car", 180.0), ("cart", 120.0), ("care", 140.0),
            ("the", 250.0), ("hello", 160.0), ("keyboard", 110.0)]
 WORDS = ["cat", "the", "hello", "keyboard"]
+
+#: Per-script fixture vocabularies. Each is ``(lexicon, decoded words)`` and each
+#: mirrors the ``en`` structure exactly — a four-member shared-prefix family so
+#: the beam's trie branching is actually exercised, the script's highest-frequency
+#: short word, a greeting, and one long word — so a new script's fixture probes
+#: the same decode behaviours the English one does.
+#:
+#: ``ru`` frequencies are the app's own CKDT scale (``255 - rank`` from
+#: ``langpack-ru.zip``'s ``dictionary.bin``, the identical formula
+#: ``eval_cyrillic.build_trie`` uses), NOT invented weights: the λ term is scale
+#: sensitive (PHASE_J §6.9 — the CKDT scale is exactly why ru wants λ = 2.0 and
+#: not E1's 1.1), so a fixture on a different frequency scale would validate a
+#: ranking the app never performs.
+VOCABS = {
+    "en": (LEXICON, WORDS),
+    "ru": ([("кот", 137.0), ("кота", 122.0), ("коты", 96.0), ("котик", 93.0),
+            ("что", 249.0), ("привет", 169.0), ("клавиатура", 88.0)],
+           ["кот", "что", "привет", "клавиатура"]),
+}
 BEAM_WIDTH = 32
 TOP_K = 4
 
@@ -90,6 +109,12 @@ def main() -> int:
                     dest="ens_avg",
                     help="averaging mode when --onnx lists >1 model")
     ap.add_argument("--out", default="ctc_model_golden.json")
+    ap.add_argument("--vocab", default="en", choices=sorted(VOCABS),
+                    help="which script's fixture vocabulary to freeze (see "
+                         "VOCABS). Must match --layout: the ideal paths are "
+                         "traced through the layout's own key centers, so a word "
+                         "with a letter the layout lacks is a KeyError. Default "
+                         "'en' keeps every pre-existing fixture byte-identical.")
     ap.add_argument("--preset", default="",
                     help="scoring preset the beam cases are generated at, as "
                          "'gamma,lambda,beta,gammaPrune,betaPrune'. Defaults to the "
@@ -122,8 +147,13 @@ def main() -> int:
                 for p in str(args.onnx).split(",")]
     ens_avg = getattr(args, "ens_avg", "prob")
 
+    lexicon, words = VOCABS[args.vocab]
+    missing = sorted({c for w, _ in lexicon for c in w} - set(letters))
+    if missing:
+        raise SystemExit(f"--vocab {args.vocab} needs letters {missing!r} that "
+                         f"{args.layout.name} does not have")
     trie = LexTrie()
-    for w, f in LEXICON:
+    for w, f in lexicon:
         trie.insert(w, f)
 
     keys = np.zeros((MAX_KEYS, 2), np.float32)
@@ -135,8 +165,8 @@ def main() -> int:
     # Featurizer-only cases first: the fixed synthetic branch probes, plus one
     # realistic multi-segment word path built from the layout's own key centers.
     feat_cases = list(FEATURIZE_CASES)
-    fx, fy, ft = ideal_path(by_letter, "cat")
-    feat_cases.append(("feat_word_path_cat", fx, fy, ft))
+    fx, fy, ft = ideal_path(by_letter, words[0])
+    feat_cases.append((f"feat_word_path_{words[0]}", fx, fy, ft))
     for name, xs, ys, ts in feat_cases:
         feats = featurize(xs, ys, ts)                                 # [2,64]
         cases.append({
@@ -145,7 +175,7 @@ def main() -> int:
                        "t": [float(v) for v in ts]},
             "features": [float(v) for v in feats.reshape(-1)],        # [128]
         })
-    for word in WORDS:
+    for word in words:
         xs, ys, ts = ideal_path(by_letter, word)
         feats = featurize(xs, ys, ts)                                 # [2,64]
         feed = {"features": feats[None], "layout_keys": keys[None],
@@ -164,7 +194,7 @@ def main() -> int:
             "points": {"x": xs, "y": ys, "t": ts},
             "features": [float(v) for v in feats.reshape(-1)],        # [128] x-row then y-row
             "emissions": [[float(v) for v in row] for row in lp],
-            "lexicon": [[w, f] for w, f in LEXICON],
+            "lexicon": [[w, f] for w, f in lexicon],
             "params": {"gamma": gamma, "lambda": lam, "beta": beta,
                        "alpha": 0.0, "gammaPrune": gamma_prune,
                        "betaPrune": beta_prune, "beamWidth": BEAM_WIDTH,

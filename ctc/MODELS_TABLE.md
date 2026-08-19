@@ -953,6 +953,31 @@ fixture and preset move together):
 | `phaseK_mix2i8f16_golden.json` | 140,497 | `e3c2a351be195b6d08d424d6a1db0cf38622d2dda2ed8c546b12221aa32febeb` | the `mix2-i8f16` **averaged** head, E1 |
 | `phaseK_t64_golden_contractv2.json` | 229,413 | `22124ebbcb5be3f5fc6174a05331ed68effb17954f1d26ced424106a8adf9a42` | `phaseK_t64_s1234_contractv2`, **frames = 64** |
 | `sw2345_s1234_golden_CANDIDATE.json` | 140,098 | `b397715091b0ccb26be802842a6b3048efbeba7fbc3fd19572face62f12b47b7` | `sw2345_s1234`, candidate fixture (never promoted) |
+| `ru_synth_ch80_fp16w_golden.json` | 160,876 | `041c20722a957d1341108eb969dc677a123363011094ad05b36fdc1baa1050b0` | `ru_synth_ch80_fp16w` on `ru_jcuken_default`, at the app's `tunedRuCkdt` preset (1.05 / **2.0** / 0.2 / 0.3734 / 0.9882), CKDT frequency scale — see §8.2b |
+
+#### 8.2b The Russian export (2026-08-18)
+
+`phaseIB-ru-synth` exported to the ship contract. **Evidence tier: val-only,
+permanently; single seed (1234); license-clean synthesis training; Yandex =
+eval-only per `YANDEX_LICENSE_RESEARCH.md`.** Full derivation in
+`PHASE_I_DATA.md` §9; the audience-facing writeup is
+`ctc-architecture-and-multiscript-guide.md` §4.
+
+| file | bytes | sha256 |
+|---|---|---|
+| `artifacts/ru_synth_ch80.onnx` (fp32 source) | 1,142,727 | `d78a9fb9f8e170595a7714220cf5fd9dfc2324935900aec6cb6d7a2ec1a36666` |
+| `artifacts/ru_synth_ch80_fp16w.onnx` (ship bytes) | 589,406 | `84ac284d4f0d0cb86061df9c557507e1489ab93a75b40885a4431976cee32469` |
+
+The fp32 re-export is **byte-identical** to the artifact the 2026-08-09 training
+run produced (`d78a9fb9…`, §8.2's "not committed" list) — a free determinism
+check on the whole export path. fp16w decode is free: in-dict t1/t3/t5 on the
+confirm half are identical to fp32 (**77.92 / 89.50 / 92.00**) despite a
+1.16e-01 sliced emission residue and 2 argmax flips per 100 real traces.
+Full-set in-dict t1 **77.41** (9,416 rows, 8,471 decoded, app-ru 50 k CKDT trie,
+λ = 2.0). **This is the only non-Latin ONNX the campaign has produced that is
+shippable at all** — `phaseIB-ru-real` (89.64) is Yandex-license-blocked
+forever, and `phaseJ-joint` (78.23 confirm) was rejected on its −0.42 en
+regression against a 0.3 tolerance.
 
 Also present in the working directory but **not committed** (too large):
 `resbn256i_s4321.onnx` sha `910ad2f138e1911f56c6965bce06338ef160b0bb4ca9977eade4dc8208eb40ec`
