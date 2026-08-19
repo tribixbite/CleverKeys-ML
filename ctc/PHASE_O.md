@@ -1,0 +1,227 @@
+# Phase O — per-script CTC models for the non-Latin scripts the app can serve
+
+**Opened:** 2026-08-18. **Workdir** `~/ctc-train`, **GPU** RTX 5080 Laptop (16 GB).
+The app repo `/home/will/git/swype/CleverKeys` is a **read-only reference**.
+
+Phase I-B proved one thing and left one question open. It proved that a script
+with **no swipe corpus at all** can be launched from English motor residuals
+transplanted onto its own layout — Cyrillic reached in-dict t1 **76.21** at
+λ = 1.1, **≈ 77.4** once PHASE_J §6.9 tuned λ = 2.0, against a real Yandex
+holdout with no real Cyrillic row anywhere in the pipeline. The open question
+was scope: *which other scripts does that unlock, and what does each one
+actually cost?*
+
+Phase O answers that question script by script. Everything here is
+**synthesis-only evidence** unless a section says otherwise — Russian remains
+the single script in this campaign with a real eval corpus, and that corpus
+(Yandex Cup 2023) is **eval-only, never training**, per `YANDEX_LICENSE_RESEARCH.md`.
+
+---
+
+## 1. O1 — INVENTORY
+
+### 1.1 What "the app can actually serve" means, operationally
+
+A script is servable when **both** halves exist:
+
+**(a) A layout with extractable per-key geometry.** The app ships 86 layout XMLs
+in `src/main/layouts/` (the dir `build.gradle`'s `copyLayoutDefinitions` copies
+into `build/generated/layouts/res/raw`; `srcs/layouts/` is the upstream-style
+source dir the *tests* read). 36 of them declare a non-Latin `script`.
+
+**(b) A lexicon.** The app has exactly **seven bundled CKDT-v2 dictionaries**
+(`src/main/assets/dictionaries/`: en 98,140 · es 50,000 · fr/de/it/pt/sv 40,000)
+— all Latin — plus **19 importable langpack zips** in `scripts/dictionaries/`.
+Of those 19, exactly **two are non-Latin: `langpack-ru.zip` (50,000) and
+`langpack-el.zip` (39,860)**. There is no Hebrew, Arabic, Persian, Armenian,
+Georgian, Devanagari, Bengali, Tamil, Kannada, Gujarati, Sinhala or Hangul
+lexicon anywhere in the repo.
+
+So on the strict reading, the answer to "every non-Latin script the app can
+actually serve" is **two: Cyrillic-ru and Greek-el**. Everything else is
+blocked on a dictionary — which for eleven further languages is a ~20-minute
+job, because `wordfreq` is installed here and the app's own dictionary
+pipeline (`scripts/build_wordlist.py` → `build_dictionary.py`) is itself a
+wordfreq consumer whose rank formula this phase replicates byte-exactly
+(`script_registry.frequency_to_rank`). Those are carried as **Tier B** below.
+
+### 1.2 The geometry extractor, and why it is trustworthy
+
+`app_layout.py` replicates the app's own key walk line for line:
+
+* `a11y/KeyboardGeometry.computeKeyRects` — `xLeft = x + key.shift*keyWidth`,
+  `xRight = xLeft + key.width*keyWidth`, `x = xRight`; `yTop = y + row.shift*rowHeight`,
+  `yBottom = y + (row.shift+row.height)*rowHeight`, `y = yBottom`;
+* `KeyboardData.Row.parse` / `Key.parse` defaults — row `height` 1 (clamped
+  ≥ 0.5), row `shift` 0, row `scale` 0 = off (else `Row.updateWidth` scales key
+  *widths* only), key `width` 1, key `shift` 0; centre value is `key0` **or** its
+  synonym `c`;
+* `swipe/CtcEngineAdapter.buildMappedLayout` — normalisation over the
+  **bounding box of the letter keys only**, first-occurrence-wins in row-major
+  order.
+
+Margins and unit sizes cancel in that normalisation, so they are fixed at 0/1.
+The bottom row, number row and numpad are injected at runtime and carry no
+letters, so they cancel too.
+
+**Validation — the extractor reproduces the frame the campaign trained in.**
+Running it on the app's own `latn_qwerty_us.xml` and differencing against
+`en_qwerty.json` — the geometry every English model in this campaign was
+trained and evaluated on:
+
+| comparison | max abs dx | max abs dy | mean euclid | max euclid |
+|---|---|---|---|---|
+| app `latn_qwerty_us.xml` vs `en_qwerty.json` | **4.7e-4** | 0.0 | 2.9e-4 | **4.7e-4** |
+| app `cyrl_jcuken_ru.xml` vs Yandex-derived `ru_jcuken_default.json` | 3.4e-3 | 0.0 | 8e-4 | 3.4e-3 |
+
+Row 1 and row 3 agree to the last bit; the 4.7e-4 is row 2 alone (a rounding
+vintage in the FUTO-derived json). **The app frame and the training frame are
+the same frame**, to 0.05 % of the board — three orders of magnitude inside the
+measured affine-tolerance envelope. Every Phase-O layout json therefore lands
+on the canonical `(2r+1)/2R` row family (0.1667 / 0.5 / 0.8333), which was
+checked for all five generated layouts.
+
+The ru row of that table is a **free retro-validation of Phase I-B**: the ru
+model was trained on the *Yandex corpus'* grid, and the app's own ЙЦУКЕН grid
+sits 3.4e-3 away from it. The ru model is deployable on the app's geometry
+without a regeneration.
+
+**Falsification control.** The same wrong-geometry control Phase I-B used
+(`PHASE_I_DATA` §4: qwerty centres under a `letter → key i mod 26` map collapse
+start-hit to 0.008 against 0.917 for the right frame) is re-run per script in
+§2 as part of each script's endpoint-proximity gate — a frame is never accepted
+on its row-position arithmetic alone.
+
+### 1.3 Two app defects found while doing this
+
+1. **The shipped Greek layout declares the wrong script.**
+   `srcs/layouts/grek_qwerty.xml` says `script="greek"`; the copy that actually
+   builds, `src/main/layouts/grek_qwerty.xml`, says `script="latin"` (verified
+   identical in `build/generated/layouts/res/raw/`). The two files differ in
+   nothing else. Today this is harmless — `SwipeEngineRouter` sends it down the
+   CTC Latin path, `CtcEngineAdapter.buildMappedLayout` finds no a–z and returns
+   null, and the swipe falls through to the geometric engine — but it is exactly
+   the attribute a Greek CTC path would key on, so it must be fixed *before*
+   any Greek model is wired in.
+2. **The bundled Greek lexicon has no final sigma.** All 39,860 words in
+   `langpack-el.zip` carry word-final **σ** where Greek orthography requires
+   **ς** (`ξεκινώντασ`, `ὡσ`). This is documented in the app's own
+   `scripts/build_wordlist.py::load_aosp`: wordfreq casefolds its corpus and
+   Python casefolding maps ς→σ; the note calls the σ-final display forms "a
+   documented wordfreq-status-quo caveat, not a fix target this round".
+   For tap-typing that is a cosmetic misspelling. **For swipe-typing it is
+   fatal**, and this phase measured how fatal: **25.7 % of the lexicon
+   (25.4 % by frequency weight) is σ-final**, and σ and ς are *different keys in
+   different rows* of the Greek layout (ς at the QWERTY-w position in row 1, σ at
+   the s position in row 2). A σ-final lexicon would train and score one Greek
+   word in four against the wrong endpoint. Phase O therefore restores final
+   σ→ς by rule — a lossless repair, because modern Greek orthography is fully
+   deterministic here — and the app must apply the same one-line rule when it
+   builds the el trie (or regenerate the pack). See §3 for the integration note.
+
+### 1.4 The non-Latin layout census
+
+`app_layout.py --census` over all 86 shipped layouts. `centre` = letters on
+`key0`/`c` (swipe-typeable); `corner-only` = letters that exist **only** on a
+`key1..key8` slot. Corner letters are typeable by a directional flick but
+**never by a swipe**, and the app's own alias table gives them the *host key's
+centroid* — two letters at one coordinate, which no geometry-conditioned
+encoder can separate. They are excluded from every Phase-O alphabet and their
+cost is measured, not waved away.
+
+| script | layouts | centre letters | corner-only | lexicon in repo | verdict |
+|---|---|---|---|---|---|
+| **Cyrillic** | 11 | 26–42 | varies | **ru 50 k (langpack)** | ru **DONE** (Phase I-B/J); uk/bg/mk buildable (Tier B); sr blocked; kk/mn/tj/os/as no lexicon source |
+| **Greek** | 1 | **25** | none | **el 39,860 (langpack)** | **Tier A — the one new fully-served script** |
+| Hebrew | 2 | 27 | none | none | Tier B (wordfreq `he`) |
+| Arabic | 5 | 29–33 | **آ أ إ ذ** and more | none | Tier C — common letters are corner-only |
+| Persian | 2 | 31 | ء آ ئ ژ | none | Tier C |
+| Urdu | 1 | 26 | 18 incl. آ ث ح خ ذ ص ض ظ غ | none | Tier C — over 40 % of the alphabet is corner-only |
+| Armenian | 1 | 38 | և | none | **blocked-on-dictionary** (no wordfreq `hy`) |
+| Georgian | 2 | 26–32 | ჭ ჟ ღ შ ჩ ძ … | none | **blocked-on-dictionary** (no wordfreq `ka`) |
+| Devanagari | 3 | **7–20** | 30–40 | none | **structurally blocked** |
+| Bengali / Gujarati / Kannada / Tamil / Sinhala | 6 | **7–26** | 13–40 | none | **structurally blocked** |
+| Hangul | 1 | 26 (jamo) | 25 | none | **structurally blocked** |
+| Shavian | 1 | 39 | 9 | none | no lexicon; niche |
+
+"Structurally blocked" is not a scheduling excuse, it is a property of the
+layouts: `kann_kannada.xml` exposes **7** centre letters and 45 corner-only
+ones, `deva_alt.xml` **8** centre and 40 corner. In those scripts the writing
+system's units are simply not on the swipe surface — a swipe path cannot reach
+them — so no amount of training data helps. They need a layout redesign (or a
+conjunct-aware input model) before a swipe model is even a coherent request.
+Arabic/Persian/Urdu sit one notch better: the *consonant skeleton* is mostly on
+centre keys, but the hamza-carriers (أ إ آ) that a large share of words need are
+on corners, so a swipe model would systematically fail those words. All three
+are recorded as **priced, not attempted**.
+
+### 1.5 The Phase-O work list, ranked
+
+| # | script | letters | lexicon | tier | evidence available |
+|---|---|---|---|---|---|
+| 0 | **Cyrillic-ru** | 31 | app langpack-ru 50 k, CKDT | **DONE** — the worked example | synthesis + **real Yandex holdout** (unique) |
+| 1 | **Greek-el** | **25** | app langpack-el 39,860, CKDT | **A** — bundled lexicon, perfect 1:1 layout fit, zero corner-only | **synthesis-holdout only** |
+| 2 | **Ukrainian-uk** | 31 | wordfreq `uk`, app rank formula | **B** | synthesis-holdout only |
+| 3 | **Hebrew-he** | 27 | wordfreq `he`, app rank formula | **B** — perfect fit, first abjad/RTL | synthesis-holdout only |
+| 4 | **Bulgarian-bg** | 30 | wordfreq `bg`, app rank formula | **B** — perfect fit | synthesis-holdout only |
+| 5 | **Macedonian-mk** | 31 | wordfreq `mk`, app rank formula | **B** — perfect fit | synthesis-holdout only |
+| — | Serbian-sr | 30 | **none** — wordfreq `sh` yields **0** Cyrillic words in its top 80 k (it is a Latin-script list) | blocked | — |
+| — | Armenian-hy, Georgian-ka | 38 / 32 | none | blocked-on-dictionary | — |
+| — | Arabic/Persian/Urdu | 26–33 | none | priced, not attempted (corner-only letters) | — |
+| — | Indic, Hangul | 7–26 | none | structurally blocked | — |
+
+Measured costs that the ranking already accounts for:
+
+* **uk** — ї and ґ are `loc` corner slots on `cyrl_jcuken_uk.xml`, so **4.03 %
+  of the top-60 k Ukrainian vocabulary (4.16 % frequency-weighted) is
+  permanently un-swipe-typeable** on this layout. That is a layout limitation,
+  not a model limitation, and it is a ceiling on any uk number reported here.
+* **bg / mk** — the only corner-only letters are the accented disambiguators
+  ѝ (and ѐ for mk); they fold to и / е, which is what Bulgarian and Macedonian
+  typists do on a keyboard without them. Effective loss ≈ 0.
+* **el / he / sr** — zero corner-only letters. The layout is the alphabet.
+
+### 1.6 Layout artifacts committed by O1
+
+Generated with `app_layout.py --xml <file> --letters <alphabet>`; every one
+lands on the `(2r+1)/2R` row family:
+
+| script | layout json | source XML | letters | letter-box (units) |
+|---|---|---|---|---|
+| el | `layouts/el_qwerty.json` | `grek_qwerty.xml` | 25 | 10 × 3 |
+| uk | `layouts/uk_jcuken.json` | `cyrl_jcuken_uk.xml` | 31 | 11 × 3 |
+| bg | `layouts/bg_bds.json` | `cyrl_ueishsht.xml` | 30 | 11 × 3 |
+| mk | `layouts/mk_lynyertdz.json` | `cyrl_lynyertdz_mk.xml` | 31 | 11 × 3 |
+| he | `layouts/he_1.json` | `hebr_1_il.xml` | 27 | 11 × 3 |
+
+All five load through the committed `train.py --layout` unchanged
+(`load_layout_centers` accepts them; keys[] order == `letters`, so no emission
+column is permuted). Every alphabet fits well inside the 64 slots the head
+provides — the largest here is 31, the same as ru.
+
+### 1.7 Lexicon inventory as loaded
+
+`script_registry.py` output (projection applied identically to lexicon and
+targets; weights on the CKDT `255 − rank` scale):
+
+| script | source | records | distinct projectable | notes |
+|---|---|---|---|---|
+| el | app `langpack-el.zip` (CKDT v2) | 39,860 | **37,516** | 2,344 collapse under accent stripping; 0 unprojectable; 9,638 (25.7 %) σ-final → ς restored |
+| uk | wordfreq `uk`, depth 54,599 | 50,000 | 49,955 | rank via the app's own formula |
+| he | wordfreq `he`, depth 51,332 | 50,000 | 49,915 | niqqud stripped; final forms kept distinct |
+| bg | wordfreq `bg`, depth 37,325 | 35,820 | 35,788 | list exhausts before the 50 k cap |
+| mk | wordfreq `mk`, depth 52,172 | 50,000 | 49,963 | |
+| sr | wordfreq `sh`, depth 54,841 | **0** | **0** | `sh` is a Latin-script list — Serbian is blocked |
+
+**Honesty on the Tier-B lexicons:** a wordfreq top-N list is *not* what the app
+ships. `build_wordlist.py` runs hunspell/aspell/pyspellchecker/AOSP oracles plus
+per-language allow/block lists over its candidate stream; the Tier-B lists here
+skip all of that, so they carry more corpus noise (typos, foreign tokens,
+inflected junk) than a real pack would. The *frequency scale* is identical by
+construction; the *word selection* is not. Every Tier-B number in §2 is a
+number against a lexicon the app does not yet have.
+
+---
+
+*(§2 per-script results and §3 app-integration notes follow as each script
+completes.)*
