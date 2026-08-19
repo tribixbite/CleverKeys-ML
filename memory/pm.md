@@ -1267,3 +1267,22 @@ itself). Plan of record: ctc/PHASE_N.md, committed BEFORE execution.
       reads unspent; test-2400 sealed at ledger 4 throughout.
 - [ ] M0 pre-registration + baseline read (ship model, 3 seeds)
 - [ ] N2 lever screening -> N3 pair+KD -> M2 final read -> close-out
+
+## 2026-08-18 — ru export + multi-script guide (requested)
+
+- [x] Re-verify APP_INTEGRATION_AUDIT's 23 findings against the app's NEW head
+      (`9a6ffdd2`, post neural-engine removal) and write a re-verification
+      addendum into `ctc/APP_INTEGRATION_AUDIT.md`.
+- [x] Export `phaseIB-ru-synth/best.pt` -> `ctc/artifacts/ru_synth_ch80.onnx`
+      (fp32) + `_fp16w.onnx` (ship bytes) at the campaign export conventions
+      (sliced-view parity + argmax gate).
+- [x] Golden fixture at the app's `tunedRuCkdt` preset
+      (1.05/2.0/0.2/0.3734/0.9882) on the CKDT frequency scale + the vendored
+      `ru_jcuken_default` geometry -> `ru_synth_ch80_fp16w_golden.json`.
+      `make_golden.py` grew a `--vocab` switch; the `en` path is asserted
+      byte-identical to the shipped fixture.
+- [x] Validate the EXPORTED artifact on the ru real-val probe (Yandex
+      eval-only, 9,416 rows): reproduce the 77.92-class confirm-half number
+      at lambda = 2.0.
+- [x] Write `docs/specs/ctc-architecture-and-multiscript-guide.md` (app repo,
+      the one authorised app commit) and mirror it to `ctc/`.
