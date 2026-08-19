@@ -388,7 +388,74 @@ miss. Three facts around it, none of which retire it:
 
 ## 5. The other five scripts
 
-*(populated by §5 of the run; see `RESULTS.md` and `MODELS_TABLE.md` §4.16)*
+All five regenerated on v2, retrained on the **Phase-O recipe and the Phase-O
+90/10 donor discipline** — deliberately, so that every per-script comparison
+against Phase O changes exactly one variable, the generator. (ru ships from the
+full-pool arm because its gate is real data; the five keep the split because
+their holdout *is* their probe and donor-disjointness is what makes it worth
+anything. The −1.69 real points §4.1 measures for that split is therefore left
+on the table for these five, and is the registered recommendation for whoever
+regenerates next.)
+
+Probe: each script's own 10,000-row v2 synthesis holdout, disjoint donor half,
+independent word draw (seed 777), decoded through the exported fp32 graph at
+γ 1.05 / λ 2.0 / β 0.2 / 0.3734 / 0.9882.
+
+| script | K | greedy | **in-dict t1** | ≤3 | ≥4 | vs ch192 EN | vs ch80 EN | permuted geometry | ≥70 gate |
+|---|---|---|---|---|---|---|---|---|---|
+| **el** Greek | 25 | 69.01 | **90.69** | 95.79 | 86.70 | **+6.02** | **+6.92** | 0.00 | pass |
+| **uk** Ukrainian | 31 | 55.09 | **87.97** | 92.73 | 85.88 | **+5.39** | **+7.22** | 0.02 | pass |
+| **bg** Bulgarian | 30 | 55.97 | **82.26** | 85.64 | 80.12 | **+5.21** | **+7.29** | 0.00 | pass |
+| **mk** Macedonian | 31 | 64.56 | **89.02** | 93.52 | 85.83 | **+5.57** | **+6.66** | 0.00 | pass |
+| **he** Hebrew | 27 | 56.88 | **77.00** | 85.83 | 71.47 | **+8.06** | **+10.65** | 0.01 | **pass** (was FAIL) |
+| *(ru, same probe family)* | 31 | 50.98 | *86.49* | *90.41* | *85.05* | *+3.87* | *+6.07* | *0.00* | *pass* |
+
+**The sign flip is the result, not the level.** On Phase O's v1 holdouts every
+script model **lost** to the 3×-capacity English ch192 zero-shot, by −0.56 to
+−3.75, which was the single clearest symptom that the v1 holdout was measuring
+"how English-shaped is this distribution" rather than "how good is this model".
+On the v2 holdouts every script model **beats** ch192, by +5.2 to +8.1 — and on
+Russian, where the same pair can be checked on real swipes, the holdout margin
+(+3.87) and the real margin (+3.41) now agree to half a point. Greedy tells the
+same story from the emissions side: the script models read 55–69 against the
+English controls' 13–25.
+
+**Hebrew clears its gate.** Phase O exported he flagged, at 65.36 against a
+registered ≥70 band. On v2 it reads **77.00** at the same preset, +11.6 on a
+probe that is not the same probe — the honest way to say it is that he is no
+longer the outlier of the six on its own generator, and that its ≤3 stratum
+(50.31 in Phase O, the diagnosis offered there) reads 85.83 now that the draw is
+frequency-weighted. It remains the weakest of the six and remains unvalidated
+against any real Hebrew swipe, because none exists.
+
+**Falsification control.** `eval_script --permute-layout 4242` — every key centre
+moved to some other key's position — collapses all five to **0.00–0.02** in-dict
+t1 and 0.00 greedy, as it did in Phase O. The layout json is a testable claim and
+it passes.
+
+**Export gates.** Every fp32 export clears with **100/100 argmax agreement** on
+the sliced contract view against real traces on the real layout, and the fp16w
+ship bytes cost at most 0.03 t1:
+
+| script | BN fold (sliced) | fp32 vs torch (sliced) | argmax | fp16w vs fp32 (white noise) | argmax | fp16w decode cost |
+|---|---|---|---|---|---|---|
+| ru | 1.20e-04 | 9.92e-05 | **100/100** | 1.06e-01 | 93/100 | 79.73 → 79.75 (+0.02, real probe) |
+| el | 9.73e-05 | 8.58e-05 | **100/100** | 6.81e-02 | 96/100 | 90.69 → 90.68 (−0.01) |
+| uk | 6.48e-05 | 1.28e-04 | **100/100** | 1.13e-01 | 95/100 | 87.97 → 87.97 (0.00) |
+| bg | 4.71e-04 | 1.83e-04 | **100/100** | 5.49e-02 | 98/100 | 82.26 → 82.23 (−0.03) |
+| mk | 8.01e-05 | 1.60e-04 | **100/100** | 5.42e-02 | 98/100 | 89.02 → 89.02 (0.00) |
+| he | 1.04e-03 | **1.16e-03** | **100/100** | 5.41e-02 | 99/100 | 77.00 → 77.00 (0.00) |
+
+**he's fp32 export needed the parity tolerance relaxed from 1e-3 to 2e-3**
+(`--parity-tol 2e-3`) and is disclosed rather than quietly re-run: the measured
+sliced residue is 1.16e-03 against a historical envelope of 0.8e-4…7.6e-4, with
+argmax agreement 100/100 on **both** probes — which is the binding gate the
+exporter's own docstring names. he is flagged for this in the registry.
+`quantize_onnx.parity_vs_source` probes with white noise, which PHASE_J §5.2
+established is not a calibrated stand-in in either direction; the decode column
+is the binding evidence and it is free.
+
+### 5.1 What these five numbers are NOT
 
 **The Phase-O caveat carries over unchanged, and gets one turn worse.** Greek,
 Ukrainian, Bulgarian, Macedonian and Hebrew have no real swipe corpus in
@@ -406,6 +473,13 @@ What *is* transferable is the ru result: at matched capacity and matched recipe,
 switching the generator from v1 to v2 is worth **+2.3 real top-1 and +19 real
 greedy** on Russian. The five scripts share the generator, the donor bank, the
 architecture and the recipe. They do not share the validation.
+
+One more thing the v2 holdouts are not: comparable to Phase O's. A v1 model
+scored on a v2 holdout is out of distribution — on ru the v1 ship model reads
+80.87 there against the v2 model's 86.49, a 5.6-point gap where the real probe
+says 2.3. Any cross-generation per-script table must therefore compare *margins
+against a fixed control*, which is what §5's ch192/ch80 columns do, and never
+levels.
 
 ---
 
@@ -448,8 +522,46 @@ python3 ctc/eval_script.py --code ru --preset ckdt \
 
 Committed evidence: `ctc/phase_p_gates.json` (the full G1–G4 record),
 `ctc/phase_p_enen.json` (the A1 control), `ctc/phaseP_G5_*.json` (the four ship-gate
-decodes). Runtime intermediates under `~/ctc-train/synth_gap/` are regenerable
-from the committed scripts; seed 1234 throughout, donor-draw seed 20260819.
+decodes), `ctc/phaseP_holdout_*.json` (the calibration re-run),
+`ctc/phase_p_scripts.json` (the five-script battery). Runtime intermediates under
+`~/ctc-train/synth_gap/` are regenerable from the committed scripts; seed 1234
+throughout, donor-draw seed 20260819.
+
+### 6.1 The v2 artifact registry
+
+Generation-2 artifacts **supersede** Phase O's for deployment; both generations
+stay in the registry with their tiers, because the v1 bytes are the ones every
+prior number in `MODELS_TABLE.md` was measured on. Every graph is the standard
+1,142,727-byte resbn80 export (the alphabet is data, not architecture).
+
+| file | bytes | sha256 |
+|---|---|---|
+| `ru_synth_v2_ch80.onnx` | 1,142,727 | `763190f9bc9854a3183f10d7dba7d8e1de1c101812b5958ee9bdbb403b93089b` |
+| `ru_synth_v2_ch80_fp16w.onnx` | 589,406 | `9004befb6ff07b744c65d3c13481539e758ebe10d4f47cbeffe68d39d12b0e52` |
+| `ru_synth_v2_ch80_fp16w_golden.json` | 160,282 | `a5ed2b9f62843d085779f5ab7457e6608f5c47e8994c224146ebdaf32fcdb82d` |
+| `el_synth_v2_ch80.onnx` | 1,142,727 | `ada06a627074d120fed77d128920e073270cf1caa5afeea285ff421945a99432` |
+| `el_synth_v2_ch80_fp16w.onnx` | 589,406 | `a65151793bd78e0399b34dc2dede3da6a4a2a4d9ad48190a62cfdff75a770495` |
+| `el_synth_v2_ch80_fp16w_golden.json` | 144,332 | `ee34b42260bbe53acea15c408c3c20ce73d1db6574c38436801b397985569262` |
+| `uk_synth_v2_ch80.onnx` | 1,142,727 | `a9cf7ff49d1ac35a3e33921b4b6e74ce42a54bce50229101f410ee550f5529c8` |
+| `uk_synth_v2_ch80_fp16w.onnx` | 589,406 | `e7941d310c9075adf97d31a14ae6da8d4e42282cfd5154d7e778414fd3679cbf` |
+| `uk_synth_v2_ch80_fp16w_golden.json` | 155,680 | `6826e133d74a9551a8f41a8718b5d39fa2e19430adc93ae307705da346081db3` |
+| `bg_synth_v2_ch80.onnx` | 1,142,727 | `b92cf65ff546db64af290c8fd2de04018977838d5c2d9b0eaf1ba4322090c82b` |
+| `bg_synth_v2_ch80_fp16w.onnx` | 589,406 | `56d51194e22ee112dec868abaf9ddb91059d0dc752158552711db44f80935d4a` |
+| `bg_synth_v2_ch80_fp16w_golden.json` | 154,872 | `c2fa0e387c15e16ad5c633542ee112089b815c87f1b06b674292d4dbe3c3deeb` |
+| `mk_synth_v2_ch80.onnx` | 1,142,727 | `f2cd4cfa159039c8fe6d2326cb9377b0e2bf5afd4df07a5212716547b2a49e42` |
+| `mk_synth_v2_ch80_fp16w.onnx` | 589,406 | `a3c96b5f98cbb66aad7a291ce8ecbc147d228085d4ad6eb5b27143402dca209c` |
+| `mk_synth_v2_ch80_fp16w_golden.json` | 160,726 | `d1b25a309145feeca14be7356a9f2ac304ee0e4f605665de40933189885a67aa` |
+| `he_synth_v2_ch80.onnx` (**flagged**, §5) | 1,142,727 | `863c5f4df524893141d34089ca6e12b248bac17af82cc5d651cb603c7b3b98bb` |
+| `he_synth_v2_ch80_fp16w.onnx` (**flagged**) | 589,406 | `943ab4e36297c686a2af00a5bd5ec622a9671b9d2258b49297513aefe85f0c26` |
+| `he_synth_v2_ch80_fp16w_golden.json` | 140,434 | `c0ff01294eccfefc54040b1ff8cf9d8266dd645f65305534bf0ab588d4f9e4b0` |
+
+Every fixture is frozen at **γ 1.05 / λ 2.0 / β 0.2 / 0.3734 / 0.9882** on the
+script's own lexicon weights, 10 cases each (5 pure-featurizer branch probes, 1
+word-path featurizer case, 4 model-backed beam cases) — the same shape as Phase
+O's, so the app-side `CtcParityTest` row needs a model/fixture swap and nothing
+else. The alphabet strings, projection rules and per-script wiring of PHASE_O
+§3.2–3.4 are **unchanged**: v2 changes the training distribution, not the
+contract.
 
 ---
 
