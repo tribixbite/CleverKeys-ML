@@ -1,5 +1,89 @@
 # CTC Swipe Encoder — Training Results
 
+# Phase O (2026-08-18/19): five new non-Latin scripts — and the discovery that the probe they are measured on is unreliable
+
+Full record: `ctc/PHASE_O.md`. Phase I-B showed a script with no corpus can be
+launched from English motor residuals (Cyrillic, in-dict t1 76.21 → 77.41 at the
+tuned λ). Phase O asks which other scripts that unlocks and what each costs.
+
+**Inventory.** Of 36 non-Latin layouts the app ships, exactly **two scripts have
+both a layout and a lexicon in-repo**: Russian (done) and **Greek**. Five more
+are one wordfreq list away (uk/he/bg/mk on the app's own rank formula; Serbian is
+blocked because wordfreq's `sh` list has **zero** Cyrillic words in its top 80 k).
+Armenian and Georgian are blocked on a dictionary. Devanagari, Bengali, Gujarati,
+Kannada, Tamil, Sinhala and Hangul are **structurally** blocked — those layouts
+expose 7–20 letters on centre keys and put the rest on corner slots a swipe
+cannot reach. Arabic/Persian/Urdu are priced and not attempted (the hamza
+carriers أ إ آ are corner-only).
+
+**The extractor is validated, not asserted.** `app_layout.py` replicates the
+app's own `KeyboardGeometry.computeKeyRects` + `buildMappedLayout` and reproduces
+`en_qwerty.json` from the app's `latn_qwerty_us.xml` to **4.7e-4** — the app frame
+and the training frame are the same frame. As a free by-product, the app's own
+ЙЦУКЕН grid sits **3.4e-3** from the Yandex grid the ru model trained on, so that
+model is deployable on app geometry as exported.
+
+**The central result: the synthesis holdout is not a trustworthy probe.** On
+Russian — the only script with both a synthesis holdout and a real corpus — the
+same two models rank in opposite orders, both significantly:
+
+| model | ru synthesis holdout | ru **REAL** swipes |
+|---|---|---|
+| `ru_synth_ch80` (script-trained) | 81.10 | **77.41** |
+| `phaseM_kd_fresh_w1` (shipped **English**, zero-shot) | **83.38** | 76.32 |
+| Δ / paired exact McNemar | −2.28, **p = 7.1e-12** | +1.09, **p = 0.0099** |
+
+Three defects, each measured: it **over-credits capacity** (English ch192 beats
+English ch80 by +7.14 on the holdout and by +0.53, n.s., on real swipes — which
+is exactly what flips the ranking); it **inverts the λ choice** (holdout prefers
+λ 1.1 by +4.70, real data prefers λ 2.0 by +1.20); and its **length mix is 12×
+off** (3.3 % short words vs real usage's 38.7 %).
+
+**Consequences that change the campaign's picture.** The shipped English model
+reaches **76.32 in-dict top-1 on real Russian swipes** with nothing but the right
+layout and the right trie — genuinely out of distribution (it was trained with 26
+active slots, never 31), in the shipped geometric engine's 71–77 band, and within
+1.1 of the purpose-trained model. `ctc-architecture-and-multiscript-guide.md`
+§3.1's "a Latin-trained model does not zero-shot another script" is **too strong
+as stated**; what survives is the emissions half — zero-shot greedy is 18.62
+against the script model's 37.13, so English is leaning on the trie. The price
+list for a new script now reads: **layout + trie wiring ≈ 76, per-script
+synthesis ≈ +1.6 (p = 1.4e-4 at matched capacity), real data ≈ +13.** The
+expensive half is the data, not the model.
+
+**Five new models, exported.** Same recipe as `phaseIB-ru-synth`, verbatim,
+single seed. On their own 10 k synthesis holdouts at the adopted preset:
+**el 82.54 · uk 79.27 · bg 71.80 · mk 71.69 · he 65.36** in-dict t1. Four clear
+the registered ≥70 gate; **he fails it** at the adopted preset (70.28 at λ 1.1)
+and is exported flagged. Against the capacity-matched English control every
+script model wins by +4.9…+7.3; against the 3×-capacity ship model every one
+loses by −0.6…−3.8 — the exact pattern the ru calibration says to expect, and the
+reason neither column is quoted as an accuracy.
+
+**Two registered arms refuted.** The per-script λ sweep picked 1.1 in all five
+scripts and the ru control showed that preference is inverted against real data —
+λ 2.0 adopted, sweeps discarded, all fixtures frozen at 2.0. Warm-starting from
+the English ch80 (`phaseO-ru-initH`) is +0.88 on the holdout and **−0.14 on real
+(p = 0.69)**; not promoted.
+
+**Falsification.** With key centres permuted, every model on every script decodes
+at **0.00 top-1 and 0.00 greedy**. The geometry is entirely load-bearing.
+
+**Two app defects found.** The shipped `grek_qwerty.xml` declares
+`script="latin"` (the `srcs/` copy says `greek`), and `langpack-el` carries **no
+final sigma** — 25.7 % of the pack is σ-final where Greek writes ς, and the two
+are different keys in different rows, so an unrepaired lexicon would train and
+score one Greek word in four against the wrong endpoint. Phase O restores final
+σ→ς by rule; the app must do the same.
+
+**Evidence tier.** el/uk/bg/mk/he are **synthesis-trained, synthesis-holdout-only,
+single-seed, and calibrated against Russian rather than measured on their own
+script**. No real swipe corpus exists in any of them (`DATASET_SCOUT.md` §4.4),
+no sealed test split can ever exist, four of the five lexicons are not the app's,
+and no on-device measurement was taken.
+
+---
+
 # The fourth unsealing (2026-08-14) — the shipped model is test-validated on both footings, and takes a qualified equal-footing win at 2.91 MB
 
 **The final read of test-2400. The ledger closes at 4 and there is no fifth.**
