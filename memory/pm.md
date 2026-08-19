@@ -1286,3 +1286,43 @@ itself). Plan of record: ctc/PHASE_N.md, committed BEFORE execution.
       at lambda = 2.0.
 - [x] Write `docs/specs/ctc-architecture-and-multiscript-guide.md` (app repo,
       the one authorised app commit) and mirror it to `ctc/`.
+
+## 2026-08-18 — PHASE O: per-script models for every non-Latin script the app can serve
+
+- [x] O1 INVENTORY committed before any training (`ctc/PHASE_O.md` §1).
+      app_layout.py replicates KeyboardGeometry.computeKeyRects + KeyboardData
+      parse defaults + buildMappedLayout's letter-box normalization, and
+      reproduces en_qwerty.json from the app's own latn_qwerty_us.xml to
+      4.7e-4 — app frame == training frame. Free retro-validation: app
+      cyrl_jcuken_ru sits 3.4e-3 from the Yandex grid the ru model trained on.
+      Verdict: exactly TWO non-Latin scripts have layout AND lexicon in-repo
+      (ru done, el new); uk/he/bg/mk are one wordfreq list away on the app's
+      own rank formula; sr blocked (wordfreq 'sh' has 0 Cyrillic in 80k);
+      hy/ka blocked-on-dictionary; Indic/Hangul structurally blocked (7-20
+      centre keys, rest on corner slots a swipe cannot reach);
+      Arabic/Persian/Urdu priced not attempted (hamza carriers corner-only).
+      Two app defects measured: shipped grek_qwerty.xml says script="latin",
+      and langpack-el has NO final sigma (25.7% of the lexicon).
+- [x] O2 tooling: script_synth.py (generic residual transplant, 90/10 donor
+      split for an honest holdout), eval_script.py (any alphabet, npz or
+      jsonl probe, --dump for paired tests, --permute-layout falsification).
+      eval_script cross-checked digit-exact against eval_cyrillic on the real
+      ru confirm half (77.92/89.50/92.00, allrows 70.18, greedy 37.71).
+- [x] CALIBRATION (the phase's central result): the synthesis holdout gets the
+      model comparison BACKWARDS. ru-synth vs shipped-EN zero-shot is -2.28 on
+      the holdout (p=7.1e-12) and +1.09 on REAL swipes (p=0.0099); vs the
+      capacity-matched ch80 EN it is +1.62 real (p=1.4e-4). English capacity
+      buys nothing cross-script (+0.53, n.s.). Price list for a new script:
+      layout+trie wiring ~76, per-script synthesis ~+1.6, real data ~+13.
+      Third probe defect: holdout is 3.3% short words vs real usage's 38.7%.
+- [x] Synthesis for ru/el/uk/he/bg/mk (1M train + 5k val + 10k holdout each),
+      endpoint stats in the ru reference band, wrong-geo controls collapse.
+- [x] Five trainings at the ru-synth recipe VERBATIM (94k steps, resbn ch80,
+      greedy selection) — all reached 94,000.
+- [ ] O2 eval battery (lambda sweep tune/confirm, full holdout fp32+fp16w,
+      two zero-shot controls, permuted-layout falsification) — running
+- [ ] phaseO-ru-initH: warm-start from the en ch80 phaseH-p50, ru synthesis,
+      measured on REAL ru — the one recipe change phase O can validate against
+      real data — running
+- [ ] O2(e) artifacts + goldens, O3 close (PHASE_O.md, MODELS_TABLE, RESULTS)
+- [ ] regenerate cache_ru/val.npz (clobbered and disclosed; see f0c7a66)
