@@ -1,0 +1,46 @@
+{
+ "a": {
+  "name": "v2full",
+  "dump": "/home/will/ctc-train/evalQ/dump_ru_v2full.jsonl"
+ },
+ "b": {
+  "name": "v3ship",
+  "dump": "/home/will/ctc-train/evalQ/dump_ru_v3.jsonl"
+ },
+ "indict_t1": {
+  "n": 8471,
+  "a_pct": 79.73,
+  "b_pct": 85.07,
+  "delta_b_minus_a": 5.34,
+  "a_only": 227,
+  "b_only": 679,
+  "p_mcnemar": 5.366437145598743e-53
+ },
+ "greedy": {
+  "n": 8471,
+  "a_pct": 56.12,
+  "b_pct": 65.66,
+  "delta_b_minus_a": 9.54,
+  "a_only": 353,
+  "b_only": 1161,
+  "p_mcnemar": 1.4422062953373398e-100
+ },
+ "le3_t1": {
+  "n": 3281,
+  "a_pct": 85.77,
+  "b_pct": 89.15,
+  "delta_b_minus_a": 3.38,
+  "a_only": 81,
+  "b_only": 192,
+  "p_mcnemar": 1.4665442976126045e-11
+ },
+ "ge4_t1": {
+  "n": 5190,
+  "a_pct": 75.92,
+  "b_pct": 82.49,
+  "delta_b_minus_a": 6.57,
+  "a_only": 146,
+  "b_only": 487,
+  "p_mcnemar": 8.801894219402194e-44
+ }
+}
