@@ -1594,3 +1594,108 @@ scores." Two tracks, and the license split is NON-NEGOTIABLE
 Verdict pre-registration (stated before any training): if v3-ship cannot beat
 v2's battery AND probe, that is a VALID TERMINAL VERDICT — v2 remains the
 generator and the upper bound still prices all future work.
+
+## 2026-08-20 — APP DOC RECONCILIATION at app `d717bda7` (ML repo only; app tree read-only)
+
+Reviewed every app commit `d76be9a6..d717bda7` (31) and reconciled this repo's three
+app-facing documents against it. Nothing was written to the app repo.
+
+- [x] `ctc/APP_INTEGRATION_AUDIT.md` §6 — second re-verification addendum at `d717bda7`
+- [x] `ctc/ctc-architecture-and-multiscript-guide.md` — v2/v2full + current app state
+- [x] `ctc/APP_WIRING_CHECKLIST.md` — NEW, the ordered actionable list for the app agent
+- [x] `memory/pm.md` — this entry
+
+### Score: 15 CLOSED, 6 PARTIAL, 6 OPEN, 0 regressed (of 23 original + 4 NEW findings)
+
+Closed in the app's 2026-08-20 wave: HIGH-1 (dead ONNX session now falls through to
+geometric on dispatch AND prewarm — the diff the guide proposed applied essentially
+verbatim), HIGH-3, MEDIUM-1, MEDIUM-2, MEDIUM-7, MEDIUM-8, MEDIUM-9, NEW-1, NEW-2, NEW-4.
+
+**MEDIUM-2 matters to us**: the `settle = true` MemoryProbe marks that inflated every
+first CTC decode by ~720 ms in `LOCAL_BUILD=true` builds are gone. On-device latency
+numbers are quotable again — relevant the first time a script model is measured.
+
+### HIGH-4 is claimed closed and is NOT, precisely
+
+The CI work is real and substantial — `ui-testing.yml` is green on API 21/29/34 for the
+first time since 2026-07-18, `OK (23 tests)`, after three stacked defects (dash has no
+`pipefail` and the emulator action runs `script:` LINE BY LINE via `sh -c`; PackageManager
+indexes a new IME asynchronously; instrumentation lives in `<applicationId>.test`, not the
+app package). Both HIGH-4 sub-items ARE closed: `CtcParityTest.MODEL_ASSET_PATH` is now
+derived from `CtcEngineAdapter.MODEL_ASSET`, and the preset pin asserts `beamWidth ==
+Defaults.CTC_BEAM_WIDTH`.
+
+But the gate's curated class list is `CtcMultiLanguageInstrumentedTest`,
+`GeometricSwipeOracleTest`, `CrashGuardInstrumentedTest`. **`CtcEmissionModelParityTest` is
+not in it**, and neither is `CtcLatencyGateTest`. So the fixture's HEADER sha is checked on
+every push and its EMISSION MATRICES are checked nowhere automatic — the exact model-swap
+failure HIGH-4 was written about. Fix is one string edit to `.github/scripts/emulator-ci.sh`.
+Also: `ui-testing.yml` triggers on PR + nightly cron, NOT on push to main, and is not a
+required check.
+
+### Two new findings that matter to the multi-script plan
+
+**NEW-5 — the el projection is half-implemented, and the shipped half is the second half.**
+`6f30d60f` shipped `CtcGreekOrthography` (word-final σ→ς, idempotent, medial σσ preserved,
+higher freq wins on collision, zero production callers so far). That is PHASE_O §3.4's LAST
+step. The step before it — NFD / drop Mn / NFC — has NO app-side implementation for Greek
+(`CtcAzProjection` is Latin-only), and it is the step that makes the alphabet 25 letters.
+Wiring sigma alone turns "one Greek word in four mis-keyed" into "most of the pack has no
+emission slot". Recorded in the guide §7 item 9 and the checklist §2.3. Not a defect today
+— el is unserved and the commit says "not yet wired".
+
+**NEW-7 — nobody has checked a script lexicon against the 32-frame budget.** The app added
+`CtcDecodableLength` (`2d080c7d`): decodable iff `length + adjacent-duplicate-pairs <= 32`,
+because the encoder emits a fixed `[1,32,65]`. The en dictionary is asserted clean. Our v2
+word draw is wordfreq token mass with NO length ceiling, and el/uk carry long inflected
+forms. Added as a per-script pre-training gate (guide §3.2 step 7, checklist §2.4).
+
+**NEW-6 — the app is one model generation behind in three places**: `memory/HANDOFF.md`
+still says "Russian is delivered: ru_synth_ch80_fp16w.onnx, 84ac284d…, 77.41", and the
+app-repo copy of the guide never received EITHER the v2 or the v2full edit. The section-by-
+section list of what to port is `APP_WIRING_CHECKLIST.md` §3.
+
+### Still open app-side, ordered
+
+1. MEDIUM-3 — the execution brief still has no banner and still says "Q1 model choice:
+   SUPERSEDED-PENDING — a new model is training" and "Default engine stays neural". Now the
+   LAST anti-confusion finding; everything around it was fixed.
+2. HIGH-4's residue (one string in emulator-ci.sh).
+3. HIGH-2's residue — two unmarked sw2345 citations in `docs/`; the drift guard was widened
+   to src/test + src/androidTest (`f172bb8e`) but still does not scan `docs/`.
+4. NEW-6 — the guide mirror + HANDOFF onto v2/v2full.
+5. MEDIUM-4 — 11 MB of superseded bench ONNX.
+6. LOW-9's remaining half — no `supportsLayout` negative for a Cyrillic KeyboardData. Gate 3
+   is untested in the negative direction, and per-script routing REMOVES gate 1.
+
+### The staging insight, now the headline of the checklist
+
+The shipped English model zero-shots real Russian at **76.32** with nothing but the right
+layout and the right trie; the purpose-built v2 ru model reads **79.73**, i.e. **+3.41**.
+So the wiring delivers 76 of the ~80 available points BEFORE any model asset lands, and
+76 is already at or above geometric's cross-layout anchors (71-77). Recommendation to the
+app agent: land the shared wiring + layout + trie + projection as ONE milestone with NO new
+model asset (zero APK growth, one routing change), then add 589,406-byte model assets per
+script as an independent second milestone.
+
+### Surprises worth carrying
+
+- The `reactivecircus/android-emulator-runner` per-line `sh -c` behaviour killed 32
+  consecutive CI runs for a month and reported it as `adb: device offline`, which was a red
+  herring from the action's own pre-boot poll loop. Every `script:` must be a ONE-LINE call
+  into a bash file.
+- `am instrument` exits 0 even when tests fail. The gate's second check ("no OK line = fail")
+  caught a run that would otherwise have gone green having executed zero tests, on its first
+  real invocation.
+- The app found (`68394c25`, `98307dc2`) that its contraction keys were largely unreachable
+  through the beam because length normalisation divides emission evidence by `len^0.9` while
+  the frequency bonus is not divided — an ~8.5-nat frequency gap demanded ~75 nats of
+  emission evidence against the 7-10 nats the model produces. Fixed by deriving the injected
+  frequency as `minReal - 1` per lexicon. **Relevant to us**: any new CKDT script lexicon
+  gets the "reachable, never preferred" invariant by construction; do not reintroduce a
+  constant.
+- The app layout tree uses TWO schemas for the centre key value (`c=` and `key0=`) and both
+  are live; matching only one makes ~40 layouts look letterless.
+
+NEXT (app side, NOT this agent): work `ctc/APP_WIRING_CHECKLIST.md` top to bottom. §1.1
+(banner the execution brief) and §1.2 (one string in emulator-ci.sh) are both minutes.
