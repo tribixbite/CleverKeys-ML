@@ -1547,3 +1547,50 @@ NEXT (app side, NOT this agent): if any of the five is ever wired, use
 `*_synth_v2full_ch80*`, not `*_synth_v2_ch80*`. The app-repo copy of
 ctc-architecture-and-multiscript-guide.md still lacks BOTH the v2 and the v2full
 sections; the ML mirror has both.
+
+## 2026-08-20 — PHASE Q: SYNTH v3, THE LEARNED TRACE GENERATOR (+ THE SEALED UPPER BOUND)
+
+User direction: "train a synthetic trace generator using the futo + yandex
+swipes, generate new synthetic traces, train on those to get closer to ru-real
+scores." Two tracks, and the license split is NON-NEGOTIABLE
+(YANDEX_LICENSE_RESEARCH.md binds):
+
+  SHIPPING TRACK: generator trained ONLY on MIT data (FUTO t3 + HWS). Its
+  outputs may feed shipped decoders. Ship gate = real ru probe vs v2's 79.73.
+  RESEARCH TRACK (sealed): twin generator trained on Yandex ru swipes — legal
+  under the научные carve-out for MEASUREMENT ONLY. Every file
+  *_RESEARCH_ONLY, under ~/ctc-train/research_only/, never in artifacts/,
+  never in a shipping lineage. Purpose: THE UPPER BOUND — how much of the
+  79.73-vs-89.64 gap does a perfect in-domain learned generator close.
+
+- [x] Q0 read the record (SYNTH_V2_DESIGN, SYNTH_V2_RESEARCH_AUDIT, PHASE_P,
+      PHASE_O, YANDEX_LICENSE_RESEARCH), verify infra (torch cu128 OK on the
+      5080; cache_ru/train_yandex.npz 1M real rows exists; eval_script --dump
+      + mcnemar tooling exists; phaseIB-ru-real ckpt still on disk)
+- [ ] Q1 PHASE_Q.md: design choice (conditional flow matching over the
+      residual field — the audit's own pre-registered shape), rationale vs
+      alternatives, pre-registered gates + ship band, budgets. COMMIT BEFORE
+      TRAINING.
+- [ ] Q2 ctc/synth_v3.py: conditioning builder, CFM model, trainer, sampler,
+      matched-arm driver, cache writer (train.py-compatible npz schema, v2's
+      wordfreq S0 draw reused verbatim)
+- [ ] Q3 train shipping-track generator on FUTO+HWS (detached, watchdogged);
+      battery via ctc/synth_v3_gates.py vs v2's C_B_S5 numbers (same
+      instruments: G1, G3 KS battery, G4 MLP/GBM17/GBM23 + floors + null,
+      PRDC diversity guard)
+- [ ] Q4 ru ship-gate: 1M-row v3 cache, decoder retrain (Phase-O/P recipe
+      VERBATIM, seed 1234, --workers 0 detached), real-probe decode with
+      --dump, paired McNemar vs phaseP-ru-v2full re-decode. SHIP iff
+      >= +1.0 t1 AND p < 0.05.
+- [ ] Q5 research twin: same code/hyperparams on cache_ru/train_yandex.npz;
+      *_RESEARCH_ONLY cache + decoder; real-probe decode -> THE UPPER BOUND;
+      re-decode phaseIB-ru-real at the current preset for the same-footing
+      ceiling
+- [ ] Q6 if ship gate passes: regenerate the six scripts (P6 pattern, full
+      pool), retrain, export, tiered registry supersede
+- [ ] Q7 docs: PHASE_Q.md results + THE UPPER BOUND, MODELS_TABLE/RESULTS
+      updates, pm.md close, lowercase conventional commits, push
+
+Verdict pre-registration (stated before any training): if v3-ship cannot beat
+v2's battery AND probe, that is a VALID TERMINAL VERDICT — v2 remains the
+generator and the upper bound still prices all future work.
