@@ -75,6 +75,7 @@ import script_registry as SR  # noqa: E402
 from futo_decoder_eval import load_layout  # noqa: E402
 from paths import DEFAULT_WORKDIR, resolve  # noqa: E402
 from prepare_data import T_OUT  # noqa: E402
+from layout_aug import resample_bandwidth  # noqa: E402
 from script_synth import (  # noqa: E402
     SEEDS, collapse, endpoint_stats, token_mass, wrong_geometry, write_split)
 
@@ -228,6 +229,246 @@ def make_net(hidden: int = 128, dilations: Sequence[int] = (1, 2, 4, 8, 1, 2, 4,
             return self.out(torch.nn.functional.silu(self.out_gn(h)))
 
     return Net()
+
+
+# ── the acquisition imprint (the one pre-registered repair round) ───────────────
+#
+# PHASE_Q.md §2 allows one documented repair round before the battery re-run.
+# The first battery read named the defect precisely: the GBM's TOP feature on
+# the raw v3 arm is `dup_frac` (importance 0.107) — the fraction of exact
+# zero-length steps.  Real featurized traces carry exact duplicates because a
+# stationary finger produces identical raw samples and the 60 Hz chain
+# preserves them; a continuous flow density has probability zero of emitting
+# two bit-equal points.  This is a REPRESENTATION tell, not motor behaviour —
+# the same class of finding as v2's S5 (half the cornering gap was acquisition,
+# not humans).  The repair puts the real chain's two discrete imprints back at
+# sampling time:
+#
+#   1. bandwidth — draw a duration from the MIT-fit law
+#      log T = a + b·log L + c·log S + ε·sd  and re-featurize through the real
+#      60 Hz chain (`layout_aug.resample_bandwidth`), giving the output the
+#      duration-conditional smoothness SPREAD the model blurs over;
+#   2. dwell snap — steps shorter than ε_snap collapse to exact duplicates,
+#      with ε_snap fit ON ENGLISH so that generated-English dup_frac matches
+#      the English bank's own dup_frac (fit on MIT, checked on ru — the S4/S5
+#      discipline, no Yandex statistic enters the shipping fit).
+#
+# The research twin fits the same two parameters on ITS training corpus
+# (sealed), keeping the twins symmetric.
+
+
+def snap_dwells(paths: np.ndarray, eps: float) -> np.ndarray:
+    """Collapse sub-``eps`` steps to exact duplicates (vectorised, grouped).
+
+    Group ids advance only on steps ≥ eps computed on the ORIGINAL path, so
+    the snap cannot cascade; every point takes its group's first sample.
+    """
+    if eps <= 0:
+        return paths
+    P = paths.transpose(0, 2, 1)                            # [N,64,2]
+    d = np.hypot(*(np.diff(P, axis=1).transpose(2, 0, 1)))   # [N,63]
+    g = np.zeros((len(P), N_SAMPLES), np.int64)
+    g[:, 1:] = np.cumsum(d >= eps, axis=1)
+    # first sample index of each group, per row (init high, take the minimum)
+    rows = np.broadcast_to(np.arange(len(P))[:, None], g.shape)
+    idx = np.broadcast_to(np.arange(N_SAMPLES)[None, :], g.shape)
+    first = np.full((len(P), N_SAMPLES), N_SAMPLES - 1, np.int64)
+    np.minimum.at(first, (rows, g), idx)
+    take = first[rows, g]
+    out = P[rows, take]                                      # [N,64,2]
+    return out.transpose(0, 2, 1).astype(np.float32)
+
+
+def apply_imprint(paths: np.ndarray, cond: np.ndarray, imprint: Dict[str, object],
+                  rng: np.random.Generator) -> Tuple[np.ndarray, np.ndarray]:
+    """Bandwidth + dwell-snap chain -> ``(paths, drawn_T_ms)``.
+
+    L and S are decoded from the conditioning channels (7: log1p L, 8:
+    (S−1)/10), so the imprint sees exactly the geometry the model saw.
+    """
+    law = imprint["duration_law"]
+    a, b, c, sd = (float(law[k]) for k in ("intercept", "b_length", "c_segments",
+                                           "resid_sd"))
+    L = np.expm1(cond[:, 7, 0].astype(np.float64))
+    S = np.round(cond[:, 8, 0].astype(np.float64) * 10.0) + 1.0
+    nseg = np.maximum(S - 1.0, 1.0)
+    T = np.zeros(len(paths), np.float32)
+    ok = L > 1e-6
+    T[ok] = np.exp(a + b * np.log(L[ok]) + c * np.log(nseg[ok])
+                   + rng.standard_normal(int(ok.sum())) * sd).astype(np.float32)
+    out = paths.copy()
+    for i in np.nonzero(ok)[0]:
+        out[i] = resample_bandwidth(out[i], float(T[i]))
+    return snap_dwells(out, float(imprint["snap_eps"])), T
+
+
+def fit_duration_law_npz(bank_paths: Sequence[Path], letters: str,
+                         centers: np.ndarray) -> Dict[str, float]:
+    """``log T = a + b·log L_ideal + c·log n_segments`` on bank npz rows."""
+    idx = {ch: i for i, ch in enumerate(letters)}
+    Ls: List[np.ndarray] = []
+    Ss: List[np.ndarray] = []
+    Ts: List[np.ndarray] = []
+    for p in bank_paths:
+        with np.load(p) as d:
+            if "duration_ms" not in d:
+                raise SystemExit(f"{p} has no duration_ms — rebuild the bank "
+                                 f"(prepare_data.py records it)")
+            words = [str(w) for w in d["words"]]
+            T = np.asarray(d["duration_ms"], np.float64)
+        L = np.empty(len(words))
+        S = np.empty(len(words))
+        for i, w in enumerate(words):
+            seq = collapse(np.array([idx[ch] for ch in w], np.int64))
+            seg = np.hypot(*np.diff(centers[seq].astype(np.float64), axis=0).T)
+            L[i] = seg.sum()
+            S[i] = max(len(seg), 1)
+        Ls.append(L)
+        Ss.append(S)
+        Ts.append(T)
+    L, S, T = np.concatenate(Ls), np.concatenate(Ss), np.concatenate(Ts)
+    ok = (L > 1e-6) & (T > 1.0)
+    X = np.stack([np.ones(int(ok.sum())), np.log(L[ok]), np.log(S[ok])], 1)
+    y = np.log(T[ok])
+    coef, *_ = np.linalg.lstsq(X, y, rcond=None)
+    resid = y - X @ coef
+    r2 = 1.0 - float((resid ** 2).sum()) / float(((y - y.mean()) ** 2).sum())
+    return {"intercept": float(coef[0]), "b_length": float(coef[1]),
+            "c_segments": float(coef[2]), "resid_sd": float(resid.std()),
+            "r2": r2, "n": int(ok.sum()),
+            "median_T_ms": float(np.median(T[ok]))}
+
+
+def fit_duration_law_yandex(jsonl: Path, letters: str, centers: np.ndarray,
+                            stride: int = 6) -> Dict[str, float]:
+    """The twin's duration law, streamed from the raw corpus (sealed footing)."""
+    from prepare_yandex import iter_corpus, keep_reason
+    idx = {ch: i for i, ch in enumerate(letters)}
+    Ls: List[float] = []
+    Ss: List[float] = []
+    Ts: List[float] = []
+    kept = 0
+    for word, gname, xs, ys, ts, _ in iter_corpus(jsonl):
+        if gname != "default":
+            continue
+        p, why = keep_reason(word, xs, ts)
+        if p is None:
+            continue
+        kept += 1
+        if kept % stride:
+            continue
+        seq = collapse(np.array([idx[ch] for ch in p], np.int64))
+        if len(seq) < 2:
+            continue
+        seg = np.hypot(*np.diff(centers[seq].astype(np.float64), axis=0).T)
+        Ls.append(float(seg.sum()))
+        Ss.append(float(max(len(seg), 1)))
+        Ts.append(float(ts[-1]))
+    L, S, T = (np.asarray(a, np.float64) for a in (Ls, Ss, Ts))
+    ok = (L > 1e-6) & (T > 1.0)
+    X = np.stack([np.ones(int(ok.sum())), np.log(L[ok]), np.log(S[ok])], 1)
+    y = np.log(T[ok])
+    coef, *_ = np.linalg.lstsq(X, y, rcond=None)
+    resid = y - X @ coef
+    r2 = 1.0 - float((resid ** 2).sum()) / float(((y - y.mean()) ** 2).sum())
+    return {"intercept": float(coef[0]), "b_length": float(coef[1]),
+            "c_segments": float(coef[2]), "resid_sd": float(resid.std()),
+            "r2": r2, "n": int(ok.sum()),
+            "median_T_ms": float(np.median(T[ok]))}
+
+
+def bank_dup_frac(bank_paths: Sequence[Path], limit: int = 100_000) -> float:
+    fr: List[float] = []
+    for p in bank_paths:
+        with np.load(p) as d:
+            f = np.asarray(d["features"][:limit], np.float64)
+        dd = np.hypot(*(np.diff(f.transpose(0, 2, 1), axis=1).transpose(2, 0, 1)))
+        fr.append(float((dd < 1e-9).mean()))
+    return float(np.mean(fr))
+
+
+def cmd_fit_imprint(args: argparse.Namespace) -> int:
+    """Fit the imprint (duration law + snap ε) on the GENERATOR'S OWN corpus."""
+    gen = Generator(args.gen if args.gen.is_absolute()
+                    else resolve(args.workdir, args.gen))
+    out = args.out if args.out.is_absolute() else resolve(args.workdir, args.out)
+    if gen.research:
+        assert_sealed(out, "fit-imprint --out")
+    bank_paths = []
+    for name in args.bank.split(","):
+        p = Path(name.strip())
+        p = p if p.is_absolute() else resolve(args.workdir, p)
+        bank_paths.append(p if p.exists()
+                          else resolve(args.workdir, Path("cache") / name.strip()))
+    layout_path = args.layout if args.layout.exists() else HERE / args.layout
+    letters_l, centers = load_layout(layout_path)
+    letters = "".join(letters_l)
+
+    if args.yandex_jsonl:
+        # Research twin: durations live only in the raw corpus jsonl (the
+        # featurized cache drops them).  Sealed footing — the law is stamped
+        # research and can never touch a shipping generator (load_imprint).
+        if not gen.research:
+            raise SystemExit("--yandex-jsonl is research-track only; the "
+                             "shipping imprint is fit on the MIT bank npz")
+        law = fit_duration_law_yandex(Path(args.yandex_jsonl), letters, centers,
+                                      stride=args.yandex_stride)
+    else:
+        law = fit_duration_law_npz(bank_paths, letters, centers)
+    print(f"[imprint] duration law: {law}", flush=True)
+    target = bank_dup_frac(bank_paths)
+    print(f"[imprint] bank dup_frac target {target:.4f}", flush=True)
+
+    # ε fit: generate on the bank's own word distribution, chain with the law,
+    # bisect ε so generated dup_frac matches the bank's.
+    with np.load(bank_paths[0]) as d:
+        words = [str(w) for w in d["words"]]
+    rng = np.random.default_rng(4242)
+    sample_words = [words[i] for i in rng.integers(len(words), size=args.fit_rows)]
+    cond_all, wid, _ = cond_table(sample_words, letters, centers)
+    cond = cond_all[wid]
+    raw = gen.sample(cond, seed=NOISE_SEED + 99)
+    imp = {"duration_law": law, "snap_eps": 0.0}
+    band, _ = apply_imprint(raw, cond, imp, np.random.default_rng(4243))
+
+    def dup_of(eps: float) -> float:
+        f = snap_dwells(band, eps)
+        dd = np.hypot(*(np.diff(f.transpose(0, 2, 1), axis=1).transpose(2, 0, 1)))
+        return float((dd < 1e-9).mean())
+
+    lo, hi = 0.0, 0.02
+    for _ in range(28):
+        mid = 0.5 * (lo + hi)
+        if dup_of(mid) < target:
+            lo = mid
+        else:
+            hi = mid
+    eps = 0.5 * (lo + hi)
+    got = dup_of(eps)
+    print(f"[imprint] snap_eps {eps:.6f} -> generated dup_frac {got:.4f} "
+          f"(target {target:.4f})", flush=True)
+    blob = {"duration_law": law, "snap_eps": eps, "dup_frac_target": target,
+            "dup_frac_fit": got, "fit_rows": args.fit_rows,
+            "bank": [str(p) for p in bank_paths],
+            "gen_ckpt_sha16": gen.sha16, "research": gen.research}
+    if gen.research:
+        blob["license"] = RESEARCH_LICENSE
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(blob, indent=1))
+    print(f"[imprint] -> {out}")
+    return 0
+
+
+def load_imprint(path: Optional[Path], workdir: Path,
+                 gen: "Generator") -> Optional[Dict[str, object]]:
+    if path is None:
+        return None
+    p = path if path.is_absolute() else resolve(workdir, path)
+    blob = json.loads(p.read_text())
+    if blob.get("research") and not gen.research:
+        raise SystemExit(f"{p} is a RESEARCH_ONLY imprint but the generator is "
+                         f"shipping-track — refusing the cross-track mix")
+    return blob
 
 
 # ── research-track seal ─────────────────────────────────────────────────────────
@@ -486,6 +727,10 @@ def cmd_sample_cache(args: argparse.Namespace) -> int:
     if gen.research:
         report["license"] = RESEARCH_LICENSE
 
+    imprint = load_imprint(args.imprint, args.workdir, gen)
+    if imprint is not None:
+        report["imprint"] = imprint
+
     for split in want:
         n = {"train": args.rows, "val": args.val_rows,
              "holdout": args.holdout_rows}[split]
@@ -496,13 +741,21 @@ def cmd_sample_cache(args: argparse.Namespace) -> int:
         t0 = time.time()
         feats = gen.sample(cond, seed=NOISE_SEED + NOISE_OFFSET[split],
                            steps=args.euler_steps)
+        rows_extra: Dict[str, np.ndarray] = {}
+        if imprint is not None:
+            feats, T = apply_imprint(
+                feats, cond, imprint,
+                np.random.default_rng(NOISE_SEED + NOISE_OFFSET[split] + 1000))
+            rows_extra["drawn_duration_ms"] = T
         dt = time.time() - t0
         st = {"made": n, "seconds": round(dt, 1), "rows_per_s": round(n / dt)}
         prov = gen_provenance(gen, dict(
             script=spec.code, split=split, seed=SEEDS[split],
             noise_seed=NOISE_SEED + NOISE_OFFSET[split], rows=n,
-            layout=spec.layout_json, stats=st, lexicon=spec.lexicon.tier))
-        out = write_split(cache, want_files[split], feats, words, letters, prov)
+            imprint=bool(imprint), layout=spec.layout_json, stats=st,
+            lexicon=spec.lexicon.tier))
+        out = write_split(cache, want_files[split], feats, words, letters, prov,
+                          rows=rows_extra or None)
         report[f"gen_{split}"] = st
         print(f"[{spec.code}] {split}: {st} -> {out}", flush=True)
         if split in ("train", "holdout"):
@@ -539,8 +792,14 @@ def cmd_matched(args: argparse.Namespace) -> int:
     cond = cond_all[wid]
     feats = gen.sample(cond, seed=NOISE_SEED + NOISE_OFFSET["matched"],
                        steps=args.euler_steps)
+    imprint = load_imprint(args.imprint, args.workdir, gen)
+    if imprint is not None:
+        feats, _ = apply_imprint(
+            feats, cond, imprint,
+            np.random.default_rng(NOISE_SEED + NOISE_OFFSET["matched"] + 1000))
     prov = gen_provenance(gen, dict(role="word-matched gate arm",
                                     words_npz=str(src), n=len(words),
+                                    imprint=bool(imprint),
                                     euler_steps_used=args.euler_steps))
     out.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(out, features=feats, words=np.array(words),
@@ -585,6 +844,9 @@ def main() -> int:
     sc.add_argument("--holdout-rows", type=int, default=10_000)
     sc.add_argument("--splits", default="train,val,holdout")
     sc.add_argument("--euler-steps", type=int, default=EULER_STEPS)
+    sc.add_argument("--imprint", type=Path, default=None,
+                    help="acquisition-imprint json from fit-imprint (the one "
+                         "pre-registered repair round)")
     sc.add_argument("--wf-lang", default="")
     sc.add_argument("--force", action="store_true")
     sc.set_defaults(fn=cmd_sample_cache)
@@ -595,7 +857,25 @@ def main() -> int:
     ma.add_argument("--out", type=Path, required=True)
     ma.add_argument("--layout-json", default="ru_jcuken_default.json")
     ma.add_argument("--euler-steps", type=int, default=EULER_STEPS)
+    ma.add_argument("--imprint", type=Path, default=None)
     ma.set_defaults(fn=cmd_matched)
+
+    fi = sub.add_parser("fit-imprint",
+                        help="fit the acquisition imprint (duration law + "
+                             "dwell-snap ε) on the generator's own corpus")
+    fi.add_argument("--gen", type=Path, required=True)
+    fi.add_argument("--bank", required=True,
+                    help="featurized bank npz(s): dup_frac target + ε-fit word "
+                         "distribution (and the duration law, unless "
+                         "--yandex-jsonl)")
+    fi.add_argument("--layout", type=Path, required=True)
+    fi.add_argument("--out", type=Path, required=True)
+    fi.add_argument("--fit-rows", type=int, default=20_000)
+    fi.add_argument("--yandex-jsonl", default="",
+                    help="research twin only: fit the law from the raw corpus "
+                         "(the featurized cache has no durations)")
+    fi.add_argument("--yandex-stride", type=int, default=6)
+    fi.set_defaults(fn=cmd_fit_imprint)
 
     args = ap.parse_args()
     return args.fn(args)

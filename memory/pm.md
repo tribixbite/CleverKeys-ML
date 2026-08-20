@@ -1567,33 +1567,69 @@ scores." Two tracks, and the license split is NON-NEGOTIABLE
       PHASE_O, YANDEX_LICENSE_RESEARCH), verify infra (torch cu128 OK on the
       5080; cache_ru/train_yandex.npz 1M real rows exists; eval_script --dump
       + mcnemar tooling exists; phaseIB-ru-real ckpt still on disk)
-- [ ] Q1 PHASE_Q.md: design choice (conditional flow matching over the
+- [x] Q1 PHASE_Q.md: design choice (conditional flow matching over the
       residual field — the audit's own pre-registered shape), rationale vs
-      alternatives, pre-registered gates + ship band, budgets. COMMIT BEFORE
-      TRAINING.
-- [ ] Q2 ctc/synth_v3.py: conditioning builder, CFM model, trainer, sampler,
-      matched-arm driver, cache writer (train.py-compatible npz schema, v2's
-      wordfreq S0 draw reused verbatim)
-- [ ] Q3 train shipping-track generator on FUTO+HWS (detached, watchdogged);
-      battery via ctc/synth_v3_gates.py vs v2's C_B_S5 numbers (same
-      instruments: G1, G3 KS battery, G4 MLP/GBM17/GBM23 + floors + null,
-      PRDC diversity guard)
-- [ ] Q4 ru ship-gate: 1M-row v3 cache, decoder retrain (Phase-O/P recipe
-      VERBATIM, seed 1234, --workers 0 detached), real-probe decode with
-      --dump, paired McNemar vs phaseP-ru-v2full re-decode. SHIP iff
-      >= +1.0 t1 AND p < 0.05.
-- [ ] Q5 research twin: same code/hyperparams on cache_ru/train_yandex.npz;
-      *_RESEARCH_ONLY cache + decoder; real-probe decode -> THE UPPER BOUND;
-      re-decode phaseIB-ru-real at the current preset for the same-footing
-      ceiling
-- [ ] Q6 if ship gate passes: regenerate the six scripts (P6 pattern, full
-      pool), retrain, export, tiered registry supersede
-- [ ] Q7 docs: PHASE_Q.md results + THE UPPER BOUND, MODELS_TABLE/RESULTS
-      updates, pm.md close, lowercase conventional commits, push
+      alternatives, pre-registered gates + ship band, budgets. Committed
+      BEFORE training (dbab40c).
+- [x] Q2 ctc/synth_v3.py: conditioning builder, CFM model (1.94M params),
+      trainer, sampler, matched-arm driver, cache writer; research seal
+      enforced in code (assert_sealed). Repair round added fit-imprint +
+      apply_imprint (duration law + dwell snap).
+- [x] Q3 ship generator trained (70 min, VAL 0.386); battery run. G1 PASS,
+      G3 6/7 (step_cv 0.165 vs 0.15 MISS), G4 GBM17 0.7212 vs v2 0.8125
+      PASS (campaign low) / MLP-speed 0.764 MISS, GQ-D PRDC PASS. Proceed-
+      rule deviation disclosed in PHASE_Q.md §7.2.
+- [x] Q4 SHIP GATE PASS: 85.07 vs 79.73, +5.34, p 5.4e-53 (bar was +1.0);
+      greedy 56.12->65.66; <=3 89.15 clears the 86.4 corollary v2 missed;
+      fp16w cost +0.01. GQ-T clean (holdout greedy 56.52 < real 65.66).
+- [x] Q5 THE UPPER BOUND: sealed twin U = 85.95 (+0.89 over ship, p 0.0025;
+      >=4 stratum indistinguishable p 0.47); ceiling re-decoded at this
+      preset = 88.69; decomposition 5.34 generator / 0.89 in-domain data /
+      2.74 generation cost. Twin battery near-floor (MLP speed 0.598,
+      GBM17 0.613) — residual is model-family over-smoothing.
+- [x] Q6 six scripts regenerated + retrained + exported on v3
+      (*_synth_v3_ch80*, generation 4): el 92.12 (+7.0 vs ch192),
+      uk 88.96 (+13.0), bg 86.76 (+10.1), mk 91.55 (+5.0), he 80.69
+      (+16.1); permuted 0.00 everywhere; all exports 100/100 at default
+      tol (he flag does not recur); fp16w free.
+- [x] Q7 docs: PHASE_Q.md §7 results, MODELS_TABLE §4.17, RESULTS.md head,
+      phase_q_scripts.json, evidence JSONs committed, pushed.
 
 Verdict pre-registration (stated before any training): if v3-ship cannot beat
 v2's battery AND probe, that is a VALID TERMINAL VERDICT — v2 remains the
 generator and the upper bound still prices all future work.
+[OUTCOME: not needed — v3 ships, +5.34 real.]
+
+### PHASE Q CLOSE (2026-08-20)
+
+The learned generator ships. Conditional rectified flow over the residual
+field, English-only training, geometry-only conditioning, acquisition imprint
+at sampling time. Real ru probe 79.73 -> 85.07 (+5.34, p 5e-53), greedy
+56 -> 66, both strata significant, all six scripts regenerated and superseded
+(generation 4), no export flags, fp16w free everywhere.
+
+The sealed twin (научные carve-out, measurement only, every artifact
+RESEARCH_ONLY under ~/ctc-train/research_only/, nothing in git or artifacts/)
+reads U = 85.95 against the 88.69 same-preset ceiling. THE DECOMPOSITION:
+of v2's 8.96-point gap to real-trained, the English-trained learned generator
+closes 5.34 (86% of all learned-generator headroom), in-domain data is worth
+0.89 (0.31 n.s. on >=4 words), generation fidelity costs 2.74. The transplant
+era's dominant "donor population" term nearly vanishes under conditional
+generation; what binds now is the model family's own over-smoothing (twin
+battery: ac1 0.141 MISS, minima/seg 0.67 vs 0.77 — same signature both
+tracks).
+
+Carried open: UCL95 <= 0.60 still unmet (speed-texture axis); lambda 2.0 now
+two emission-generations stale (greedy 37->56->66) but re-tuning still refused
+(validator burn); register residual open; single seed; four of six scripts
+still have no real measurement; U is one architecture's bound, not the
+supremum.
+
+NEXT (app side, NOT this agent): if any script is wired, use
+*_synth_v3_ch80* (generation 4), not v2full. The app-repo copy of
+ctc-architecture-and-multiscript-guide.md now lacks the v2, v2full AND v3
+sections; the ML mirror needs a v3 synthesis section added too (not yet
+written — the only doc debt this phase leaves).
 
 ## 2026-08-20 — APP DOC RECONCILIATION at app `d717bda7` (ML repo only; app tree read-only)
 

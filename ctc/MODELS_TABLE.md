@@ -790,6 +790,75 @@ generator and its donor footing change the training distribution, not the
 contract.
 
 
+### 4.17 Phase Q — the learned generator, and the sealed upper bound (2026-08-20)
+
+Full record: `PHASE_Q.md`. SYNTH v3 replaces the transplant with a conditional
+rectified-flow model over the residual field (1.94 M params, trained on FUTO t3
++ HWS only — the MIT shipping track), plus an acquisition imprint (duration law
++ dwell snap, both fit on the generator's own corpus). Same footing rules as
+§4.16: the ru rows carry the **real** Yandex column (eval-only, 8,471 in-dict,
+CKDT preset, fp32 graph) and are the only accuracy claims; the five others
+carry their own **v3** synthesis holdout, generator-relative as ever.
+
+**The ship gate (real Russian), all rows paired on the same 8,471 rows:**
+
+| arm | training cache | in-dict t1 | t3 | t5 | ≤3 | ≥4 | greedy | verdict |
+|---|---|---|---|---|---|---|---|---|
+| `phaseP-ru-v2full` = `ru_synth_v2_ch80` | v2 transplant | 79.73 | 90.77 | 93.26 | 85.77 | 75.92 | 56.12 | the registered baseline |
+| **`phaseQ-ru-v3`** = `ru_synth_v3_ch80` | **v3 learned**, `cache_ru_v3` | **85.07** | **93.35** | **95.16** | **89.15** | **82.49** | **65.66** | **SHIP** — G5-Q PASS (bar ≥ 80.73) |
+| `phaseQ-ru-yxgen_RESEARCH_ONLY` (sealed, unshippable) | v3 twin trained on 1 M real Yandex rows | *85.95* | *93.74* | *95.37* | *90.95* | *82.79* | *69.72* | **THE UPPER BOUND** — measurement only |
+| `phaseIB-ru-real` re-decode at this preset | 1 M real Yandex rows (unshippable) | *88.69* | *95.28* | *96.82* | *93.90* | *85.39* | *75.23* | the ceiling |
+
+**Paired tests, exact McNemar, n = 8,471:** v3 vs v2full **+5.34, p = 5.4e-53**
+(greedy +9.54, p = 1.4e-100; ≤3 +3.38, p = 1.5e-11 — clears the 86.4 corollary
+v2 missed; ≥4 +6.57, p = 8.8e-44) · U vs v3 **+0.89, p = 0.0025** (≥4 stratum
++0.31, p = 0.47 — indistinguishable) · ceiling vs U **+2.74, p = 5.6e-23**.
+Decomposition: of the 8.96-point v2→ceiling gap, the English-trained learned
+generator closes 5.34 (86 % of the 6.22 any learned generator of this family
+could reach), the in-domain data adds 0.89, and generation itself costs 2.74.
+fp16w decode cost +0.01. λ untouched.
+
+**The battery** (`phaseQ_gates_v3.json`): G1 PASS (start-hit 0.885 vs real
+0.915; v2 0.730) · G3 6/7 with step_cv 0.165 vs 0.15 the sole MISS and
+sharp_turns 0.080 / turn_mean 0.083 / sc-coupling 0.250/0.217 all far past v2 ·
+G4 **GBM₁₇ 0.7212 vs v2's 0.8125 — the lowest reading on the registered
+instrument in the campaign** (45 % gap-closure vs v1), GBM₂₃ agrees at 0.7943,
+MLP-speed 0.7640 MISS (English tempo texture — the axis the probe proved
+non-binding) · GQ-D PRDC recall 0.879 PASS · GQ-T clean (holdout greedy 56.52
+*below* real greedy 65.66). The §2 proceed-rule deviation is disclosed in
+`PHASE_Q.md` §7.2. The sealed twin's calibration battery reads near-floor
+(MLP speed 0.598, coords 0.501, GBM₁₇ 0.613) — what remains in-domain is the
+model family's own over-smoothing (ac1, stroke count), the named mechanism
+behind the 2.74.
+
+**The five corpus-less scripts, on their own v3 holdouts** (10,000 rows, CKDT,
+fresh noise + fresh word draw; levels are generator-relative — margins against
+the EN zero-shot controls on the same rows are the only cross-generation
+comparator, and they **widen** against P6's):
+
+| arm | holdout t1 / t3 / t5 | greedy | ch192-EN (Δ) | ch80-EN (Δ) | P6's ch192 Δ | permuted | fp16w cost |
+|---|---|---|---|---|---|---|---|
+| **`phaseQ-el-v3`** = `el_synth_v3_ch80` | **92.12** / 97.23 / 97.92 | 74.17 | 85.11 (**+7.01**) | 86.05 (+6.07) | +6.11 | 0.00 | 0.00 |
+| **`phaseQ-uk-v3`** = `uk_synth_v3_ch80` | **88.96** / 94.97 / 95.93 | 60.75 | 75.94 (**+13.02**) | 77.05 (+11.91) | +5.09 | 0.00 | 0.00 |
+| **`phaseQ-bg-v3`** = `bg_synth_v3_ch80` | **86.76** / 95.87 / 97.04 | 65.28 | 76.71 (**+10.05**) | 76.03 (+10.73) | +5.47 | 0.00 | 0.00 |
+| **`phaseQ-mk-v3`** = `mk_synth_v3_ch80` | **91.55** / 97.26 / 97.97 | 71.66 | 86.55 (**+5.00**) | 85.98 (+5.57) | +5.23 | 0.00 | 0.00 |
+| **`phaseQ-he-v3`** = `he_synth_v3_ch80` | **80.69** / 92.25 / 94.72 | 64.03 | 64.64 (**+16.05**) | 63.89 (+16.80) | +7.92 | 0.00 | 0.00 |
+
+*(cells from `ctc/phase_q_scripts.json`; the greedy columns — 60–74 against the
+EN controls' 13–32 — are the emissions-side confirmation that the texture moved
+toward the target scripts and away from English, the direction ru's real probe
+verified at +5.34.)*
+
+**Export gates.** Every fp32 export **100/100 argmax at the default 1e-3**
+(he 3.57e-04, inside the envelope — the v2-era flag does not recur); fp16w
+≤ 0.01 t1 everywhere. Standard 1,142,727-byte resbn80 graphs, fp16w 589,406 B;
+hashes in `PHASE_Q.md` §7.7. **Generation 4 (`*_synth_v3_ch80*`) supersedes
+v2full for deployment on all six scripts**; every earlier generation stays in
+the registry with the numbers that were measured on it. **Nothing in
+`artifacts/` derives from Yandex** — the twin generator, its samples and its
+decoder live untracked under `~/ctc-train/research_only/`, permanently
+unshippable per `YANDEX_LICENSE_RESEARCH.md` §8.1 / `PHASE_Q.md` §0.
+
 ## 5. Configurations — mixes, pairs and blends, with their member composition
 
 A **configuration** is not a model: it is a named set of members plus a rule for

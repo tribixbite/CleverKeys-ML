@@ -1,0 +1,118 @@
+{
+ "probe": "own v3 holdout (generator-relative), CKDT preset",
+ "ru_probe": "REAL yandex valid-10k, eval-only",
+ "scripts": {
+  "el": {
+   "holdout": {
+    "indict_t1": 92.12,
+    "indict_t3": 97.23,
+    "indict_t5": 97.92,
+    "greedy_t1": 74.17,
+    "le3_t1": 95.7,
+    "ge4_t1": 89.22,
+    "decoded": 10000
+   },
+   "fp16w_t1": 92.12,
+   "permuted_t1": 0.0,
+   "en192_t1": 85.11,
+   "en80_t1": 86.05,
+   "margin_ch192": 7.01,
+   "margin_ch80": 6.07,
+   "fp16w_cost": 0.0
+  },
+  "uk": {
+   "holdout": {
+    "indict_t1": 88.96,
+    "indict_t3": 94.97,
+    "indict_t5": 95.93,
+    "greedy_t1": 60.75,
+    "le3_t1": 92.67,
+    "ge4_t1": 87.38,
+    "decoded": 10000
+   },
+   "fp16w_t1": 88.96,
+   "permuted_t1": 0.0,
+   "en192_t1": 75.94,
+   "en80_t1": 77.05,
+   "margin_ch192": 13.02,
+   "margin_ch80": 11.91,
+   "fp16w_cost": 0.0
+  },
+  "bg": {
+   "holdout": {
+    "indict_t1": 86.76,
+    "indict_t3": 95.87,
+    "indict_t5": 97.04,
+    "greedy_t1": 65.28,
+    "le3_t1": 89.26,
+    "ge4_t1": 85.18,
+    "decoded": 10000
+   },
+   "fp16w_t1": 86.77,
+   "permuted_t1": 0.0,
+   "en192_t1": 76.71,
+   "en80_t1": 76.03,
+   "margin_ch192": 10.05,
+   "margin_ch80": 10.73,
+   "fp16w_cost": 0.01
+  },
+  "mk": {
+   "holdout": {
+    "indict_t1": 91.55,
+    "indict_t3": 97.26,
+    "indict_t5": 97.97,
+    "greedy_t1": 71.66,
+    "le3_t1": 94.71,
+    "ge4_t1": 89.24,
+    "decoded": 10000
+   },
+   "fp16w_t1": 91.55,
+   "permuted_t1": 0.0,
+   "en192_t1": 86.55,
+   "en80_t1": 85.98,
+   "margin_ch192": 5.0,
+   "margin_ch80": 5.57,
+   "fp16w_cost": 0.0
+  },
+  "he": {
+   "holdout": {
+    "indict_t1": 80.69,
+    "indict_t3": 92.25,
+    "indict_t5": 94.72,
+    "greedy_t1": 64.03,
+    "le3_t1": 86.33,
+    "ge4_t1": 77.13,
+    "decoded": 10000
+   },
+   "fp16w_t1": 80.69,
+   "permuted_t1": 0.0,
+   "en192_t1": 64.64,
+   "en80_t1": 63.89,
+   "margin_ch192": 16.05,
+   "margin_ch80": 16.8,
+   "fp16w_cost": 0.0
+  },
+  "ru": {
+   "real_probe": {
+    "indict_t1": 85.07,
+    "indict_t3": 93.35,
+    "indict_t5": 95.16,
+    "greedy_t1": 65.66,
+    "le3_t1": 89.15,
+    "ge4_t1": 82.49,
+    "decoded": 8471
+   },
+   "fp16w_t1": 85.08,
+   "holdout_diag_GQT": 88.14,
+   "paired_vs_v2full": {
+    "n": 8471,
+    "a_pct": 79.73,
+    "b_pct": 85.07,
+    "delta_b_minus_a": 5.34,
+    "a_only": 227,
+    "b_only": 679,
+    "p_mcnemar": 5.366437145598743e-53
+   }
+  }
+ }
+}

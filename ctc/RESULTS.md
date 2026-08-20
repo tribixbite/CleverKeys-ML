@@ -1,5 +1,62 @@
 # CTC Swipe Encoder — Training Results
 
+# Phase Q (2026-08-20): the learned generator — +5.34 real Russian top-1, and the sealed twin that prices what is left
+
+Full record: `ctc/PHASE_Q.md`. SYNTH v3 replaces the residual transplant with a
+**conditional rectified-flow model over the residual field** — the shape the
+Phase-P research audit itself pre-registered — trained on the MIT English
+corpora only (FUTO t3 + HWS), conditioned on nothing but the target word's
+polyline geometry, plus an **acquisition imprint** (a duration law and a
+dwell-snap ε, fit on the generator's own corpus) that restores the two discrete
+signatures a continuous density cannot emit.
+
+**The ship gate.** Real Yandex valid-10k, eval-only footing, the same 8,471
+in-dict rows as every ru number since Phase I-B, CKDT preset, paired per-row:
+
+| arm | in-dict t1 | ≤3 | ≥4 | greedy |
+|---|---|---|---|---|
+| `ru_synth_v2_ch80` — the v2 baseline | 79.73 | 85.77 | 75.92 | 56.12 |
+| **`ru_synth_v3_ch80` — SHIP** | **85.07** | **89.15** | **82.49** | **65.66** |
+
+**+5.34, exact McNemar p = 5.4e-53** — five times the pre-registered +1.0 ship
+band — with greedy +9.54 and *both* strata significant; the ≤3 stratum clears
+the 86.4 corollary v2 missed. Real greedy now exceeds the model's greedy on its
+own synthesis holdout (65.66 vs 56.52): the generator's distribution is no
+longer easier than reality.
+
+**THE UPPER BOUND.** A twin generator — same code, same hyperparameters —
+trained on 1 M real Yandex swipes under the научные carve-out (measurement
+only; weights, samples and its decoder are sealed `RESEARCH_ONLY`, untracked,
+permanently unshippable) puts the perfect-in-domain number at **U = 85.95**,
+against the real-trained ceiling of **88.69** (phaseIB-ru-real re-decoded at
+this preset). The decomposition of the 8.96-point gap above v2: **5.34 closed
+by the English-trained learned generator (86 % of all learned-generator
+headroom), 0.89 for in-domain data** (and on ≥4-letter words the ship arm is
+statistically indistinguishable from the twin, p = 0.47), **2.74 for generation
+itself**. The population term that dominated the transplant era is nearly gone;
+the binding constraint on synthetic-data quality is now generator fidelity —
+whose named mechanism, per the twin's near-floor battery (MLP speed 0.598,
+GBM₁₇ 0.613), is the model family's own over-smoothing of dwell and stroke
+structure.
+
+**The battery, in one line each.** G1 endpoints PASS (start-hit 0.885 vs real
+0.915; v2 read 0.730) · G3 6/7 with step_cv 0.165 vs 0.15 the sole miss, while
+cornering (0.080 vs v2's 0.306) and both speed–curvature bars beat v2 outright ·
+G4 **GBM₁₇ 0.7212 — the lowest reading ever on the registered instrument**
+(v2: 0.8125), MLP-speed 0.764 MISS on the English-tempo texture axis the probe
+proved non-binding · PRDC diversity guard PASS (recall 0.879) · the §2
+proceed-rule deviation is disclosed in `PHASE_Q.md` §7.2, and the ship decision
+stayed with the pre-registered G5-Q bar throughout.
+
+**The five corpus-less scripts** were regenerated, retrained and re-exported on
+v3 (`*_synth_v3_ch80*`, generation 4, all exports 100/100 argmax at default
+tolerance — he's flag does not recur). On their own v3 holdouts the EN
+zero-shot margins **widen** against P6 (el +7.0, uk +13.0, bg +10.1, mk +5.0,
+he +16.1), and their greedy runs 60–74 against the controls' 13–32: the
+synthetic texture moved toward the target scripts and away from English, the
+same direction ru's real probe verified. Generator-relative as ever — four of
+the six scripts still have no real-data measurement of any kind.
+
 # Phase P (2026-08-19): the synthetic generator, rebuilt — +2.31 real Russian top-1 and +19 real greedy, with no real Cyrillic row anywhere
 
 Full record: `ctc/PHASE_P.md`. Phase O closed by measuring that its own probe is
