@@ -1,12 +1,20 @@
 # CTC architecture and the multi-script question — the definitive guide
 
-**Status**: reference. **Written**: 2026-08-18.
-**App state described**: `9a6ffdd2` (post neural-engine removal; `ctc` is now the DEFAULT
-`swipe_engine_mode`).
-**Training-side source of truth**: `CleverKeys-ML` @ `ctc/` — `MODELS_TABLE.md`,
+**Status**: reference. **Written**: 2026-08-18. **Revised**: 2026-08-20 (generator v2 / P6, and
+the app at `d717bda7`).
+**App state described**: `d717bda7` — `ctc` is the DEFAULT `swipe_engine_mode`, seven served
+languages, the neural engine deleted, and the 2026-08-20 remediation wave landed.
+**Training-side source of truth**: `CleverKeys-ML` @ `ctc/` — `MODELS_TABLE.md` §4.16,
+`PHASE_O.md`, **`PHASE_P.md` (v2 generator, §6.1 and §8.4 artifact registries)**,
 `PHASE_I_DATA.md` §4–§6, `PHASE_J.md` §6.9, `ALT_LAYOUT_EVAL.md`,
 `YANDEX_LICENSE_RESEARCH.md`, `APP_INTEGRATION_AUDIT.md`.
-A byte-identical mirror of this file lives at `CleverKeys-ML/ctc/ctc-architecture-and-multiscript-guide.md`.
+
+> **Mirror warning.** This file has an app-repo copy at
+> `docs/specs/ctc-architecture-and-multiscript-guide.md`. The two were byte-identical when written
+> and **have since diverged**: the app copy is still at the pre-Phase-P text — `cyrillic_synth.py`,
+> `weight = 255 − rank`, "real data is worth ~13 points", greedy 37, and the v1 `ru_synth_ch80*`
+> hashes. The sections that must be brought across are enumerated in `APP_WIRING_CHECKLIST.md` §3.
+> Until that lands, **this copy is the authority** and the app copy is one model generation stale.
 
 This document exists to kill four recurring confusions permanently:
 
@@ -15,7 +23,8 @@ This document exists to kill four recurring confusions permanently:
    needed and they cost ~30 minutes of GPU per seed.** Russian is done; the artifacts are
    named in §4.
 3. "37 layouts don't declare a script." — **Two do not, and neither is a letter layout.**
-   The real gap is three *mis-declared* or letter-incomplete layouts, listed in §3.
+   The real gap was three *mis-declared* or letter-incomplete layouts; one of the three was a
+   genuine bug and is now fixed and guarded (§2.1).
 4. "Which ONNX?" — §5 is the inventory table.
 
 ---
@@ -143,11 +152,19 @@ As implemented, this is three gates in dispatch order, each individually suffici
    `script == null` is false, so an undeclared layout goes geometric.
 2. **Language** — `InputCoordinator.performCtcSwipeTyping` reads the live language before
    dispatch; `CtcEngineAdapter.decodeAsync`/`warmUpAsync` re-check as defense in depth.
-   `SUPPORTED` at `9a6ffdd2` is `en` (EN_JSON scale) and `fr, de, es, it, pt, sv` (CKDT scale);
+   `SUPPORTED` at `d717bda7` is `en` (EN_JSON scale) and `fr, de, es, it, pt, sv` (CKDT scale);
    `it, pt, sv` are marked `PROVISIONAL`.
 3. **Alphabet completeness** — `buildMappedLayout` returns null on the first missing a–z
    letter, `supportsLayout` returns false, and the dispatcher hands the swipe to geometric
    *before any CTC work starts*. No crash, no empty bar, no garbage decode.
+
+A **fourth** condition joined these on 2026-08-20 (`ad18e0e3`, closing audit HIGH-1): if the
+ONNX session has permanently failed to load, `CtcEngineAdapter.isModelPermanentlyUnavailable()`
+is true and both the dispatcher (`InputCoordinator.kt:725-733`) and the prewarm (`:793-796`)
+route to geometric. Before that fix a dead session produced an empty slate, which the shared
+pipeline rendered as a cleared bar — indistinguishable from a bad gesture. It matters for
+multi-script work because **per-script routing removes gate 1**, so the remaining gates carry
+more weight than they did.
 
 **Russian cannot reach CTC in any state**, and that is correct, because no Russian model,
 trie, or fixture is wired into the app. Gate 2 also covers the inverse case (`ru` language on a
@@ -155,41 +172,42 @@ QWERTY layout): geometric, not CTC.
 
 ### 2.1 The "undeclared script" question — measured, not assumed
 
-Measured on `src/main/layouts/` at `9a6ffdd2` (86 XML files; this is the tree
-`copyLayoutDefinitions` ships — `srcs/layouts/` is **not** referenced by any build task and is
-divergent):
+Measured on `src/main/layouts/` at `d717bda7` (86 XML files; this is the tree
+`copyLayoutDefinitions` ships — `srcs/layouts/` is **not** referenced by any build task and has
+been divergent before):
 
 | bucket | count | consequence |
 |---|---|---|
 | `script="latin"` **and** a–z-complete | **46** | route CTC — the intended set |
-| `script="latin"` but a–z-incomplete | **3** | router lets them past, the alphabet gate stops them → geometric |
-| non-Latin declared (15 distinct scripts) | **35** | geometric at gate 1 |
+| `script="latin"` but a–z-incomplete | **2** | router lets them past, the alphabet gate stops them → geometric |
+| non-Latin declared (15 distinct scripts) | **36** | geometric at gate 1 |
 | no `script` attribute at all | **2** | `numeric.xml`, `pin.xml` — not letter layouts, correctly geometric |
 
-There is **no population of 37 undeclared layouts.** The three latin-declared-but-incomplete
-files are:
+There is **no population of 37 undeclared layouts.** The two latin-declared-but-incomplete files
+are `latn_qwerty_az.xml` and `latn_qwerty_tly.xml`, both genuinely lacking `w`, both correctly
+declared — geometric is the right answer for them.
 
-| file | missing | verdict |
-|---|---|---|
-| `latn_qwerty_az.xml` | `w` | correct declaration, genuinely lacks `w` — geometric is right |
-| `latn_qwerty_tly.xml` | `w` | same |
-| **`grek_qwerty.xml`** | all 26 | **MIS-DECLARED — a live bug, see below** |
+**The third one was a real bug and is now fixed.** `src/main/layouts/grek_qwerty.xml` declared
+`script="latin"` while its sibling `srcs/layouts/grek_qwerty.xml` had been corrected to `greek`
+in `6af11da7` ("closes neural-swipe allowlist leak") — a tree no build task reads, so the fix
+looked landed and was not. `6f30d60f` (2026-08-20) corrected the shipped file; both copies now
+read `script="greek"` and are byte-identical.
 
-**`src/main/layouts/grek_qwerty.xml` declares `script="latin"`.** The sibling
-`srcs/layouts/grek_qwerty.xml` was corrected to `script="greek"` in commit `6af11da7`
-("closes neural-swipe allowlist leak") — **but that fix landed in the tree the build does not
-read.** The shipped Greek layout is still tagged Latin, so it passes the router's script gate
-and is caught only by the alphabet gate. User-visible impact today: none (it falls to geometric
-either way). Correctness impact: the commit that claimed to close the leak did not close it for
-the shipped layouts, and the script gate is being relied on as gate 1 of 3.
+It is also **guarded**, which is the part worth keeping. `LayoutScriptDeclarationTest` walks the
+real shipped tree (`File("src/main/layouts")`) and asserts `script="latin"` ⟺ a–z-complete
+**bidirectionally** — it catches a Greek layout tagged Latin *and* an a–z-complete layout denied
+CTC for no reason — with `latn_qwerty_az` / `latn_qwerty_tly` as named exceptions, plus a by-name
+pin on Greek and a pin on the no-script set. Writing it turned up something worth recording:
+**the layout tree uses two schemas for the centre key value**, `<key c="q" ne="1"/>` and
+`<key key0="p" key1="…"/>`, and both are live. Matching only one makes ~40 layouts look like they
+contain no letters, and the header comment in every layout file documents `key0` while
+`latn_qwerty_us` uses `c` — so the comment is not a reliable guide.
 
-**So the rule is: what these layouts need is script declaration and verification, not new
-models.** The actionable work is (a) fix `grek_qwerty.xml`'s attribute in
-`src/main/layouts/`, (b) add a pure-JVM test that walks `src/main/layouts/*.xml` and asserts
-`script="latin"` ⟺ a–z-complete (with `az`/`tly` as named exceptions), and (c) add the negative
-test the audit's LOW-9 asks for: feed a ЙЦУКЕН `KeyboardData` to
-`CtcEngineAdapter.supportsLayout` and assert false, so "Cyrillic can never reach CTC" rests on
-more than the script string in the test suite.
+**Still owed** (audit LOW-9, half done): the router-level negative exists
+(`SwipeEngineRouterTest` pins "the Greek QWERTY trap: script wins over the QWERTY-shaped name"),
+but nothing asserts `CtcEngineAdapter.supportsLayout(...) == false` for a Cyrillic or Greek
+`KeyboardData`. Gate 3 is untested in the negative direction — which becomes load-bearing the
+moment per-script routing removes gate 1.
 
 ---
 
@@ -207,11 +225,19 @@ layout at CTC and hope.
 subjects. Measured cost for Russian: 94 k steps of `resbn:80` — well under an hour of a single
 RTX 5080 — plus a few minutes to export and evaluate.
 
-**Proven, not projected.** `phaseIB-ru-synth` was trained on 1,000,000 rows in which **no real
+**Proven, not projected.** `phaseP-ru-v2full` was trained on 1,000,000 rows in which **no real
 Cyrillic sample appears anywhere** (checkpoint selection ran on a synthetic val split too), and
-it decodes **real** Russian swipes at in-dict top-1 **76.21** at E1, rising to **77.41** once
-the λ term is put on the lexicon's actual frequency scale (§4). That is the same accuracy class
-as the shipped geometric engine's cross-layout anchors (71–77).
+it decodes **real** Russian swipes at in-dict top-1 **79.73** with greedy **56.12** (§4.3). Its
+v1 predecessor read 77.41 / 37.07 on the same rows; the +2.31 is paired at p = 2.6e-09. Both are
+above the shipped geometric engine's cross-layout anchors (71–77).
+
+**And the cheaper option first, because this is where the accuracy actually is.** The shipped
+**English** model, zero-shot on real Russian with nothing but the right layout and the right
+trie, reads **76.32** in-dict top-1 (`PHASE_O.md` §2.1). The purpose-built ru model adds
+**+3.41** on top of that. So of the ~79.7 points available, the app wiring — per-script alphabet,
+routing, trie, projection — delivers 76.3 of them **before any model ships**, and the model
+delivers the last three. If the work has to be staged, stage the wiring first; a script with the
+wiring and no model is already at the geometric engine's level or above.
 
 ### 3.2 The recipe, step by step
 
@@ -273,7 +299,16 @@ All tools live in `CleverKeys-ML/ctc/`.
 6. **Freeze a golden fixture.** `make_golden.py --vocab <script> --layout <geometry.json>
    --preset <the app preset>`. The fixture must be generated at the preset the app will actually
    ship, on the lexicon's real frequency scale, or it validates a ranking that never runs.
-7. **Measure on real data if any exists** — as a held-out *eval-only* probe. Synthesis is the
+7. **Check the lexicon against the 32-frame budget.** The exported encoder emits a fixed
+   `log_emissions [1,32,65]` and a CTC path spends one frame per character **plus a separating
+   blank between two identical adjacent characters**, so a word is decodable iff
+   `length + adjacent-duplicate-pairs ≤ 32`. The app added `CtcDecodableLength` and a
+   custom-word warning for this on 2026-08-20 (`2d080c7d`), with a test asserting every 20+
+   character word in `en_enhanced.json` clears it. **No script lexicon has been checked** — the
+   v2 word draw is wordfreq token mass with no length ceiling, and Greek and Ukrainian both
+   carry long inflected forms. It is one loop over the trie's word list; run it before training,
+   because a word over budget is silently unemittable rather than an error.
+8. **Measure on real data if any exists** — as a held-out *eval-only* probe. Synthesis is the
    training story; real data is how you find out whether the synthesis worked.
 
 ### 3.3 What synthesis buys and what it costs
@@ -320,7 +355,9 @@ separable from real ones. Consequences for anyone launching a script:
 |---|---|---|
 | `phaseIB-ru-real` (1 M real Yandex rows) | 89.64 | **LICENSE-BLOCKED FOREVER.** Not shippable in any form, at any time. |
 | `phaseJ-joint` (single en+ru model) | 78.23 confirm-half @ λ 2.0 | **REJECTED.** Its data is license-clean, but it cost **−0.42 en top-1** against a 0.3 tolerance and was not adopted. Its ru lead over the bar-holder is +0.31 on the confirm half — inside one binomial SE (±0.64 at n = 4,240) — and it *loses* t3 and t5 on that same half. |
-| **`phaseIB-ru-synth`** | **77.41** full-set / **77.92** confirm-half @ λ 2.0 | **THE SHIPPABLE ONE.** Trained purely on residual-transplant synthesis; zero Yandex rows anywhere in its pipeline. |
+| `phaseIB-ru-synth` = `ru_synth_ch80` (generator v1) | 77.41 full-set / 77.92 confirm-half @ λ 2.0 | **SUPERSEDED.** Shippable, but beaten by its own successor at matched everything. |
+| **`phaseP-ru-v2full`** = **`ru_synth_v2_ch80`** (generator v2, full donor pool) | **79.73** full-set @ λ 2.0, greedy 56.12 | **THE SHIPPABLE ONE.** Trained purely on residual-transplant synthesis; zero Yandex rows anywhere in its pipeline. G5 PASS against a pre-registered ≥ 79.41 floor. |
+| the shipped **English** model, zero-shot on ru | 76.32 | not a Russian model at all — the baseline the wiring alone reaches (§3.1). |
 
 **The licensing line, stated exactly** (`YANDEX_LICENSE_RESEARCH.md`, 941 lines of it): the
 Yandex Cup 2023 corpus has **no license grant anywhere** — not in the contest rules, the Cup
@@ -358,39 +395,63 @@ hashes in `PHASE_P.md` §8.4. ru has no third generation: `ru_synth_v2_ch80` is 
 the full-pool arm.
 
 
-Source checkpoint `~/ctc-train/ckpt/phaseIB-ru-synth/best.pt` — `resbn:80`, dil `1,2,4,8`,
-embed_hid 96, feat_v1, `t_out` 32, 279,346 params, step 87,000 of a 94,000-step schedule,
-greedy-selected. The fp32 re-export is **byte-identical** to the artifact the training run
-produced in 2026-08-09, which is a free determinism check on the whole export path.
+Architecture, identical across both generations: `resbn:80`, dil `1,2,4,8`, embed_hid 96,
+feat_v1, `t_out` 32, 279,346 params, 94,000-step schedule, batch 256, lr 3e-3, wd 0.01,
+warmup 1,000, coupled affine sampler, no layout-alt, greedy checkpoint selection, seed 1234.
+The v1 fp32 re-export was **byte-identical** to the artifact its 2026-08-09 training run
+produced — a free determinism check on the whole export path.
 
-Export gates, all passed:
+Export gates for the **v2 ship bytes**, all passed (`PHASE_P.md` §5):
 
-- BN fold: max |Δlog_emissions| **1.60e-04** on the sliced contract view (tolerance 5e-3);
-- fp32 export parity vs torch, real traces on `ru_jcuken_default`: sliced **1.14e-04**, argmax
+- BN fold: max |Δlog_emissions| **1.20e-04** on the sliced contract view (tolerance 5e-3);
+- fp32 export parity vs torch, real traces on `ru_jcuken_default`: sliced **9.92e-05**, argmax
   **100/100** (tolerance 1e-3, and argmax is the binding gate);
-- fp16w vs fp32, real traces: sliced **1.16e-01**, argmax **98/100**. This residue is large —
+- fp16w vs fp32, real traces: sliced **1.06e-01**, argmax **93/100**. This residue is large —
   larger than the ch192 ship model's 2.30e-02 — and it is **disclosed, not hidden**: the binding
-  check is the decode, and the decode is unchanged (below).
+  check is the decode, and the decode costs **+0.02 t1** (79.73 → 79.75).
+
+(The v1 numbers, for anyone reading a pre-Phase-P document: BN fold 1.60e-04, fp32 sliced
+1.14e-04 argmax 100/100, fp16w sliced 1.16e-01 argmax 98/100.)
 
 ### 4.3 Validation of the exported artifact
 
-`eval_cyrillic.py`, layout `ru_jcuken_default`, lexicon `app` (the langpack-ru CKDT v2 50 k
-trie), preset `1.05, 2.0, 0.2, 0.3734, 0.9882` = the app's `CtcScoringParams.tunedRuCkdt`
-verbatim, beam 100. Probe = the untouched Yandex valid-10k, 9,416 default-grid rows,
-**eval-only footing**.
+`eval_cyrillic.py` / `eval_script.py`, layout `ru_jcuken_default`, lexicon `app` (the langpack-ru
+CKDT v2 50 k trie), preset `1.05, 2.0, 0.2, 0.3734, 0.9882` = the app's
+`CtcScoringParams.tunedRuCkdt` verbatim, beam 100. Probe = the untouched Yandex valid-10k, all
+9,416 default-grid rows, 8,471 in-dict, **eval-only footing**.
 
-| artifact | rows | decoded | in-dict t1 / t3 / t5 | all-rows t1 | greedy |
-|---|---|---|---|---|---|
-| fp32, confirm half `4708:9416` | 4,708 | 4,240 | **77.92** / 89.50 / 92.00 | 70.18 | 37.62 |
-| fp16w, confirm half `4708:9416` | 4,708 | 4,240 | **77.92** / 89.50 / 92.00 | 70.18 | 37.71 |
-| fp16w, tune half `0:4708` | 4,708 | 4,231 | 76.88 / 88.63 / 91.52 | 69.10 | 36.54 |
-| fp16w, **full set** | 9,416 | 8,471 | **77.41** / 89.07 / 91.76 | 69.64 | 37.13 |
+The generation-2 gate (`PHASE_P.md` §4, G5 — the only gate that decided shipping):
 
-**The exported artifact reproduces the checkpoint's 77.92 confirm-half number exactly**
-(`PHASE_J.md` §6.9, `MODEL_COMPARISON.md:469`), and the tune half lands at 76.88 against the
-published 76.91 (−0.03). **fp16w is free at the decode**: identical t1/t3/t5 on the confirm
-half despite the 1.16e-01 emission residue and two argmax flips per hundred — the two flips
-move greedy by +0.09 and the beam not at all.
+| arm | training cache | in-dict t1 | ≤3 | ≥4 | greedy | t3 | t5 |
+|---|---|---|---|---|---|---|---|
+| `ru_synth_ch80` — the v1 baseline | v1, full donor pool | 77.42 | 86.47 | 71.70 | 37.07 | 89.06 | 91.76 |
+| `phaseP-ru-v1ctl` — paired v1 control | v1, 90/10 train side | 75.73 | 83.66 | 70.71 | 31.34 | 88.44 | 90.93 |
+| `phaseP-ru-v2` | v2, 90/10 train side | 78.87 | 83.60 | 75.88 | 55.67 | 90.73 | 93.13 |
+| **`phaseP-ru-v2full` = `ru_synth_v2_ch80` — SHIP** | **v2, full donor pool** | **79.73** | 85.77 | **75.92** | **56.12** | **90.77** | **93.26** |
+
+| paired comparison (exact McNemar, n = 8,471) | Δ t1 | p |
+|---|---|---|
+| **v2 full pool vs the v1 baseline** | **+2.31** | **2.6e-09** |
+| v2 vs v1 at matched donor footing | +3.14 | 6.4e-14 |
+| the cost of the 90/10 donor split, v1 arm | −1.69 | 5.2e-07 |
+| v2 full pool vs v2 train side | +0.86 | 0.0023 |
+
+**G5 PASS** — 79.73 against a pre-registered floor of 79.41. Two honest qualifications carried
+from `PHASE_P.md` §4.2: the ≥4-letter stratum gained **+4.22** (p = 3.6e-17, and 61 % of real
+usage lives there), while the ≤3 stratum **missed its registered corollary** at 85.77 against
+86.4 — indistinguishable from zero (p = 0.27), entirely carried by the donor-side term rather
+than by v2, and in the stratum where the lexicon prior rather than the encoder does the work.
+Re-tuning λ to recover it was **refused**: λ is already one validator-fit parameter and the
+Yandex probe is the only real one that exists.
+
+**Export gates** for the v2 bytes: BN fold 1.20e-04 (sliced), fp32-vs-torch 9.92e-05 with argmax
+**100/100** on real traces, fp16w-vs-fp32 1.06e-01 with argmax 93/100 — and the decode cost of
+fp16w is **+0.02 t1** (79.73 → 79.75). The large fp16w emission residue is disclosed rather than
+hidden, exactly as in generation 1; the binding gate is the decode and the decode is free.
+
+The v1 numbers, for anyone reading a pre-Phase-P document: fp16w full set **77.41** / 89.07 /
+91.76, confirm half 77.92, tune half 76.88. Those are the bytes every number published before
+2026-08-19 was measured on.
 
 ### 4.4 The preset, the trie and the layout
 
@@ -435,7 +496,11 @@ Unpacked:
   (test-2400, ledger reads) has **no Cyrillic counterpart** and never will. Russian numbers can
   never be called "test-validated".
 - **single seed** (1234). Every other campaign bar is a seed-mean bar; this is not one.
-- **no per-language preset sweep beyond λ.** γ, β and the prune constants are E1's, carried.
+- **no per-language preset sweep beyond λ**, and λ itself is now suspect in a new way: it was
+  tuned in `PHASE_J.md` §6.9 against a *weak-emission* model (greedy 37). The v2 model reads
+  greedy 56 and leans on the prior far less, so λ = 2.0 is probably no longer the right balance.
+  Registered open, deliberately not re-tuned (`PHASE_P.md` §4.2). γ, β and the prune constants
+  are E1's, carried.
 - **the eval corpus is Yandex.** Permitted (research/held-out eval), but it means the *only*
   real-Russian evidence for this model comes from a source whose data can never enter training
   or the APK.
@@ -444,17 +509,79 @@ Unpacked:
 ### 4.6 What still has to happen before ru could ship
 
 Not blockers on the ML side — app-side wiring, listed so nobody thinks the export was the last
-step:
+step. Status is against the app at `d717bda7`; the ordered, actionable form of this list lives in
+`APP_WIRING_CHECKLIST.md`.
 
-1. Bundle or gate on the ru langpack (it is an import today, not an asset).
-2. Teach `CtcEngineAdapter` to build a **per-script** `ALPHABET` + `buildMappedLayout`
-   (the 26-sized arrays and the `'a'..'z'` filter in `letterOf`), keyed off the layout's script.
-3. Add `ru` to `CtcLanguageSupport.SUPPORTED` with a **second model asset** and a
-   language→model mapping — the adapter currently has exactly one `MODEL_ASSET`.
-4. Ship the golden fixture and extend `CtcParityTest`'s fixture↔model↔preset triple to cover a
-   second (model, fixture, preset) row.
-5. Measure latency and memory on device. The ru model is *half* the ship model's bytes, so the
-   expectation is favourable — but expectation is not measurement.
+| # | change | status at `d717bda7` |
+|---|---|---|
+| 1 | bundle or gate on the ru langpack (an import today, not an asset) | **open** — `scripts/dictionaries/langpack-ru.zip`, not in `assets/dictionaries/` |
+| 2 | per-script `ALPHABET` + `buildMappedLayout` in `CtcEngineAdapter` — today `letterOf` filters `'a'..'z'` and the arrays are `FloatArray(26)`/`BooleanArray(26)` | **open** |
+| 3 | per-language model asset — `CtcEngineAdapter.MODEL_ASSET` is one constant | **open** |
+| 4 | `ru` in `CtcLanguageSupport.SUPPORTED`, and a script gate that admits `script="cyrillic"` | **open** |
+| 5 | make `tunedRuCkdt` reachable — `presetFor` branches on `LexiconSource` and can never return it | **open** |
+| 6 | ship the golden fixture and extend `CtcParityTest`'s fixture↔model↔preset triple to a second row | **open** |
+| 7 | trie width — the `MAX_CHILDREN = 26` clamp | **done** (`d671d19e`); the bound is now a constructor check against the emission-head width |
+| 8 | `CtcLayout` generic over `alphabet: CharArray` | **done** |
+| 9 | measure latency and memory on device | **open**, but now *possible*: the settle-probe inflation (audit MEDIUM-2) was removed in `716f7be9`, so a `LOCAL_BUILD=true` measurement is no longer ~720 ms high |
+
+The ru model is *half* the shipped English model's bytes, so the latency expectation is
+favourable — expectation is not measurement.
+
+### 4.7 The other five scripts — the per-script wiring table, refreshed
+
+Supersedes `PHASE_O.md` §3.2/§3.5, which named the generation-1 artifacts. **Wire
+`*_synth_v2full_ch80_fp16w*` for the five, and `ru_synth_v2_ch80_fp16w*` for Russian** — see §5
+for the hashes and §4.2 for why ru has no `v2full`.
+
+| script | layout XML (`src/main/layouts/`) | K | alphabet / slot order (codepoint-sorted — **this IS the app's array**) | ship bytes | lexicon | preset |
+|---|---|---|---|---|---|---|
+| **ru** | `cyrl_jcuken_ru.xml` | 31 | `абвгдежзийклмнопрстуфхцчшщыьэюя` | `ru_synth_v2_ch80_fp16w.onnx` | `langpack-ru.zip` — exists, importable today | `tunedRuCkdt` |
+| **el** | `grek_qwerty.xml` (now correctly `script="greek"`) | 25 | `αβγδεζηθικλμνξοπρςστυφχψω` | `el_synth_v2full_ch80_fp16w.onnx` | `langpack-el.zip` — exists, **needs the full el projection**, not just the ς repair (§7 item 9) | same numbers as `tunedRuCkdt` |
+| **uk** | `cyrl_jcuken_uk.xml` | 31 | `абвгдежзийклмнопрстуфхцчшщьюяєі` | `uk_synth_v2full_ch80_fp16w.onnx` | **must be built** (`build_wordlist.py --lang uk`) | same |
+| **bg** | `cyrl_ueishsht.xml` | 30 | `абвгдежзийклмнопрстуфхцчшщъьюя` | `bg_synth_v2full_ch80_fp16w.onnx` | **must be built** | same |
+| **mk** | `cyrl_lynyertdz_mk.xml` | 31 | `абвгдежзиклмнопрстуфхцчшѓѕјљњќџ` | `mk_synth_v2full_ch80_fp16w.onnx` | **must be built** | same |
+| **he** | `hebr_1_il.xml` | 27 | `אבגדהוזחטיךכלםמןנסעףפץצקרשת` | `he_synth_v2full_ch80_fp16w.onnx` | **must be built**, and `build_wordlist._is_script_word` needs a new `hebrew` branch (0x0590–0x05FF) | same |
+
+**Preset: there is no per-script preset.** All six use γ 1.05 / **λ 2.0** / β 0.2 / γp 0.3734 /
+βp 0.9882. λ = 2.0 is a **frequency-scale** constant (`LAMBDA_CKDT_SCALE`), not a Russian one —
+every one of these lexicons is on the CKDT `255 − rank` scale, the same scale `fr/de/es/it/pt/sv`
+already run at in production. The only preset that differs is `en`, whose `en_enhanced.json`
+scale wants λ = 4.0. So `presetFor` needs to become reachable for `tunedRuCkdt`, not to grow six
+new presets.
+
+**Projection rules the app must mirror** (`PHASE_O.md` §3.4 — applied to the lexicon **and** to
+anything compared against a decode):
+
+* **all scripts** — lowercase; strip `- ' ’ ʼ ‘ \``.
+* **el, he** — NFD, drop combining marks (`Mn`), NFC. Safe because no letter's identity depends
+  on a mark here: Greek accents/diaeresis and Hebrew niqqud are not keys.
+* **ru, bg, mk** — **no NFD** (it decomposes й into и + breve and destroys the alphabet).
+  Character folds instead: ru ё→е, ъ→ь; bg ѝ→и; mk ѐ→е, ѝ→и.
+* **el only** — *after* mark stripping, word-final `σ` → `ς`.
+* **uk** — no folds; words containing ї or ґ are **rejected as untypeable** (4.03 % of the
+  vocabulary). Serving them needs the corner-alias path, which is a different input mode.
+
+**Evidence tier for these five — say it exactly this way** (`PHASE_O.md` §2.7, carried forward
+through `PHASE_P.md` §5.1 and §8.6):
+
+> Greek, Ukrainian, Bulgarian, Macedonian and Hebrew CTC are **synthesis-trained,
+> synthesis-holdout-only, single-seed, and calibrated against Russian rather than measured on
+> their own script.**
+
+Their v2full holdout numbers — el 90.78, uk 87.67, bg 82.52, mk 88.68, he 76.86 — are **not
+accuracy figures for those languages**. A v2 holdout is generated by v2, and Phase O proved this
+class of probe inverts model comparisons on capacity and on λ; Phase P §8 makes it three, adding
+donor footing. What the holdouts establish is a *margin against a fixed control* (every script
+beats the 3×-capacity English zero-shot by +5.1 … +7.9, where on the v1 holdouts every script
+**lost**), and that a change measured as +0.86 real points on ru costs nothing on their own
+distribution. Never quote the levels as if they were ru's 79.73.
+
+**he carries a history flag that does not apply to its ship bytes.** The generation-2
+`he_synth_v2_ch80` fp32 export needed `--parity-tol 2e-3` (sliced residue 1.16e-03 against a
+historical 0.8e-4…7.6e-4 envelope, argmax 100/100 on both probes) and is **flagged in the
+registry**. The generation-3 `he_synth_v2full_ch80` export needed **no relaxation** — 4.04e-04
+at the default 1e-3, argmax 100/100, and 100/100 on the fp16w probe too. The flag stays on the
+P4 bytes because that exceedance was real; it does **not** carry to the bytes you would wire.
 
 ---
 
@@ -465,18 +592,32 @@ step:
 | artifact | ships? | bytes | sha256 | serves | tier |
 |---|---|---|---|---|---|
 | `src/main/assets/models/ctc_swipe_encoder.onnx` = `ctc/artifacts/phaseM_kd_fresh_w1_s1234_fp16w.onnx` | **YES — the only one** | 3,052,318 | `84718e6ebc8020176f27b9668e50922a765c96838307b640a8db9ab0549e88e5` | en + fr/de/es/it/pt/sv on any a–z-complete Latin layout | **test-validated**, both footings, every seed |
-| `ctc/artifacts/ru_synth_ch80_fp16w.onnx` | no — exported 2026-08-18, not wired | 589,406 | `84ac284d4f0d0cb86061df9c557507e1489ab93a75b40885a4431976cee32469` | Russian ЙЦУКЕН (31-letter default grid) | **val-only**, single seed, synth-trained, Yandex-eval-only |
-| `ctc/artifacts/ru_synth_ch80.onnx` (fp32 source) | no | 1,142,727 | `d78a9fb9…` | reproducibility / fixture regeneration | same |
-| `src/androidTest/assets/ctc_bench/{ch192,ch128,fast_resbn80,fast_resbn72}_s1234.onnx` | no — androidTest only, 11.0 MB | — | — | **nothing.** Superseded Campaign-2 arch-comparison artifacts | historical |
+| `ctc/artifacts/ru_synth_v2_ch80_fp16w.onnx` | no — **the ru ship candidate**, not wired | 589,406 | `9004befb6ff07b744c65d3c13481539e758ebe10d4f47cbeffe68d39d12b0e52` | Russian ЙЦУКЕН (31-letter default grid) | **val-only**, single seed, generator-v2 synth-trained, Yandex-eval-only |
+| `ctc/artifacts/{el,uk,bg,mk,he}_synth_v2full_ch80_fp16w.onnx` | no — **the five ship candidates**, not wired | 589,406 each | §4.7 / `PHASE_P.md` §8.4 | Greek, Ukrainian, Bulgarian, Macedonian, Hebrew | **synthesis-holdout-only**, single seed, calibrated against ru rather than measured |
+| `ctc/artifacts/{ru,el,uk,bg,mk,he}_synth_ch80*` (generation 1) | no — **superseded** | — | `PHASE_O.md` §2.6 | — | kept because every pre-Phase-P number was measured on them |
+| `ctc/artifacts/{el,uk,bg,mk,he}_synth_v2_ch80*` (generation 2) | no — **superseded by v2full** | — | `PHASE_P.md` §6.1 | — | kept because `PHASE_P.md` §5 was measured on them; `he_synth_v2_ch80` carries a parity flag its v2full successor does not |
+| `src/androidTest/assets/ctc_bench/{ch192,ch128,fast_resbn80,fast_resbn72}_s1234.onnx` | no — androidTest only, 11.0 MB | — | — | **nothing.** Superseded Campaign-2 arch-comparison artifacts, one of them still labelled "the ship candidate" in the benchmark's KDoc (audit MEDIUM-4, open) | historical |
 | `phaseIB-ru-real` encoder (`cb8ece6b…`) | **NEVER** | 1,142,727 | — | — | license-blocked research artifact |
 | `phaseJ-joint`, `sw2345`, `resbn192i`, `phaseL_*`, `phaseK_*`, `ch128/ch192`, `fast_resbn*` | no | — | — | — | superseded campaign arms |
+
+**Three generations exist and all three stay in the registry**, which is deliberate and is the
+commonest source of a wrong hash: `*_synth_ch80*` (v1, Phase O), `*_synth_v2_ch80*` (v2, Phase P
+§5), `*_synth_v2full_ch80*` (v2 on the full donor pool, Phase P §8). **Deploy the newest one that
+exists for the script**: `ru_synth_v2_ch80*` for Russian (ru has no v2full — it was already
+trained on the full pool), `*_synth_v2full_ch80*` for the other five. The older generations are
+kept only because published numbers were measured on them.
 
 Golden fixtures:
 
 | fixture | pairs with | preset |
 |---|---|---|
-| `src/test/resources/ctc/ctc_golden.json` = `src/androidTest/assets/ctc/ctc_golden.json`, sha `2a449c4f2de19505131b396655ae01d3e3c325e40249446ff6e7a40c2b27559c`, 140,462 B | the shipped ONNX (`84718e6e…`, asserted in CI) | `tunedV2` = 0.9 / 4.0 / 0.25 / 0.25 / 0.9882 |
-| `ctc/artifacts/ru_synth_ch80_fp16w_golden.json`, sha `041c2072…` | `ru_synth_ch80_fp16w.onnx` (`84ac284d…`) | `tunedRuCkdt` = 1.05 / 2.0 / 0.2 / 0.3734 / 0.9882 |
+| `src/test/resources/ctc/ctc_golden.json` = `src/androidTest/assets/ctc/ctc_golden.json`, sha `2a449c4f2de19505131b396655ae01d3e3c325e40249446ff6e7a40c2b27559c`, 140,462 B | the shipped ONNX (`84718e6e…`) — the **header sha** is asserted in CI, the **emission matrices are not**; see `APP_INTEGRATION_AUDIT.md` §6.2 | `tunedV2` = 0.9 / 4.0 / 0.25 / 0.25 / 0.9882 |
+| `ctc/artifacts/ru_synth_v2_ch80_fp16w_golden.json`, 160,282 B, sha `a5ed2b9f6284…` | `ru_synth_v2_ch80_fp16w.onnx` (`9004befb…`) | `tunedRuCkdt` = 1.05 / 2.0 / 0.2 / 0.3734 / 0.9882 |
+| `ctc/artifacts/{el,uk,bg,mk,he}_synth_v2full_ch80_fp16w_golden.json` | the matching v2full fp16w bytes | same `tunedRuCkdt` numbers |
+
+Every script fixture is 10 cases (5 pure-featurizer branch probes, 1 word-path featurizer case,
+4 model-backed beam cases) at the same preset — the same shape as the shipped en fixture, so
+`CtcParityTest` grows a **row**, not a new mechanism.
 
 **No model change is pending.** Phase N is terminal (`CleverKeys-ML` @ `85c0c58`); its 91.25
 headline is a different corpus, trie and preset and is explicitly not comparable. Anything you
@@ -488,138 +629,35 @@ source of the "which ONNX?" question.**
 
 ---
 
-## 6. Actionable checklist — the audit findings that survive at `9a6ffdd2`
+## 6. Audit findings — status at `d717bda7`
 
-Re-verified against this HEAD (full detail in `CleverKeys-ML/ctc/APP_INTEGRATION_AUDIT.md` §5,
-"Re-verification"). Of 23 findings: 12 persist unchanged, 5 are partially addressed, 1
-regressed, 0 are fully closed.
+The full record is `APP_INTEGRATION_AUDIT.md`: §2 the original findings, §5 the re-verification at
+`9a6ffdd2`, **§6 the second re-verification at `d717bda7`**. The ordered, actionable form for the
+app agent is `APP_WIRING_CHECKLIST.md`. This section is the summary only, so it cannot drift into
+a third competing task list.
 
-### 6.1 HIGH-1 — a latched ONNX-load failure kills swipe typing, and the refactor made it worse
+**Of the 23 original findings plus the 4 added in §5: 15 CLOSED, 6 PARTIAL, 6 OPEN, 0 regressed.**
 
-**Persists, and its blast radius grew three ways.** `CtcEngineAdapter.modelOrNull()`
-(`:145-177`) still retries three times then latches, and its log line still says
-`" — ctc mode disabled this session"` — which is not what happens. Nothing disables the mode.
-The decode degrades to `PredictionResult(emptyList(), emptyList())` (`:667-671`) and the shared
-pipeline renders that as a cleared bar. The dispatch guard (`InputCoordinator.kt:690`) still
-checks only `supportsLayout`. There is no `isModelPermanentlyUnavailable` accessor anywhere in
-`src/main`.
+**Closed in the 2026-08-20 wave** — HIGH-1 (a latched ONNX-load failure now falls through to
+geometric on both dispatch and prewarm, `ad18e0e3`; the diff this guide proposed applied
+essentially verbatim), HIGH-3 (the dead-code KDoc is gone from all three files), MEDIUM-1 (the ORT
+session is closed at teardown, after the decode thread is confirmed dead), MEDIUM-2 (**the settle
+probes are gone — latency numbers from a `LOCAL_BUILD=true` build are quotable again**), MEDIUM-7
+(the "this engine isn't serving your language" card is back, and formats its list from
+`CtcLanguageSupport.SUPPORTED.keys` so it cannot drift), MEDIUM-8 (seven languages everywhere,
+including all 22 locale strings), MEDIUM-9, NEW-1 (the spec rewritten around `ctc`-as-default),
+NEW-2 (the `grek_qwerty` script tag, plus `LayoutScriptDeclarationTest`), NEW-4.
 
-What changed since the audit:
+**Still open, and the short list is now genuinely short:**
 
-1. `Defaults.SWIPE_ENGINE_MODE` went `"neural"` → **`"ctc"`** (`Config.kt:300`). At audit time
-   this hurt only opt-in users; now it hurts everyone on defaults.
-2. `Mode.fromPref` maps `"neural"`, `"hybrid"` **and every unrecognised value** to `Mode.CTC`
-   (`SwipeEngineRouter.kt:85-88`), so users who had explicitly chosen neural are migrated in.
-3. Neural is deleted, so there is no second ML engine to land on. Three of the four gates hand
-   off to geometric (language `:666-678`, layout `:690-696`, router `SwipeEngineRouter.kt:115`);
-   **the model/lexicon gate is now the only way a swipe can reach no engine at all.**
-
-The user's only recourse is finding the Prediction Engine dropdown unaided — and MEDIUM-7 (the
-"this engine isn't serving you" card) regressed to *absent* when `NeuralPredictionSection.kt`
-was deleted.
-
-**Proposed diff.** The adapter half applies verbatim from the audit; the two `InputCoordinator`
-hunks need re-anchoring only.
-
-```diff
---- a/src/main/kotlin/tribixbite/cleverkeys/swipe/CtcEngineAdapter.kt
-+++ b/src/main/kotlin/tribixbite/cleverkeys/swipe/CtcEngineAdapter.kt
-@@
-     /** Failed load attempts so far (audit L5: bounded retry, then latch). */
-     private var modelLoadAttempts = 0
- 
-+    /**
-+     * True once the ONNX session has permanently failed to load for this adapter
-+     * ([MAX_MODEL_LOAD_ATTEMPTS] exhausted). Read from the MAIN thread by the dispatcher,
-+     * written from the decode thread by [modelOrNull] — hence `@Volatile`.
-+     *
-+     * The dispatcher MUST consult this before routing a swipe here: without a session the
-+     * decode can only ever produce an empty slate, and an empty slate is indistinguishable
-+     * from "no candidates" once it reaches the shared pipeline. Falling through to the
-+     * geometric engine keeps swipe typing alive, which is the same coverage promise the
-+     * layout and language gates already make.
-+     */
-+    @Volatile
-+    private var modelPermanentlyUnavailable = false
-+
-+    /** See [modelPermanentlyUnavailable]. Safe to call from the main thread. */
-+    fun isModelPermanentlyUnavailable(): Boolean = modelPermanentlyUnavailable
-+
-     private fun modelOrNull(): OnnxCtcEmissionModel? {
-@@
-         } catch (e: Exception) {
-             modelLoadAttempts++
-             val latched = modelLoadAttempts >= MAX_MODEL_LOAD_ATTEMPTS
-+            if (latched) modelPermanentlyUnavailable = true
-             Log.e(
-                 TAG,
-                 "CTC encoder load failed (attempt $modelLoadAttempts/$MAX_MODEL_LOAD_ATTEMPTS)" +
--                    if (latched) " — ctc mode disabled this session" else " — will retry",
-+                    if (latched) " — falling through to the geometric engine for this session"
-+                    else " — will retry",
-                 e
-             )
-```
-
-```diff
---- a/src/main/kotlin/tribixbite/cleverkeys/InputCoordinator.kt
-+++ b/src/main/kotlin/tribixbite/cleverkeys/InputCoordinator.kt
-@@ -686,7 +686,15 @@
-         // The router gates on layout METADATA (Latin script); this layout may still lack an
-         // a–z key, which yields no CtcLayout and would leave the bar empty. Geometric can
-         // decode it, so hand the swipe over rather than degrade coverage. Memoized — the
-         // decode below reuses this same geometry build.
--        if (!ctcAdapterOrCreate().supportsLayout(keyboard, params, frameW, frameH)) {
-+        //
-+        // Same reasoning for a permanently-failed ONNX session: after the bounded retry
-+        // budget is spent the adapter can only ever return an empty slate, which the shared
-+        // pipeline renders as a cleared bar. Since `ctc` became the DEFAULT mode and the
-+        // neural engine was removed, this is the only remaining way a swipe reaches no
-+        // engine at all — geometric still works, so use it.
-+        val ctc = ctcAdapterOrCreate()
-+        if (ctc.isModelPermanentlyUnavailable() ||
-+            !ctc.supportsLayout(keyboard, params, frameW, frameH)
-+        ) {
-             performGeometricSwipeTyping(
-```
-(and `:702` `ctcAdapterOrCreate().decodeAsync(` → `ctc.decodeAsync(`).
-
-```diff
-@@ -753,7 +753,8 @@
-                     val ctc = ctcAdapterOrCreate()
--                    val ctcServes = CtcEngineAdapter.supportsLanguage(language) &&
-+                    val ctcServes = !ctc.isModelPermanentlyUnavailable() &&
-+                        CtcEngineAdapter.supportsLanguage(language) &&
-                         ctc.supportsLayout(keyboard, params, frameW, frameH)
-```
-
-**Constraint the original audit could not know about**: `CoreImeHygieneDriftTest` (`:208, 251-263,
-286-294`) source-scans these blocks for the literal substrings
-`CtcEngineAdapter.supportsLanguage(`, `supportsLayout(` and `performGeometricSwipeTyping`, and
-asserts their relative index order. The diffs above preserve all three and their ordering — any
-further reshaping must too.
-
-### 6.2 The rest, ordered
-
-| # | Status at `9a6ffdd2` | Action |
+| # | item | why it is still here |
 |---|---|---|
-| **HIGH-1** | persists, escalated | the diff above. Only finding where a user loses working functionality. |
-| **NEW-1** — `docs/specs/ctc-swipe-engine.md` untouched by the removal | persists | The spec for the now-**default** engine still says "opt-in", "default stays `neural`", "QWERTY→CTC", has a four-row routing table with `neural`/`hybrid` rows, and lists `it, pt, sv \| none \| none`. `git log a7d03bc8~1..HEAD -- docs/specs/ctc-swipe-engine.md` is **empty**. Rewrite it. This belongs beside MEDIUM-3 in the anti-confusion set. |
-| **MEDIUM-3** — execution brief unbannered | persists | One paragraph. Highest confusion-removed-per-keystroke in the whole audit (see §5). |
-| **HIGH-3** — "dead code / blocked on retrain / no production implementation" KDoc | persists verbatim, all four blocks (`CtcSwipeDecoder.kt:6-15, 35-39, 41`; `CtcEmissions.kt:12-16`; `CtcLayout.kt:12`) | Delete. §1 of this guide is the replacement text. These are the files a "does CTC actually run?" search lands on. |
-| **HIGH-2** — `sw2345` misattribution | **fixed in `src/main`**; persists in `SwipeEngineRouterTest.kt:20`, `docs/eval/2026-08-15-ctc-per-language-lambda.md:101,112`, `docs/audit/2026-08-17-neural-vs-ctc-parity.md:619-623` (finding 13 unstruck) | Fix the four. **Widen `CoreImeHygieneDriftTest`'s scan (`:23`) beyond `src/main/kotlin`** — the guard was written because a KDoc rewrite reintroduced these numbers, and it cannot see the copy that is there today. |
-| **NEW-2** — `grek_qwerty.xml` mis-tagged `script="latin"` in the shipped tree | new | §2.1. Plus the two tests named there. |
-| **MEDIUM-8** — doc/UI language set | QWERTY claims fixed by the removal sweep; the **language set is now stale everywhere** after `9a6ffdd2` | `SUPPORTED` is 7 languages; `README.md:168,243`, `docs/ARCHITECTURE_MASTER.md:226`, `docs/wiki/layouts/multi-language.md:46`, `docs/wiki/specs/typing/swipe-typing-spec.md:41,61`, `docs/wiki/typing/swipe-typing.md:80`, `SwipeTypingSection.kt:41-42`, `memory/todo.md:260-262` and **all 22 `swipe_engine_mode_desc` strings** still say four. Also `ARCHITECTURE_MASTER.md:245` omits the CKDT `.bin` lexicon path and `:237` states λ as a single 4.0 when it is per-scale. |
-| **MEDIUM-7** — no "CTC isn't serving your language" feedback | **regressed to absent** — the card died with `NeuralPredictionSection.kt`; `SwipeTypingSection.kt` has no equivalent | Add a card gated on `mode == "ctc" && language !in SUPPORTED`, naming the engine that will actually run. |
-| **MEDIUM-5** — settings scope text | half fixed ("Latin layouts", QWERTY gone) | Still hardcoded English with no `stringResource`, no language list, and `:101`'s literal "100 is the validated default" is decoupled from `Defaults.CTC_BEAM_WIDTH`. |
-| **MEDIUM-2** — three `settle = true` MemoryProbe marks on the decode thread | persists (`CtcEngineAdapter.kt:425, 429, 467`) | ~720 ms on the first CTC decode in any `LOCAL_BUILD=true` build — i.e. **every instrumented latency measurement is inflated**. Decide before anyone quotes a latency number. |
-| **HIGH-4** — the fixture rule's behavioural half never runs | persists in full | No workflow runs `connectedAndroidTest`/`ew-cli`; `ui-testing.yml` is `adb install` + `dumpsys` greps only. `CtcParityTest.kt:38` still hardcodes the asset path instead of deriving it from `CtcEngineAdapter.MODEL_ASSET`; the preset pin still omits `beamWidth` (fixture 32 vs ship 100, 7-word lexicon). At minimum state the device-only caveat in the spec. |
-| **MEDIUM-6** — import validation | persists, and **inverted** | `SettingsValidation.kt:97` still validates `neural_beam_width` — a pref of a deleted engine — while `ctc_beam_width` and `swipe_engine_mode` fall to `else -> true`. |
-| **MEDIUM-1** — ORT session never closed | persists | `shutdown()` calls only `tasks.shutdown()`; `OnnxCtcEmissionModel.close()` has zero callers; ~3 MB native session leaks per `InputCoordinator` lifecycle. |
-| **MEDIUM-4** — 11.0 MB of superseded ONNX in `androidTest`, one called "the ship candidate" | persists | Delete `ctc_bench/`, or add a README saying they are superseded arch-comparison artifacts, rename `fullDecodePath_ch128_beam100_tunedV2` (its constants are E1, not tunedV2), and fix `CtcBenchFixture.kt:9`'s rival fixture citation. |
-| **MEDIUM-9** — stale `memory/todo.md` | 1 of 3 fixed | `:178-179` still says "*The CTC engines are demo-only*" — false since 2026-08-08. `:263-266` P2 item is done on both halves. The **Russian section is now correct** and leads with the honest framing. New staleness at `:260-262` (it/pt/sv called dead). |
-| **LOW-1..L-4, L-6..L-10** | all persist | Cleanup; ride along with whatever touches those files. L-5's `Mode.NEURAL` contrast is **moot** (neural is gone); the `route` overload divergence itself remains, pinned only for the string form. |
-| **NEW-3** | new, minor | `InputCoordinator.kt:525` KDoc still documents `beginSwipeCapture`'s `engine` param as `ENGINE_NEURAL`/`ENGINE_GEOMETRIC`; both call sites pass `ENGINE_CTC` or `ENGINE_GEOMETRIC`. (`SwipeMLData.ENGINE_NEURAL` is correctly retained for reading historical exports.) |
+| 1 | **MEDIUM-3** — `docs/audit/remediation-plans/ctc-integration-execution-brief.md` has no superseded banner; `:86` still says *"Q1 model choice: SUPERSEDED-PENDING — a new model is training"*, `:74` still *"Default engine stays `neural`"* | One paragraph. Unchanged across all three audit passes, and now the **only** anti-confusion finding left. It is the single likeliest source of the "which ONNX?" question. |
+| 2 | **HIGH-4's residue** — CI now runs instrumented tests (real, green on API 21/29/34), but the curated class list omits `CtcEmissionModelParityTest` | So the fixture's *header* sha is checked on every push and its *emission matrices* are checked nowhere automatic — the exact swap failure HIGH-4 was written about. One string edit to `.github/scripts/emulator-ci.sh`. Also note `ui-testing.yml` runs on PR + nightly, **not on push to `main`**. Detail in `APP_INTEGRATION_AUDIT.md` §6.2. |
+| 3 | **HIGH-2's residue** — two unmarked `sw2345` citations in `docs/`, at `docs/audit/2026-08-17-neural-vs-ctc-parity.md:619-623` (finding 13, unstruck) and `docs/eval/2026-08-15-ctc-per-language-lambda.md:101, 112` | The drift guard was widened to `src/test` and `src/androidTest` (`f172bb8e`), which caught the test-side copy. It still does not scan `docs/`, which is where both survivors are. |
+| 4 | **NEW-6** — the app's guide mirror and `memory/HANDOFF.md` still cite generation-1 ru artifacts (`ru_synth_ch80_fp16w.onnx`, `84ac284d…`, 77.41) | `APP_WIRING_CHECKLIST.md` §3 enumerates the sections to bring across. |
+| 5 | **MEDIUM-4** — 11 MB of superseded ONNX in `src/androidTest/assets/ctc_bench/`, one labelled "the ship candidate" | Item 2 of the app's own `HANDOFF.md`. |
+| 6 | **MEDIUM-5, MEDIUM-6, LOW-9 (half), LOW-1..LOW-8, LOW-10** | Cleanup. LOW-9's remaining half — a `supportsLayout` negative for a Cyrillic `KeyboardData` — stops being cosmetic the moment per-script routing removes gate 1. |
 
 ---
 
@@ -649,4 +687,22 @@ further reshaping must too.
 7. **Do not add a per-node cap back to the trie.** The `MAX_CHILDREN = 26` clamp was removed on
    purpose (§1.2); the real bound is the constructor's alphabet-vs-head-width check.
 8. **Do not assume `srcs/layouts/` ships.** It does not; `src/main/layouts/` does. A fix applied
-   to the wrong one looks landed and is not (§2.1).
+   to the wrong one looks landed and is not — that is exactly what happened to the Greek script
+   tag, for months (§2.1). The two trees agree today; `LayoutScriptDeclarationTest` guards the
+   one that ships.
+9. **Do not wire the el lexicon with only the final-sigma repair.** `CtcGreekOrthography`
+   (`swipe/ctc/CtcGreekOrthography.kt`, shipped `6f30d60f`) is correct and is the *last* of the
+   four steps in the el projection. The step before it — NFD, drop combining marks, NFC — has
+   **no app-side implementation**, and it is the step that makes the alphabet 25 letters. The
+   el model's slot order contains no accented vowels, so an unprojected `λόγος` has a character
+   with no emission slot. Repairing sigma alone converts "one word in four is mis-keyed" into
+   "most of the pack is unrepresentable". Both halves or neither.
+10. **Do not wire a `*_synth_v2_ch80*` model for el/uk/bg/mk/he.** Those are generation 2; the
+    deployment bytes are `*_synth_v2full_ch80*` (`PHASE_P.md` §8.4). The v2 rows survive in the
+    registry only because §5's numbers were measured on them, and `he_synth_v2_ch80` additionally
+    carries a parity flag that its successor does not. For **ru** the opposite holds:
+    `ru_synth_v2_ch80` *is* the full-pool arm and there is no `v2full`.
+11. **Do not quote a script's synthesis-holdout number as an accuracy figure.** el 90.78 is not
+    "Greek at 90.78"; it is fit to the v2 generator's own distribution, on a probe this campaign
+    has now shown three separate times to rank things real swipes do not rank (capacity, λ,
+    donor footing). Quote margins against a fixed control, never levels. §4.7 gives the wording.
