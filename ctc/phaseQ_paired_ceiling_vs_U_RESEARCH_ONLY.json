@@ -1,0 +1,46 @@
+{
+ "a": {
+  "name": "U_yxgen",
+  "dump": "/home/will/ctc-train/research_only/dump_ru_yxgen_RESEARCH_ONLY.jsonl"
+ },
+ "b": {
+  "name": "realtrained",
+  "dump": "/home/will/ctc-train/evalQ/dump_ru_realtrained.jsonl"
+ },
+ "indict_t1": {
+  "n": 8471,
+  "a_pct": 85.95,
+  "b_pct": 88.69,
+  "delta_b_minus_a": 2.74,
+  "a_only": 166,
+  "b_only": 398,
+  "p_mcnemar": 5.600408002702452e-23
+ },
+ "greedy": {
+  "n": 8471,
+  "a_pct": 69.72,
+  "b_pct": 75.23,
+  "delta_b_minus_a": 5.51,
+  "a_only": 315,
+  "b_only": 782,
+  "p_mcnemar": 2.3445982833017818e-46
+ },
+ "le3_t1": {
+  "n": 3281,
+  "a_pct": 90.95,
+  "b_pct": 93.9,
+  "delta_b_minus_a": 2.96,
+  "a_only": 36,
+  "b_only": 133,
+  "p_mcnemar": 2.8072362523990994e-14
+ },
+ "ge4_t1": {
+  "n": 5190,
+  "a_pct": 82.79,
+  "b_pct": 85.39,
+  "delta_b_minus_a": 2.6,
+  "a_only": 130,
+  "b_only": 265,
+  "p_mcnemar": 9.875860371270908e-12
+ }
+}
