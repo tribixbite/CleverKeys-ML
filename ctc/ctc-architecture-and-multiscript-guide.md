@@ -607,6 +607,13 @@ exists for the script**: `ru_synth_v2_ch80*` for Russian (ru has no v2full — i
 trained on the full pool), `*_synth_v2full_ch80*` for the other five. The older generations are
 kept only because published numbers were measured on them.
 
+**Phase Q (synth v3) is open and produces nothing deployable yet.** It runs two twin generators
+on separated licence tracks — a shipping track fitted only to MIT data, and a **sealed research
+track** fitted to Yandex residuals whose weights, samples and downstream decoders are permanently
+unshippable and live under `~/ctc-train/research_only/` with a `RESEARCH_ONLY` marker, never in
+`ctc/artifacts/`. The operative rule for anyone wiring bytes: **if it is not in `ctc/artifacts/`,
+it is not wirable.**
+
 Golden fixtures:
 
 | fixture | pairs with | preset |

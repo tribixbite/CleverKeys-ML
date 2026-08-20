@@ -310,12 +310,24 @@ Also update `memory/HANDOFF.md`'s "Russian is delivered" paragraph (§1.4).
    Eval-only, held out. `phaseIB-ru-real` reads **89.64** — ten points better than anything
    shippable — and is permanently unusable. If a proposal's accuracy sounds too good, check
    whether it is that model.
+
+   **This now has a second live instance.** Phase Q (opened 2026-08-20, `PHASE_Q.md`) runs two
+   twin generators on deliberately separated licence tracks: a **shipping track** fitted only to
+   MIT data (FUTO t3 + HWS), and a **sealed research track** fitted to Yandex residuals whose
+   weights, samples, and any decoder trained on them are permanently unshippable. Sealed
+   artifacts carry a `RESEARCH_ONLY` marker, live under `~/ctc-train/research_only/`, and never
+   enter `ctc/artifacts/`, the registry, or `exports/`. **If a file is not in `ctc/artifacts/`,
+   it is not wirable** — that is the operative test, and it is why the registry is the only
+   place §2.2's hashes come from.
 2. **No FUTO weights and no FUTO model outputs** in anything trained or shipped. The corpus and
    the decode-algorithm lineage are the permitted inheritance; `NOTICE:46-64` states it correctly.
    Do not "improve" that wording; do not add a FUTO teacher.
 3. **Not the `*_synth_ch80*` (v1) bytes**, and for el/uk/bg/mk/he **not the `*_synth_v2_ch80*`
    (v2) bytes either.** Both generations remain in the registry because published numbers were
    measured on them, not because they are deployable. §2.2 has the twelve files that are.
+   **Nor anything from Phase Q / synth v3**: that phase is open, its gates are pre-registered
+   and unrun, and it has produced no registry artifact. v2 / v2full remain the deployable
+   generation until `PHASE_Q.md` says otherwise and a hash lands in `ctc/artifacts/`.
 4. **he's parity flag is history, not a property of the bytes you would wire.** The generation-2
    `he_synth_v2_ch80` fp32 export needed `--parity-tol 2e-3` (sliced residue 1.16e-03 against a
    0.8e-4…7.6e-4 historical envelope; argmax 100/100 on both probes). It is flagged in the
