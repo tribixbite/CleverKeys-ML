@@ -917,3 +917,190 @@ exports.
 6. **MEDIUM-8 + MEDIUM-5 + MEDIUM-7** — the language set is stale in 8 doc sites, 22 strings and
    one settings KDoc, and there is now *no* surface that tells a user their language is unserved.
 7. **MEDIUM-2**, then **HIGH-4** — as before.
+
+---
+
+## 6. SECOND RE-VERIFICATION at app `d717bda7` (2026-08-20)
+
+**Re-audited**: `/home/will/git/swype/CleverKeys` @ **`d717bda7`** (`docs(handoff): close HIGH-4 —
+CI now runs instrumented tests and the whole workflow is green`), pulled 2026-08-20. The app tree
+was **read-only for this pass — nothing was committed there**; every change below is the Termux
+agent's.
+
+**Commit range reviewed**: `d76be9a6..d717bda7`, 31 commits — the guide landing, then a
+remediation wave (`ad18e0e3`, `b58073dd`, `716f7be9`, `ed2ead3a`, `3f123aea`, `ce93a254`,
+`31b289c0`), a docs-accuracy sweep (`c35d40ed`, `ac507cff`, `ef57eaf2`, `4e56167f`, `272c0cba`,
+`f172bb8e`, `e3a98041`), the two PHASE_O prerequisites (`6f30d60f`), the contraction work
+(`59616d0b`, `1532dfa9`, `1cae2c54`, `68394c25`, `98307dc2`), the custom-word length guard
+(`2d080c7d`), and finally the CI chain (`37a74aaf`, `ee2526be`, `16788d88`, `b749b3ce`,
+`d717bda7`).
+
+**Score: of the 23 original findings plus the 4 added in §5 — 15 are now CLOSED, 6 are PARTIAL,
+6 remain OPEN.** Zero regressions. Every HIGH is closed or materially advanced; what is left is
+one planning doc, one asset-hygiene item, and the LOW set.
+
+### 6.0 Ship state at the new head — still unchanged where it matters
+
+| item | value |
+|---|---|
+| `src/main/assets/models/ctc_swipe_encoder.onnx` | sha256 `84718e6e…e88e5` — **unchanged since `a474ddf9`**, three heads running |
+| `ctc_golden.json` (both copies) | sha256 `2a449c4f…7559c`, preset `tunedV2` |
+| `CtcLanguageSupport.SUPPORTED` | seven: `en`→EN_JSON; `fr,de,es,it,pt,sv`→CKDT_BIN. `PROVISIONAL = {it,pt,sv}`, `NEEDS_VALIDATION = ∅` (`CtcLanguageSupport.kt:78-88, 120, 139`) |
+| `Defaults.SWIPE_ENGINE_MODE` | `"ctc"` (`Config.kt:311` — note the line moved from `:300`; `ctc-swipe-engine.md:3-4` still cites the old one) |
+| `CtcScoringParams.tunedRuCkdt` | unchanged and still unreachable — `presetFor` branches on `LexiconSource`, `ru` ∉ `SUPPORTED` |
+| Russian in the APK | still none. `langpack-ru.zip` remains an import |
+| **New in `src/main`** | `swipe/ctc/CtcGreekOrthography.kt` (the el final-sigma repair) and `CtcDecodableLength` (the 32-frame budget) — see §6.3 |
+
+### 6.1 Persistence table
+
+| finding | status at `9a6ffdd2` | **status at `d717bda7`** | evidence |
+|---|---|---|---|
+| **HIGH-1** latched load kills swipe typing | persisted, escalated | **CLOSED** (`ad18e0e3`) | `@Volatile modelPermanentlyUnavailable` (`CtcEngineAdapter.kt:178-179`), accessor `:184`, set on latch `:205-207`, log text corrected `:214`; dispatch guard `InputCoordinator.kt:725-733`, prewarm `:793-796`; pinned by `CoreImeHygieneDriftTest.kt:683-692`. The proposed diff in §5.2 / guide §6.1 was applied essentially verbatim. |
+| **HIGH-2 / NEW-3** `sw2345` misattribution | fixed in `src/main`, 4 sites left | **PARTIAL** (`f172bb8e`) | Guard widened: `CoreImeHygieneDriftTest.kt:737` now scans `src/main/kotlin`, `src/test/kotlin`, `src/androidTest/kotlin`, which caught and fixed `SwipeEngineRouterTest.kt:20`. **`docs/` is still not scanned, and that is exactly where the two unmarked survivors live** — `docs/audit/2026-08-17-neural-vs-ctc-parity.md:619-623` (finding 13, still unstruck, still says "Resolve before quoting azerty 83.81 …") and `docs/eval/2026-08-15-ctc-per-language-lambda.md:101, 112` ("german 80.64 vs spanish 88.45" presented as *"the languages we DID validate"*; "the campaign's 88.98 dvorak-app figure"). |
+| **HIGH-3** dead-code KDoc | persisted verbatim | **CLOSED** (`272c0cba`, `4e56167f`) | `CtcSwipeDecoder.kt:6-9` now reads "this seam is LIVE, not a placeholder"; no "dead code" / "NO production implementation" / "blocked on retrain" anywhere in `CtcSwipeDecoder.kt`, `CtcEmissions.kt`, `CtcLayout.kt`. |
+| **HIGH-4** fixture rule's behavioural half | persisted in full | **PARTIAL — the two sub-items are CLOSED, the headline is not.** See §6.2. | `37a74aaf`, `ee2526be`, `16788d88`, `b749b3ce` |
+| **MEDIUM-1** ORT session leak | persisted | **CLOSED** (`b58073dd`) | `CtcEngineAdapter.shutdown()` `:855-864` closes `emissionModel` only after `tasks.awaitTermination(250 ms)` confirms the decode thread is dead — deliberately leaks rather than closing a session under an in-flight `run()`. Caller `InputCoordinator.kt:387`. |
+| **MEDIUM-2** settle probes on the decode thread | persisted | **CLOSED** (`716f7be9`) | No `settle` argument survives in `CtcEngineAdapter.kt`; the three marks (`:476, :480, :536`) are plain, with the ~720 ms rationale recorded at `:470-475`. **Latency numbers from a `LOCAL_BUILD=true` build are now quotable.** |
+| **MEDIUM-3** unbannered execution brief | persisted | **OPEN — unchanged** | `docs/audit/remediation-plans/ctc-integration-execution-brief.md` has no banner; `:86` still `Q1 model choice: SUPERSEDED-PENDING — a new model is training`; `:74` and `:43` still "Default engine stays `neural`". Nothing in the file records that `ctc` is the default and neural is deleted. **Now the single highest confusion-per-keystroke item left in the repo**, and the only anti-confusion finding still open. |
+| **MEDIUM-4** 11 MB superseded bench ONNX | persisted | **OPEN — unchanged** | Four files still in `src/androidTest/assets/ctc_bench/`; `CtcOnnxLatencyBenchmarkTest.kt:45-46` still calls `ch128` "the ship candidate"; `:351` still `fullDecodePath_ch128_beam100_tunedV2` with E1 constants. Acknowledged as item 2 of the app's own `memory/HANDOFF.md`. |
+| **MEDIUM-5** settings scope text | half fixed | **PARTIAL — unchanged** | `CtcSettingsActivity.kt:89-91` says "Latin layouts"; still no language list, still no `CtcLanguageSupport` reference in the file's 245 lines. Materially superseded by MEDIUM-7's card, which does name the served set. |
+| **MEDIUM-6** import validation | persisted, inverted | **PARTIAL — the inversion is gone** | `SettingsValidation.kt:247` now validates `ctc_beam_width in 10..300`; `:381` accepts any non-empty `swipe_engine_mode`, **deliberately**, documented at `:376-380` ("`fromPref` maps any unrecognised value onto the ctc default"); `neural_beam_width` at `:97` moved to the removed-keys tolerate list (`:90-102`) rather than being validated. All three behaviours are now correct; only the weak `swipe_engine_mode` predicate is arguably worth tightening. |
+| **MEDIUM-7** no unsupported-language feedback | **REGRESSED to absent** | **CLOSED** (`3f123aea`) | `SwipeTypingSection.kt:71-105` — a card gated on `swipeEngineMode != "geometric" && !CtcLanguageSupport.isSupported(primaryLanguage)`, formatted from `CtcLanguageSupport.SUPPORTED.keys` at `:97-99` so the list **cannot drift from the table**. Strings ship English-only behind `tools:ignore="MissingTranslation"`, marked as debt. |
+| **MEDIUM-8** doc/UI language set | stale everywhere | **CLOSED** (`ef57eaf2`) | Seven everywhere: `res/values/strings.xml:121` plus **all 22** `swipe_engine_mode_desc` locale copies, `README.md:168, 243`, `ARCHITECTURE_MASTER.md:227`, `docs/wiki/specs/typing/swipe-typing-spec.md:41, 61`, `docs/wiki/typing/swipe-typing.md:80`, `docs/wiki/layouts/multi-language.md:46`. Zero repo-wide hits for "four languages". |
+| **MEDIUM-9** stale `memory/todo.md` | 1 of 3 fixed | **CLOSED** (`f172bb8e`, `ac507cff`, `0f0ae587`) | The live list moved to `memory/HANDOFF.md`; `todo.md:187-201` carries a "🔴 ACTIVE HANDOFF" divider declaring everything below it history and **naming the specific stale claims**; `:182-185` (demo-only) and `:27-30` (it/pt/sv) struck with dates. |
+| **NEW-1** `ctc-swipe-engine.md` untouched | new, worse than MEDIUM-8 | **PARTIAL — effectively closed** (`c35d40ed`) | Rewritten: title now "the DEFAULT swipe engine", `:3-4` `Defaults.SWIPE_ENGINE_MODE = "ctc"`, `:12` seven languages. Two literal "opt-in" strings survive at `:609` and `:745`, both inside explicitly retrospective sections and both annotated. One stale line cite: `:3-4` points at `Config.kt:300`, the constant is at `:311`. |
+| **NEW-2** `grek_qwerty.xml` mis-tagged | new | **CLOSED, with a guard** (`6f30d60f`) | `src/main/layouts/grek_qwerty.xml:2` and `srcs/layouts/grek_qwerty.xml:2` are both `script="greek"` and byte-identical. New pure test `src/test/kotlin/tribixbite/cleverkeys/swipe/LayoutScriptDeclarationTest.kt` walks the **real shipped tree** (`:33`) and asserts `script="latin"` ⟺ a–z-complete **bidirectionally** (`:69`), pins Greek by name (`:113`), and pins the no-script set (`:127`). Named exceptions `latn_qwerty_az` / `latn_qwerty_tly` (`:40`), `numeric` / `pin` (`:43`). The census is therefore **46 / 2 / 36 / 2**, not §5.3's 46 / 3 / 35 / 2. |
+| **NEW-4** `beginSwipeCapture` KDoc | new, minor | **CLOSED** | `InputCoordinator.kt:549` now documents only the surviving engines and explains why `SwipeMLData.ENGINE_NEURAL` is retained for reading historical exports. |
+| **LOW-9** no Cyrillic/Greek `supportsLayout` negative | persisted | **PARTIAL** | The negative now exists at the **router** level — `SwipeEngineRouterTest.kt:47-50` ("The Greek QWERTY trap: script wins over the QWERTY-shaped name" → `Engine.GEOMETRIC`) and `:75`. Nothing anywhere asserts `CtcEngineAdapter.supportsLayout(...) == false` for a Cyrillic or Greek `KeyboardData`; the only `supportsLayout` assertion is the positive one at `CtcMultiLanguageInstrumentedTest.kt:484-487`. Gate 3 is still untested in the negative direction, which matters precisely because per-script routing will remove gate 1. |
+| **LOW-1** `MappedLayout.padded` unread | persisted | OPEN | declared `CtcEngineAdapter.kt:228`, still zero readers. |
+| **LOW-2** phantom `weight` in the KDoc formula | persisted | OPEN | `CtcScoringParams.kt:13`. |
+| **LOW-3** `normalizeRawX/Y` trap | persisted | OPEN | `CtcFeaturizer.kt:163`, still no `@Deprecated`. |
+| **LOW-4, LOW-5, LOW-7, LOW-8, LOW-10** | persisted | OPEN | unchanged; `SettingsActivity.kt:579` still carries the `"futo"` search keyword. |
+| **LOW-6** dev absolute path in the fixture | persisted | OPEN | both copies, line 2: `"source_onnx": "/home/will/ctc-train/ckpt/v2kd-fresh-w1/kd_fp16w.onnx"`. |
+
+### 6.2 HIGH-4 — what the CI work closed, and the one thing it did not
+
+`d717bda7`'s subject says HIGH-4 is closed. **Two of its three parts are; the headline is not, and
+the distinction is worth stating precisely because the remaining gap is the exact failure the
+finding was written about.**
+
+**Closed, unambiguously — the two sub-items** (`37a74aaf`):
+
+- `CtcParityTest.kt:43-48` — `MODEL_ASSET_PATH` is now `"src/main/assets/" + CtcEngineAdapter.MODEL_ASSET`, derived rather than hardcoded. An asset rename can no longer leave the test hashing an orphan.
+- `CtcParityTest.kt:170-181` — the preset pin now asserts `ship.beamWidth == Defaults.CTC_BEAM_WIDTH`, closing the fixture-32-vs-ship-100 hole.
+
+**Closed, and larger than the finding asked for — instrumented tests now run in CI at all.**
+`ui-testing.yml` builds and uploads `assembleDebugAndroidTest`; `.github/scripts/emulator-ci.sh`
+mode `gate` installs it, **discovers** the runner from `pm list instrumentation` filtered by
+`target=$PKG` (the app package was wrong — instrumentation lives in `<applicationId>.test`), runs
+a curated class list, and parses the verdict host-side with **two** checks: a
+`FAILURES!!!|Process crashed|INSTRUMENTATION_ABORTED` grep *and* a mandatory `OK (N tests)` line,
+because `am instrument` exits 0 even when tests fail. Reported green on API 21/29/34 with
+`OK (23 tests)` — the first green emulator run since 2026-07-18. Three stacked defects had to be
+cleared to get there, and the first is worth carrying as a standing rule: the
+`reactivecircus/android-emulator-runner` action splits `script:` into **lines** and runs each as a
+separate `sh -c`, which on ubuntu-latest is dash — so `set -euo pipefail` on line 1 killed every
+emulator job for a month and reported it as `adb: device offline`. Keep every `script:` a one-line
+call into the script file.
+
+**Not closed — the behavioural half of the fixture rule still does not run anywhere automatic.**
+The gate's class list is exactly:
+
+```
+tribixbite.cleverkeys.swipe.CtcMultiLanguageInstrumentedTest,
+tribixbite.cleverkeys.GeometricSwipeOracleTest,
+tribixbite.cleverkeys.CrashGuardInstrumentedTest
+```
+
+`CtcEmissionModelParityTest` — the class that runs the shipped ONNX and asserts its emissions
+match the fixture's stored matrices at `EMISSION_TOL = 2e-3` — **is not in it**, and neither is
+`CtcLatencyGateTest`. `CtcMultiLanguageInstrumentedTest` does open a real ORT session and decode
+real gestures through `decodeAsync`, so the gate now proves *the shipped artifact loads and
+produces real words on a real device*, which is genuinely new coverage. But it never reads
+`ctc_golden.json`. HIGH-4's precise mechanism therefore survives intact: **a model swap that
+updates the fixture's `source_onnx_sha256` header but leaves the emission matrices stale still
+passes CI green.** The pure-JVM half checks the header; the instrumented half that checks the
+matrices is built, passing, and not invoked.
+
+Two further qualifications on the gate's reach:
+
+1. **`ui-testing.yml` does not trigger on push.** Its `on:` is `pull_request` to `main`, a daily
+   `cron: '0 6 * * *'`, and `workflow_dispatch`. The Termux agent commits directly to `main`, so
+   the ordinary development path is gated only by the nightly run. `ci.yml` — the workflow that
+   *does* run on push — is still `assembleDebug` + `runPureTests` + `lint`, with no instrumented
+   step.
+2. **It is not a required check.** `d717bda7` says so itself, and gives the right reason: one
+   green run is not three, and API 29 already flaked once on a corrupt system-image download.
+
+*Remaining fix, unchanged in shape and now much cheaper*: add `CtcEmissionModelParityTest` to the
+`CLASSES` string in `.github/scripts/emulator-ci.sh`. The infrastructure it needed is built and
+proven. `CtcLatencyGateTest` is a separate judgement — a latency gate on a shared GitHub emulator
+is a flake source, and with MEDIUM-2 closed the honest place for it is an ew-cli run on real
+hardware.
+
+### 6.3 New findings
+
+**NEW-5 — `CtcGreekOrthography` implements one half of the el projection, and the other half has
+no app-side implementation at all.** `6f30d60f` shipped
+`src/main/kotlin/tribixbite/cleverkeys/swipe/ctc/CtcGreekOrthography.kt` — `repairFinalSigma`,
+`repairLexicon` (higher frequency wins on collision), `affectedCount` — correct, idempotent,
+word-final-only, medial `σσ` preserved, and tested. It is exactly what `PHASE_O.md` §3.3 item 2
+asked for.
+
+But `PHASE_O.md` §3.4 specifies the **el projection** as: lowercase → strip `- ' ’ ʼ ‘ \`` →
+**NFD, drop combining marks (`Mn`), NFC** → word-final `σ` → `ς`. The sigma rewrite is the *last*
+step of four. The mark-stripping step is what makes the alphabet 25 letters — the el model's slot
+order is `αβγδεζηθικλμνξοπρςστυφχψω`, which contains **no accented vowels**, so an unprojected
+`λόγος` carries `ό` (U+1F79 / U+03CC), a character with no emission slot. Nothing in `src/main`
+performs that fold for Greek: `CtcAzProjection` is Latin-specific, and `CtcGreekOrthography`'s own
+KDoc scopes itself to sigma. Wiring the sigma repair alone would leave a large fraction of the
+pack unrepresentable rather than merely mis-keyed.
+
+Recorded here rather than as a defect, because Greek is not a served language and the commit says
+so plainly ("Not yet wired"). It becomes blocking the moment el is wired, and it is the kind of
+gap that presents as "the model failed to learn most of the vocabulary".
+
+Related, and mechanical: **`CtcGreekOrthography` currently has zero production callers** — only
+`CtcGreekOrthographyTest` references it. It is correct unreferenced code awaiting a consumer, not
+dead code; anyone running a dead-code sweep should leave it alone.
+
+**NEW-6 — the app's own CTC references are one model generation behind, in three places.**
+`2026-08-19`/`08-20` on the ML side promoted `ru_synth_v2_ch80*` (Phase P) and then
+`{el,uk,bg,mk,he}_synth_v2full_ch80*` (P6). The app still cites generation 1 throughout:
+
+- `memory/HANDOFF.md` — "**Russian is delivered**: `CleverKeys-ML/ctc/artifacts/ru_synth_ch80_fp16w.onnx`, 589,406 B, sha `84ac284d…`" and "decodes real Russian at 77.41 in-dict top-1". The current ship bytes are `ru_synth_v2_ch80_fp16w.onnx`, sha `9004befb…`, at **79.73**.
+- `docs/specs/ctc-architecture-and-multiscript-guide.md` — the app's mirror of this repo's guide **never received the v2 edit**. Its §3.2 still describes `cyrillic_synth.py` and `weight = 255 − rank`; its §3.3 still reads "Real data is worth ~13 top-1 points" (now ~10) and "greedy collapses to 37" (now 56.12); its §4.2 artifact table lists only the v1 hashes.
+- The v2 artifact hashes and the P6 supersession are not recorded app-side anywhere.
+
+No shipped behaviour depends on any of this — none of these artifacts is in the APK — but it is
+the same class of defect as MEDIUM-3: a stale planning statement that the next reader will act on.
+The fix is the app-repo half of the guide edit, enumerated in `APP_WIRING_CHECKLIST.md` §3.
+
+**NEW-7 — the 32-frame decodable-word budget is a lexicon constraint nobody has applied to a
+non-Latin lexicon.** `2d080c7d` added `CtcDecodableLength` and a warning dialog: the exported
+encoder emits a fixed `log_emissions [1,32,65]`, and a CTC path spends one frame per character
+**plus a separating blank between adjacent duplicates**, so the budget is
+`length + adjacent-duplicate-pairs ≤ 32`. A test asserts every 20+ character word in
+`en_enhanced.json` clears it.
+
+The five corpus-less scripts have no equivalent assertion, and two of them are plausible
+offenders: `PHASE_P.md` §5's word draw is wordfreq token mass with no length ceiling, and
+Greek and Ukrainian both carry long inflected forms. Nothing in Phase O or Phase P checked it.
+Added to the checklist as a per-script gate — it costs one loop over the trie's word list.
+
+### 6.4 What remains, ordered
+
+1. **MEDIUM-3** — banner the execution brief. One paragraph, unchanged since the first audit, and
+   now the only anti-confusion finding still open. Everything around it has been fixed.
+2. **HIGH-4's residue** — add `CtcEmissionModelParityTest` to `CLASSES` in
+   `.github/scripts/emulator-ci.sh`. One string edit on infrastructure that is now proven green.
+3. **HIGH-2's residue** — the two unmarked `sw2345` doc sites, and a decision on whether the drift
+   guard should scan `docs/` (it currently cannot see either of them).
+4. **NEW-6** — bring the app's guide mirror and `HANDOFF.md` onto the v2/v2full generation.
+5. **MEDIUM-4** — the 11 MB of superseded bench ONNX, one of them labelled "the ship candidate".
+6. **LOW-9's remaining half** — a `supportsLayout` negative for a Cyrillic `KeyboardData`. Cheap,
+   and it stops being cosmetic the moment per-script routing removes gate 1.
+7. **LOW-1..LOW-8, LOW-10** — cleanup, ride-along.
+
+`NEW-5` and `NEW-7` are not app defects today; they are wiring prerequisites, and they live in
+`APP_WIRING_CHECKLIST.md` rather than here.
