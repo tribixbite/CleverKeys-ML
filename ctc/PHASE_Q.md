@@ -576,3 +576,193 @@ Committed evidence: `phaseQ_G5_*.json`, `phaseQ_gates_v3.json`,
 `phaseQ_*RESEARCH_ONLY.json` (numbers only), `phase_q_scripts.json`.
 Seeds: generator/decoder 1234, splits 1234/999/777, noise 20260820+offset,
 imprint ε-fit 4242/4243.
+
+---
+
+# Phase Q addendum — the closing round (2026-08-20)
+
+**Scope, stated as a boundary.** This round adds **no lever**. It firms two
+things Phase Q left single-seeded and one thing three phases have deferred:
+(Q-A) three-seed replication of all six gen-4 decoders, so §7.3/§7.5's numbers
+stop being one draw; (Q-B) the λ re-tune that §7.6 item 5 registered as open,
+run on the PHASE_J §6.9 half-split footing; (Q-C) the guide's v3 section. No new
+generator, no new architecture, no new gate family, no scope growth. Everything
+in §8/§9 below was **committed before the first decode of the round** — the
+results sections say so explicitly and carry their own timestamps.
+
+## 8. Q-A — seed replication, pre-registered
+
+### 8.1 What runs
+
+The six gen-4 decoders retrained at **seeds 4321 and 7777** — the campaign's
+standing replication triple (PHASE_J §6.6 used exactly 1234/4321/7777). Twelve
+runs, ~1 GPU-h each, 4–5 concurrent, detached with `--workers 0`.
+
+*Nothing else moves.* Same caches (`cache_{ru,el,uk,bg,mk,he}_v3`, already
+generated — the generator, its imprint, the word draw and the noise seeds are
+untouched, so the only varying quantity in the whole experiment is the decoder's
+init/shuffle stream), same layouts, same Phase-O/P recipe verbatim: `resbn:80`,
+dil 1,2,4,8, embed_hid 96, feat_v1, t_out 32, 94,000 steps, batch 256, lr 3e-3,
+wd 0.01, warmup 1,000, coupled affine sampler, no layout-alt, greedy checkpoint
+selection, patience 40. Run names `phaseQ-<code>-v3-s<seed>`; `phaseQ_train.sh`
+gains a `SEED` environment variable and a `ru` case, and is byte-equivalent in
+its default (`SEED` unset ⇒ 1234 ⇒ the s1234 run names and arguments already on
+the record).
+
+### 8.2 What is measured, and what is *not* re-measured
+
+Per replicate: fp32 export through `export_onnx.py` at the **default 1e-3**
+parity tolerance, then one CKDT-preset read of the script's own v3 holdout
+(10,000 rows) — and for ru additionally the **real** Yandex probe (9,416 rows /
+8,471 in-dict) with a per-row dump, so the ru seeds are paired, not three
+independent point estimates.
+
+Deliberately not re-run per seed, with the reason:
+
+* **the EN zero-shot controls** (`phaseM_kd_fresh_w1_s1234` ch192 and
+  `phaseH-p50` ch80) — they are *other models* decoded on the same rows; they do
+  not depend on our seed. Read once per script and reused across the triple.
+  ru's controls on `cache_ru_v3/holdout.npz` were never read at s1234 and are
+  read now, once, for all three seeds.
+* **the permuted-layout falsification** — a property of the layout, read at
+  s1234 and already 0.00 on every script.
+* **fp16w quantization** — only the shipped bytes need it, and §8.4 keeps s1234
+  as the shipped bytes unless an anomaly fires.
+* **the G1–G4/GQ-D battery** — an instrument on the *generator*, which this
+  round does not touch.
+
+### 8.3 How the tables are reported
+
+Per script: the three holdout t1 values, their **mean** and **sample sd**
+(n = 3, Bessel), and the EN-control margin recomputed at the seed mean. ru
+carries the same for the real probe (t1, greedy, ≤3, ≥4) plus the pairwise
+McNemar between s1234 and each replicate. `MODELS_TABLE.md` §4.17 and §7.5, and
+`PHASE_Q.md` §7.3/§7.5, are edited so the **seed-mean is the quoted tier** and
+the single-seed figure survives only as the s1234 row.
+
+### 8.4 Which bytes ship — the anomaly rule, written before the numbers
+
+s1234 stays the shipped artifact (its bytes are what §7.7's hashes and every
+golden fixture were measured on) **unless** a replicate fires one of these,
+each of which is a defect rather than a preference:
+
+* **A1** — a replicate's fp32 export misses **100/100 argmax** at the default
+  1e-3 tolerance, and s1234's did not. (Then the *export path* is the anomaly,
+  and the round says so.)
+* **A2** — a replicate's final val-greedy sits **> 1.0 pt** below the triple's
+  mean val-greedy: a training pathology, visible without any decode.
+* **A3** — a replicate's holdout t1 falls outside **mean ± 3 sd** of the triple.
+* **A4** — ru only: a replicate's **real-probe** t1 exceeds s1234's by
+  **≥ +1.0** (the campaign's single-seed resolution floor, PHASE_P §7.5) at
+  exact-McNemar p < 0.05. Then s1234 is not a typical seed on the only real
+  instrument that exists, and the shipped bytes are reconsidered *in the open*.
+
+If any fires, that seed is exported (fp32 + fp16w + golden fixture) and the
+supersede is argued explicitly. If none fires, the export set is unchanged and
+the seed-mean is quoted as the tier — the s1234 bytes keep their measured
+hashes, which is the whole reason not to churn them.
+
+## 9. Q-B — the λ re-tune, pre-registered
+
+### 9.1 Why this is run at all, given a standing refusal
+
+PHASE_P §4.2 **refused** to re-tune λ against the Yandex probe: "λ is already
+one validator-fit parameter, and spending the validator again to recover 0.6
+points on one stratum is exactly the trap this campaign keeps documenting.
+Registered as an open item for a phase that has a second real corpus." §7.6
+item 5 carried the refusal forward and named the reason it is getting harder to
+hold: **λ = 2.0 was fitted in PHASE_J §6.9 against a greedy-37 model, and the
+gen-4 decoder reads greedy 65.66.** Two full generations of emission
+improvement separate the tuned parameter from the model it is tuning.
+
+The refusal is now **overridden by explicit user direction**, and the override
+is recorded as what it is: the second real corpus never arrived, and the round
+spends the validator instead of waiting for it. What the refusal bought is not
+recoverable by writing this paragraph — so the erosion is priced in §9.5 rather
+than argued away.
+
+### 9.2 The instrument, fixed before any read
+
+* **Decoder**: the gen-4 s1234 shipping export
+  `~/ctc-train/ckpt/phaseQ-ru-v3/ctc_swipe_encoder.onnx` (fp32, sha in §7.7 as
+  `ru_synth_v3_ch80.onnx`). Not a replicate, not fp16w, not an ensemble.
+* **Probe**: `~/ctc-train/data/yandex_val10k.jsonl`, all 9,416 default-grid
+  rows, eval-only footing, `langpack-ru` 50 k CKDT trie, beam 100, top-k 8.
+* **Split — the PHASE_J §6.9 split verbatim**: tune = rows `0:4708`, confirm =
+  rows `4708:9416`, applied by `eval_script.py --rows` *before* the OOV filter,
+  so the halves are row-disjoint by construction. (The in-dict counts inside
+  each half are whatever they are; they are reported, not chosen.)
+* **Everything except λ is frozen** at CKDT: γ 1.05, β 0.2, γ-prune 0.3734,
+  β-prune 0.9882.
+* **Metric**: in-dict top-1 on the half.
+
+### 9.3 The grid and the selection rule
+
+Grid, closed and complete: **λ ∈ {1.1, 1.5, 2.0, 2.5, 3.0, 4.0}** — E1's 1.1 and
+§6.9's three sweep points, plus the two interpolants that make an interior
+optimum detectable. Six tune-half decodes, and no others.
+
+* **λ\*** = argmax of tune-half in-dict t1.
+* **Interior-optimum rule.** If λ\* is a grid endpoint (1.1 or 4.0), the optimum
+  is outside the swept range, the sweep is **inconclusive**, and nothing is
+  adopted — the grid is not extended, because extending a grid after seeing
+  where it points is the fit-to-the-validator failure this rule exists to stop.
+* If **λ\* = 2.0**, the incumbent won its own sweep: **no confirm read is spent**
+  and the negative is recorded. (This is the outcome that costs the validator
+  least, and it is a real possible outcome, not a formality.)
+* Ties on the tune half resolve to the incumbent 2.0.
+
+### 9.4 The confirm half, and the adoption bar
+
+Only if λ\* is interior *and* ≠ 2.0: the confirm half `4708:9416` is decoded
+**twice** — at λ = 2.0 and at λ\* — each with a per-row dump, and compared with
+`phaseQ_paired.py` (exact McNemar, paired on the identical row set).
+
+> **ADOPT λ\* iff the confirm-half in-dict-t1 gain over λ = 2.0 is ≥ +0.30.**
+
+That is the whole bar. The McNemar p and the ≤3/≥4/greedy splits are reported
+beside it as evidence about *where* a gain lives, and they do not move the
+decision — a bar with two conditions invites picking the one that passed.
++0.30 is set below the +1.0 single-seed *training* resolution floor on purpose:
+this is a decode-side parameter read on the **same** rows through the **same**
+weights, so the paired comparison has no seed variance in it at all; +0.30 is
+roughly half a binomial SE at n ≈ 4,200 and is the smallest gain worth changing
+a shipped constant for.
+
+### 9.5 The erosion, priced now rather than after
+
+The ru real probe has been read as a *tuning* surface twice before: PHASE_J
+§6.9's λ sweep (tune half, 4 points) and its confirm read. This round is the
+**third** such episode: six reads of the tune half and, conditionally, two of
+the confirm half. Consequences, stated so no later document has to rediscover
+them:
+
+* the confirm half has now been used to confirm **two** different parameter
+  choices and is no longer a virgin surface; a future third confirmation on
+  these same rows is worth materially less than this one, and the campaign
+  should say "we have no clean confirm half left" rather than pretend otherwise;
+* every ru number in the registry stays on the *decoded* footing it was measured
+  at — an adopted λ does **not** retroactively re-label 85.07, it produces a new
+  row measured at the new preset, and both are kept;
+* the ≤3-vs-≥4 balance argument from PHASE_P §4.2 is **not** a selection
+  criterion here (§9.4) precisely because it was the motivation; motivating a
+  sweep and grading it are different jobs.
+
+### 9.6 If adopted — the fixture-and-preset rule, applied
+
+A preset change invalidates every fixture frozen at the old preset. On adoption:
+
+1. `ru_synth_v3_ch80_fp16w_golden.json` is **regenerated** at
+   `1.05,λ*,0.2,0.3734,0.9882` (`phaseQ_artifacts.sh` gains the preset as a
+   parameter), its new bytes/sha256 replace §7.7's ru fixture row, and the old
+   fixture is recorded as superseded-with-reason.
+2. **Only ru changes.** The other five scripts keep λ 2.0: their only probe is a
+   *generator-relative* v3 holdout, and tuning a decode constant on the
+   generator's own output fits the generator, not the language. Stated as a rule
+   so the asymmetry is not read as an oversight.
+3. `APP_WIRING_CHECKLIST.md` gains the app-side change —
+   `CtcScoringParams.tunedRuCkdt` λ 2.0 → λ\* — as an item with the fixture it
+   must ship beside. The app repo is not touched by this round.
+4. λ = 2.0 remains correct as `LAMBDA_CKDT_SCALE`'s *scale* default for every
+   Latin CKDT lexicon; what changes, if anything changes, is one language's
+   override.

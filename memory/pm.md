@@ -1735,3 +1735,35 @@ script as an independent second milestone.
 
 NEXT (app side, NOT this agent): work `ctc/APP_WIRING_CHECKLIST.md` top to bottom. §1.1
 (banner the execution brief) and §1.2 (one string in emulator-ci.sh) are both minutes.
+
+---
+
+2026-08-20 — Phase Q closing round (addendum), opened
+
+Three tasks, no new levers. Pre-registration for Q-A/Q-B is `ctc/PHASE_Q.md` §8/§9,
+committed BEFORE the first decode of the round.
+
+- [ ] **Q-A seed replication.** Retrain all six gen-4 decoders (ru/el/uk/bg/mk/he on
+      `cache_<code>_v3`) at seeds **4321** and **7777**, Phase-O/P recipe verbatim,
+      12 runs, 4-5 concurrent, detached `--workers 0`.
+- [ ] **Q-A harvest.** Per replicate: fp32 export at the default 1e-3 tolerance +
+      one CKDT holdout read; ru additionally the real Yandex probe with a dump.
+      EN zero-shot controls / permuted control / fp16w NOT re-run per seed (§8.2).
+- [ ] **Q-A tables.** 3-seed mean +/- sd per script, EN-control margin at the seed
+      mean, ru real-probe seed-mean + pairwise McNemar vs s1234. Update
+      `PHASE_Q.md` §7.3/§7.5 and `MODELS_TABLE.md` §4.17 so the seed-mean is the
+      quoted tier. Anomaly rule = §8.4 (A1-A4); otherwise s1234 stays the shipped bytes.
+- [ ] **Q-B lambda re-tune.** Grid {1.1,1.5,2.0,2.5,3.0,4.0} on the ru real probe's
+      PHASE_J §6.9 tune half (rows 0:4708), interior-optimum rule, confirm on
+      4708:9416, adopt iff confirm-half gain >= +0.30 over lambda 2.0. Overrides the
+      standing PHASE_P §4.2 refusal by explicit user direction; erosion priced in §9.5.
+- [ ] **Q-B consequences (iff adopted).** Regenerate the ru golden fixture at the new
+      preset (fixture-and-preset rule), update artifact hashes, add the app-side
+      `CtcScoringParams.tunedRuCkdt` change to `APP_WIRING_CHECKLIST.md`. ru only —
+      the five corpus-less scripts keep 2.0 (their probe is generator-relative).
+- [ ] **Q-C guide v3 section.** `ctc/ctc-architecture-and-multiscript-guide.md`:
+      concise v3-synthesis section (what the generator is, generation-4 artifact
+      names + sha256s, evidence tiers incl. the upper-bound decomposition one-liner,
+      the license seal), superseding stale v2/v2full text. Note in
+      `APP_WIRING_CHECKLIST.md` that the app-repo copy of the guide needs the same
+      edit; the app repo stays untouched.
