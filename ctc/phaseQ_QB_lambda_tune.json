@@ -1,0 +1,78 @@
+{
+ "what": "Q-B lambda re-tune, PHASE_Q.md \u00a79 \u2014 TUNE HALF ONLY",
+ "verdict": "INCONCLUSIVE \u2014 lambda* is a grid endpoint; NOT ADOPTED; the confirm half was NOT read and stays unspent (\u00a79.3 interior-optimum rule)",
+ "decoder": "ckpt/phaseQ-ru-v3/ctc_swipe_encoder.onnx (gen-4 s1234 fp32 ship export)",
+ "probe": "data/yandex_val10k.jsonl, rows 0:4708 (PHASE_J \u00a76.9 tune half)",
+ "preset_frozen": "gamma 1.05, beta 0.2, gamma_prune 0.3734, beta_prune 0.9882",
+ "in_dict_rows_in_half": 4231,
+ "grid": [
+  "1.1",
+  "1.5",
+  "2.0",
+  "2.5",
+  "3.0",
+  "4.0"
+ ],
+ "lambda_star": "1.1",
+ "lambda_star_is_endpoint": true,
+ "incumbent": "2.0",
+ "tune_half_shortfall_of_incumbent_t1": 0.63,
+ "monotone_decreasing_in_lambda": true,
+ "greedy_invariant": true,
+ "rows": {
+  "1.1": {
+   "decoded": 4231,
+   "indict_t1": 85.65,
+   "indict_t3": 93.33,
+   "indict_t5": 94.92,
+   "greedy_t1": 65.73,
+   "le3_t1": 89.75,
+   "ge4_t1": 83.06
+  },
+  "1.5": {
+   "decoded": 4231,
+   "indict_t1": 85.49,
+   "indict_t3": 93.67,
+   "indict_t5": 94.99,
+   "greedy_t1": 65.73,
+   "le3_t1": 89.69,
+   "ge4_t1": 82.83
+  },
+  "2.0": {
+   "decoded": 4231,
+   "indict_t1": 85.02,
+   "indict_t3": 93.48,
+   "indict_t5": 95.04,
+   "greedy_t1": 65.73,
+   "le3_t1": 88.96,
+   "ge4_t1": 82.52
+  },
+  "2.5": {
+   "decoded": 4231,
+   "indict_t1": 84.02,
+   "indict_t3": 93.38,
+   "indict_t5": 94.82,
+   "greedy_t1": 65.73,
+   "le3_t1": 88.16,
+   "ge4_t1": 81.4
+  },
+  "3.0": {
+   "decoded": 4231,
+   "indict_t1": 83.1,
+   "indict_t3": 92.93,
+   "indict_t5": 94.68,
+   "greedy_t1": 65.73,
+   "le3_t1": 87.61,
+   "ge4_t1": 80.25
+  },
+  "4.0": {
+   "decoded": 4231,
+   "indict_t1": 80.69,
+   "indict_t3": 91.68,
+   "indict_t5": 94.02,
+   "greedy_t1": 65.73,
+   "le3_t1": 86.88,
+   "ge4_t1": 76.77
+  }
+ }
+}

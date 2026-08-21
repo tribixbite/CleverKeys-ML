@@ -498,6 +498,12 @@ still collapses everything to ~0.
 5. **λ 2.0 was not re-tuned** — now two generations of emission improvement
    past the model it was tuned against (greedy 37 → 56 → 66). The standing
    refusal (validator burn) holds; the case for a second real corpus grows.
+   *(Superseded by §9.7, the closing round: λ **was** swept on the tune half.
+   The incumbent 2.0 is measurably off-peak by **−0.63 t1**, t1 is monotone
+   decreasing across {1.1 … 4.0}, and the optimum is **off-grid on the low
+   side** — so the interior-optimum rule refused adoption and the confirm half
+   was not spent. The shipped constant is unchanged and the shortfall is open,
+   one pre-registered confirm read from being decided.)*
 6. **The register residual is open** (wordfreq ≤3 mass 26.8 % vs real usage
    35.6 %) — untouched by Q, same license-clean route if ever wanted.
 7. **U is one architecture's upper bound**, not the supremum over all learned
@@ -766,3 +772,69 @@ A preset change invalidates every fixture frozen at the old preset. On adoption:
 4. λ = 2.0 remains correct as `LAMBDA_CKDT_SCALE`'s *scale* default for every
    Latin CKDT lexicon; what changes, if anything changes, is one language's
    override.
+
+### 9.7 Result — **INCONCLUSIVE, and the direction is the finding**
+
+*(measured 2026-08-20 after §9.1–§9.6 were committed; evidence
+`phaseQ_QB_lambda_tune.json`)*
+
+Six decodes of the tune half, 4,231 in-dict rows, gen-4 s1234 fp32 export,
+everything but λ frozen:
+
+| λ | in-dict t1 | t3 | t5 | ≤3 | ≥4 | greedy |
+|---|---|---|---|---|---|---|
+| **1.1** (E1) | **85.65** | 93.33 | 94.92 | **89.75** | **83.06** | 65.73 |
+| 1.5 | 85.49 | **93.67** | 94.99 | 89.69 | 82.83 | 65.73 |
+| **2.0** (incumbent `tunedRuCkdt`) | 85.02 | 93.48 | **95.04** | 88.96 | 82.52 | 65.73 |
+| 2.5 | 84.02 | 93.38 | 94.82 | 88.16 | 81.40 | 65.73 |
+| 3.0 | 83.10 | 92.93 | 94.68 | 87.61 | 80.25 | 65.73 |
+| 4.0 | 80.69 | 91.68 | 94.02 | 86.88 | 76.77 | 65.73 |
+
+*(greedy is λ-invariant by construction — it never touches the beam — and reads
+65.73 in all six, which is the sweep's own internal consistency check.)*
+
+**λ\* = 1.1 — the low endpoint. The interior-optimum rule (§9.3) fires:
+INCONCLUSIVE, nothing adopted, the grid is not extended, and the confirm half
+was never read.** The shipped `tunedRuCkdt` λ = 2.0 is unchanged, the six
+golden fixtures are unchanged, and `APP_WIRING_CHECKLIST.md` gains no preset
+item.
+
+**Why this is a real result and not a null.** t1 is **monotone decreasing across
+the whole grid** — 85.65 → 80.69, no interior structure at all. The sweep did
+not fail to find a peak; it found that the peak is *below* the lowest λ anyone
+thought to test, because the grid was built around the incumbent. And the
+mechanism is the one PHASE_P §4.2 wrote down in advance, pointing the direction
+it predicted:
+
+> "A model with 56 greedy leans on the prior less, and at λ = 2.0 — a value
+> tuned against a *weak-emission* model — that is not obviously the right
+> balance any more."
+
+λ weights the lexicon's frequency prior against emission evidence. λ = 2.0 was
+fitted in PHASE_J §6.9 to a greedy-37 model whose beam was doing most of the
+work; the gen-4 decoder reads greedy 65.73 and wants the prior turned **down**,
+not up. §7.6 item 5 named the suspicion; this measures its sign.
+
+**The shortfall, stated plainly and left open.** On the tune half the incumbent
+λ = 2.0 costs **−0.63 t1** against λ = 1.1 (−0.79 on ≤3, −0.54 on ≥4). That is
+a *measured, unconfirmed* shortfall in a shipped constant, and the honest
+position is exactly that: unconfirmed, because confirming it is what the
+confirm half is for and the rule forbids spending it on a sweep that cannot
+locate an optimum. Adopting an endpoint would mean shipping a value the sweep
+cannot show is best — the true argmax may be 0.9, or 0.5, or lower — and it
+would invalidate six golden fixtures to chase a number the next grid would move
+again.
+
+**What it costs, and what it saved.** The erosion actually spent is **six reads
+of the tune half and zero of the confirm half** — less than §9.5 budgeted. The
+confirm half is still virgin, which is the single most valuable asset a
+follow-up has. A future phase that wants this point should pre-register a grid
+that *brackets* the new direction (e.g. {0.4, 0.7, 0.9, 1.1, 1.5} — an interior
+optimum has to be possible for the rule to be satisfiable), fit on the tune
+half, and spend the confirm half once, on the winner against 2.0. That is one
+confirm read away from a decided answer, and this round deliberately did not
+spend it on a question it had framed wrong.
+
+**Carried to §7.6 item 5**, which is rewritten from "λ was not re-tuned" to
+"λ was swept, the incumbent is measurably off-peak by 0.63 on the tune half,
+and the peak is off-grid on the low side."

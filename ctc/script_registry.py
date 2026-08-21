@@ -32,6 +32,7 @@ Three invariants every entry must satisfy
 from __future__ import annotations
 
 import math
+import os
 import struct
 import unicodedata
 import zipfile
@@ -207,9 +208,17 @@ class ScriptSpec:
             if lx.path.suffix == ".zip":
                 with zipfile.ZipFile(lx.path) as zf:
                     blob = zf.read("dictionary.bin")
-                tmp = Path("/tmp") / f"ckdt_{self.code}.bin"
-                tmp.write_bytes(blob)
-                recs = read_ckdt_v2(tmp)
+                # PID-unique, and removed after the read: a fixed /tmp name
+                # races when several evals run concurrently (a λ grid, a seed
+                # battery), and the loser reads a half-written file and dies in
+                # `read_ckdt_v2`'s header unpack.  Observed 2026-08-20 on the
+                # Q-B sweep — one of six parallel decodes.
+                tmp = Path("/tmp") / f"ckdt_{self.code}_{os.getpid()}.bin"
+                try:
+                    tmp.write_bytes(blob)
+                    recs = read_ckdt_v2(tmp)
+                finally:
+                    tmp.unlink(missing_ok=True)
             else:
                 recs = read_ckdt_v2(lx.path)
             raw = [(w, float(max(1, 255 - r))) for w, r in recs]
