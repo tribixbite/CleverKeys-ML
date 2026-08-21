@@ -805,7 +805,7 @@ carry their own **v3** synthesis holdout, generator-relative as ever.
 | arm | training cache | in-dict t1 | t3 | t5 | ≤3 | ≥4 | greedy | verdict |
 |---|---|---|---|---|---|---|---|---|
 | `phaseP-ru-v2full` = `ru_synth_v2_ch80` | v2 transplant | 79.73 | 90.77 | 93.26 | 85.77 | 75.92 | 56.12 | the registered baseline |
-| **`phaseQ-ru-v3`** = `ru_synth_v3_ch80` | **v3 learned**, `cache_ru_v3` | **85.07** | **93.35** | **95.16** | **89.15** | **82.49** | **65.66** | **SHIP** — G5-Q PASS (bar ≥ 80.73) |
+| **`phaseQ-ru-v3`** = `ru_synth_v3_ch80` | **v3 learned**, `cache_ru_v3` | **85.07** | **93.35** | **95.16** | **89.15** | **82.49** | **65.66** | **SHIP** — G5-Q PASS (bar ≥ 80.73). **3-seed mean 85.30 ± 0.207** (s4321 85.36, s7777 85.47; s1234 is the *lowest* draw, neither replicate distinguishable at p 0.24 / 0.11) — `PHASE_Q.md` §10.2 |
 | `phaseQ-ru-yxgen_RESEARCH_ONLY` (sealed, unshippable) | v3 twin trained on 1 M real Yandex rows | *85.95* | *93.74* | *95.37* | *90.95* | *82.79* | *69.72* | **THE UPPER BOUND** — measurement only |
 | `phaseIB-ru-real` re-decode at this preset | 1 M real Yandex rows (unshippable) | *88.69* | *95.28* | *96.82* | *93.90* | *85.39* | *75.23* | the ceiling |
 
@@ -839,18 +839,33 @@ fresh noise + fresh word draw; levels are generator-relative — margins against
 the EN zero-shot controls on the same rows are the only cross-generation
 comparator, and they **widen** against P6's):
 
-| arm | holdout t1 / t3 / t5 | greedy | ch192-EN (Δ) | ch80-EN (Δ) | P6's ch192 Δ | permuted | fp16w cost |
-|---|---|---|---|---|---|---|---|
-| **`phaseQ-el-v3`** = `el_synth_v3_ch80` | **92.12** / 97.23 / 97.92 | 74.17 | 85.11 (**+7.01**) | 86.05 (+6.07) | +6.11 | 0.00 | 0.00 |
-| **`phaseQ-uk-v3`** = `uk_synth_v3_ch80` | **88.96** / 94.97 / 95.93 | 60.75 | 75.94 (**+13.02**) | 77.05 (+11.91) | +5.09 | 0.00 | 0.00 |
-| **`phaseQ-bg-v3`** = `bg_synth_v3_ch80` | **86.76** / 95.87 / 97.04 | 65.28 | 76.71 (**+10.05**) | 76.03 (+10.73) | +5.47 | 0.00 | 0.00 |
-| **`phaseQ-mk-v3`** = `mk_synth_v3_ch80` | **91.55** / 97.26 / 97.97 | 71.66 | 86.55 (**+5.00**) | 85.98 (+5.57) | +5.23 | 0.00 | 0.00 |
-| **`phaseQ-he-v3`** = `he_synth_v3_ch80` | **80.69** / 92.25 / 94.72 | 64.03 | 64.64 (**+16.05**) | 63.89 (+16.80) | +7.92 | 0.00 | 0.00 |
+| arm | holdout t1 / t3 / t5 (s1234) | **3-seed mean ± sd** | greedy | ch192-EN (Δ at mean) | ch80-EN (Δ) | P6's ch192 Δ | permuted | fp16w cost |
+|---|---|---|---|---|---|---|---|---|
+| **`phaseQ-el-v3`** = `el_synth_v3_ch80` | **92.12** / 97.23 / 97.92 | **92.19 ± 0.070** | 74.17 | 85.11 (**+7.08**) | 86.05 (+6.14) | +6.11 | 0.00 | 0.00 |
+| **`phaseQ-uk-v3`** = `uk_synth_v3_ch80` | **88.96** / 94.97 / 95.93 | **89.12 ± 0.266** | 60.75 | 75.94 (**+13.18**) | 77.05 (+12.07) | +5.09 | 0.00 | 0.00 |
+| **`phaseQ-bg-v3`** = `bg_synth_v3_ch80` | **86.76** / 95.87 / 97.04 | **86.91 ± 0.180** | 65.28 | 76.71 (**+10.20**) | 76.03 (+10.88) | +5.47 | 0.00 | 0.00 |
+| **`phaseQ-mk-v3`** = `mk_synth_v3_ch80` | **91.55** / 97.26 / 97.97 | **91.56 ± 0.121** | 71.66 | 86.55 (**+5.01**) | 85.98 (+5.58) | +5.23 | 0.00 | 0.00 |
+| **`phaseQ-he-v3`** = `he_synth_v3_ch80` | **80.69** / 92.25 / 94.72 | **80.43 ± 0.238** | 64.03 | 64.64 (**+15.79**) | 63.89 (+16.54) | +7.92 | 0.00 | 0.00 |
+| *(ru, on its own v3 holdout — the GQ-T probe, EN controls read for the first time in §10.1)* | *88.14* / 94.45 / 95.48 | ***87.93 ± 0.254*** | *56.52* | *74.91* (***+13.02***) | *75.82* (+12.11) | — | *0.00* | — |
 
 *(cells from `ctc/phase_q_scripts.json`; the greedy columns — 60–74 against the
 EN controls' 13–32 — are the emissions-side confirmation that the texture moved
 toward the target scripts and away from English, the direction ru's real probe
 verified at +5.34.)*
+
+**The closing round (`PHASE_Q.md` §8/§10) replicated all six decoders at seeds
+4321 and 7777** — 12 runs, recipe verbatim, caches untouched, `--seed` the only
+varying quantity. **Every tier replicates**, all twelve exports cleared the
+default 1e-3 tolerance at 100/100 argmax, and none of the four pre-registered
+anomaly rules fired, so **s1234 remains the shipped artifact** and no fixture was
+regenerated. The seed-mean is now the quoted tier; the s1234 column is kept
+because it is what the shipped bytes measure. Two findings came out of the
+replication itself: the campaign's **±1.0 single-seed resolution floor is ~5×
+too wide** on this instrument (measured ru real-probe seed sd **0.207**, so ~±0.4
+at 95 %) — which does not re-decide any past gate but does make §9.7's −0.63 λ
+shortfall larger than three seed sds — and **seed variance lives almost entirely
+in short words** (≤3 sd 0.509 against ≥4 sd 0.049), the same stratum as Phase P's
+missed corollary and the λ sweep's largest movement.
 
 **Export gates.** Every fp32 export **100/100 argmax at the default 1e-3**
 (he 3.57e-04, inside the envelope — the v2-era flag does not recur); fp16w

@@ -587,7 +587,11 @@ Unpacked:
   created from a corpus that cannot be licensed. The campaign's sealing discipline
   (test-2400, ledger reads) has **no Cyrillic counterpart** and never will. Russian numbers can
   never be called "test-validated".
-- **single seed** (1234). Every other campaign bar is a seed-mean bar; this is not one.
+- **three seeds** (1234/4321/7777) as of the Phase-Q closing round — the ru path is
+  finally on the same seed-mean footing as every other campaign bar. Real-probe
+  **85.30 ± 0.207**, and the shipped s1234 bytes are the *lowest* of the three
+  (`PHASE_Q.md` §10.2). What is still single-seed: the **generator** itself, the
+  synthesis caches, the sealed upper bound U, and the real-trained ceiling.
 - **no per-language preset sweep beyond λ**, and **λ = 2.0 is now measured to be off-peak**.
   It was tuned in `PHASE_J.md` §6.9 against a *weak-emission* model (greedy 37); the generation-4
   model reads greedy 66 and leans on the prior far less. `PHASE_Q.md` §9.7 swept
@@ -659,8 +663,14 @@ anything compared against a decode):
 through `PHASE_P.md` §5.1 and §8.6):
 
 > Greek, Ukrainian, Bulgarian, Macedonian and Hebrew CTC are **synthesis-trained,
-> synthesis-holdout-only, single-seed, and calibrated against Russian rather than measured on
+> synthesis-holdout-only, three-seed, and calibrated against Russian rather than measured on
 > their own script.**
+
+*(The closing round replicated all five at seeds 4321/7777: holdout seed-means el 92.19 ± 0.070,
+uk 89.12 ± 0.266, bg 86.91 ± 0.180, mk 91.56 ± 0.121, he 80.43 ± 0.238, every EN-control margin
+intact, no anomaly, shipped bytes unchanged — `PHASE_Q.md` §10.1. **Replication tightens a
+generator-relative number; it does not make it a language accuracy figure**, so the sentence
+above is otherwise unchanged.)*
 
 Their generation-4 holdout numbers — el 92.12, uk 88.96, bg 86.76, mk 91.55, he 80.69 — are
 **not accuracy figures for those languages**, and the point is sharper for v3 than it was for

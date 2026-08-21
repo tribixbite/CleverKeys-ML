@@ -1743,13 +1743,19 @@ NEXT (app side, NOT this agent): work `ctc/APP_WIRING_CHECKLIST.md` top to botto
 Three tasks, no new levers. Pre-registration for Q-A/Q-B is `ctc/PHASE_Q.md` §8/§9,
 committed BEFORE the first decode of the round.
 
-- [ ] **Q-A seed replication.** Retrain all six gen-4 decoders (ru/el/uk/bg/mk/he on
+- [x] **Q-A seed replication — DONE.** 12 runs, all clean. Original text: Retrain all six gen-4 decoders (ru/el/uk/bg/mk/he on
       `cache_<code>_v3`) at seeds **4321** and **7777**, Phase-O/P recipe verbatim,
       12 runs, 4-5 concurrent, detached `--workers 0`.
-- [ ] **Q-A harvest.** Per replicate: fp32 export at the default 1e-3 tolerance +
+- [x] **Q-A harvest — DONE.** All 12 exports 100/100 argmax at the default 1e-3. Original text: Per replicate: fp32 export at the default 1e-3 tolerance +
       one CKDT holdout read; ru additionally the real Yandex probe with a dump.
       EN zero-shot controls / permuted control / fp16w NOT re-run per seed (§8.2).
-- [ ] **Q-A tables.** 3-seed mean +/- sd per script, EN-control margin at the seed
+- [x] **Q-A tables — DONE.** Every tier replicates; ru real probe **85.30 +/- 0.207**
+      (s1234 85.07 is the LOWEST draw, replicates +0.30/+0.40 at p 0.24/0.11). Holdout
+      seed-means: ru 87.93+/-0.254, el 92.19+/-0.070, uk 89.12+/-0.266, bg 86.91+/-0.180,
+      mk 91.56+/-0.121, he 80.43+/-0.238. No anomaly rule fired -> s1234 stays the shipped
+      artifact, no fixture regenerated. New inferences: the +/-1.0 resolution floor is ~5x too
+      wide on this instrument, and seed variance lives in short words (<=3 sd 0.509 vs >=4 sd
+      0.049). Record `PHASE_Q.md` §10, evidence `ctc/phase_q_seeds.json`. Original text: 3-seed mean +/- sd per script, EN-control margin at the seed
       mean, ru real-probe seed-mean + pairwise McNemar vs s1234. Update
       `PHASE_Q.md` §7.3/§7.5 and `MODELS_TABLE.md` §4.17 so the seed-mean is the
       quoted tier. Anomaly rule = §8.4 (A1-A4); otherwise s1234 stays the shipped bytes.
@@ -1777,3 +1783,16 @@ committed BEFORE the first decode of the round.
       the license seal), superseding stale v2/v2full text. Note in
       `APP_WIRING_CHECKLIST.md` that the app-repo copy of the guide needs the same
       edit; the app repo stays untouched.
+
+2026-08-21 — Phase Q closing round CLOSED. All three tasks done; nothing adopted that
+changes a shipped byte or constant. Open items handed forward, in priority order:
+
+1. **The lambda confirm read.** One pre-registered grid that brackets the new direction
+   (e.g. {0.4, 0.7, 0.9, 1.1, 1.5}) fitted on the ru tune half, then ONE confirm read of the
+   winner against 2.0. The confirm half is still virgin and is the campaign's last clean
+   surface on this probe. Payoff ~0.6 t1 on the shipped ru preset; cost one confirm read plus
+   six fixture regenerations if it lands.
+2. **Generator-seed variance is unmeasured.** §10's 0.207 is decoder-seed only.
+3. **Four of six scripts still have no real-data measurement.** Unchanged since Phase O.
+4. **App side**: `ctc/APP_WIRING_CHECKLIST.md` top to bottom; the app-repo guide copy is now
+   TWO generations stale (§3) and the app repo was not touched from this side.

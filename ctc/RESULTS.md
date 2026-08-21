@@ -57,6 +57,34 @@ synthetic texture moved toward the target scripts and away from English, the
 same direction ru's real probe verified. Generator-relative as ever — four of
 the six scripts still have no real-data measurement of any kind.
 
+**The closing round: three seeds, and a λ sweep that refused itself.** All six
+decoders were retrained at seeds 4321 and 7777 (`PHASE_Q.md` §8/§10). **Every
+tier replicates.** ru's real probe reads **85.30 ± 0.207** across the triple, and
+**the shipped s1234 bytes are the lowest of the three** — the headline was
+understated, not lucky. Holdout seed-means: el 92.19 ± 0.07, uk 89.12 ± 0.27,
+bg 86.91 ± 0.18, mk 91.56 ± 0.12, he 80.43 ± 0.24, ru 87.93 ± 0.25; every
+EN-control margin survives. All twelve exports cleared the default tolerance at
+100/100 argmax and none of the four pre-registered anomaly rules fired, so the
+shipped bytes and every golden fixture are unchanged. Two things came out of the
+replication that no single-seed phase could see: the campaign's **±1.0
+single-seed resolution floor is roughly 5× too wide** on this instrument (n = 3,
+so treat the 0.207 as one measurement, not a constant), and **seed variance
+lives almost entirely in short words** — ≤3 sd 0.509 against ≥4 sd 0.049, the
+same stratum as Phase P's missed corollary and the λ sweep's largest movement.
+
+**λ, finally swept — and deliberately not adopted.** The re-tune `PHASE_P` §4.2
+refused and §7.6 carried as open was run on `PHASE_J` §6.9's exact half-split.
+On the tune half, in-dict t1 is **monotone decreasing** across
+{1.1, 1.5, 2.0, 2.5, 3.0, 4.0}: 85.65 → 80.69. λ\* = 1.1 is a **grid endpoint**,
+so the pre-registered interior-optimum rule fired — **INCONCLUSIVE, nothing
+adopted, the confirm half never read** and still virgin for a grid that brackets
+the new direction. The direction is the result, and it is the one Phase P
+predicted in words: λ 2.0 was fitted to a greedy-37 model whose beam did the
+work, and a greedy-66 model wants the prior turned **down**. The shipped
+`tunedRuCkdt` is unchanged and carries a **measured, unconfirmed −0.63 t1
+shortfall** — which, against the newly measured 0.207 seed sd, is a real effect
+rather than noise.
+
 # Phase P (2026-08-19): the synthetic generator, rebuilt — +2.31 real Russian top-1 and +19 real greedy, with no real Cyrillic row anywhere
 
 Full record: `ctc/PHASE_P.md`. Phase O closed by measuring that its own probe is

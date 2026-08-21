@@ -413,7 +413,9 @@ the G5 gate, not the battery, decides shipping.
 
 Same 8,471 in-dict rows, fp32 export (sliced parity 7.63e-05, argmax 100/100),
 CKDT preset, paired per-row against the committed v2full re-decode (which
-reproduced 79.73 to the digit):
+reproduced 79.73 to the digit). *(§10.2 replicated this at seeds 4321/7777: the
+3-seed mean is **85.30 ± 0.207** and s1234 is the lowest of the three, so the
+row below is the pessimistic draw.)*
 
 | | in-dict t1 | greedy | ≤3 | ≥4 | t3 | t5 |
 |---|---|---|---|---|---|---|
@@ -467,6 +469,11 @@ PHASE_P.md carries over *strengthened*: levels are generator-relative, margins
 against the EN zero-shot controls on the same rows are the only
 cross-generation comparator). CKDT preset, no sweep.
 
+*(§10.1 replicated every row of this table at seeds 4321/7777; the seed-mean
+tiers are 87.93 ru / 92.19 el / 89.12 uk / 86.91 bg / 91.56 mk / 80.43 he, sd
+0.07–0.27, and every EN-control margin survives. The s1234 row is kept here
+because it is what the shipped bytes measure.)*
+
 | script | greedy | in-dict t1 | ≤3 | ≥4 | vs ch192 EN | vs ch80 EN | permuted | fp16w Δt1 |
 |---|---|---|---|---|---|---|---|---|
 | **el** | 74.17 | **92.12** | 95.70 | 89.22 | **+7.01** | +6.07 | 0.00 | 0.00 |
@@ -495,6 +502,12 @@ still collapses everything to ~0.
    proceed-rule deviation they triggered.
 4. **Single seed (1234) everywhere**, as in every prior phase; +5.34 is ~5×
    the campaign's resolution floor, the five-script deltas are not re-seeded.
+   *(Superseded by §10, the closing round: all six decoders were retrained at
+   seeds 4321 and 7777. Every tier replicates — ru's real probe reads
+   **85.30 ± 0.207** with s1234 the lowest of the three — and the measured seed
+   sd shows the ±1.0 resolution floor is itself ~5× too wide on this
+   instrument. What remains single-seed is the **generator**, the caches, U and
+   the ceiling: §10.6.)*
 5. **λ 2.0 was not re-tuned** — now two generations of emission improvement
    past the model it was tuned against (greedy 37 → 56 → 66). The standing
    refusal (validator burn) holds; the case for a second real corpus grows.
@@ -838,3 +851,164 @@ spend it on a question it had framed wrong.
 **Carried to §7.6 item 5**, which is rewritten from "λ was not re-tuned" to
 "λ was swept, the incumbent is measurably off-peak by 0.63 on the tune half,
 and the peak is off-grid on the low side."
+
+## 10. Q-A — result: **every tier replicates, and the resolution floor was conservative**
+
+*(measured 2026-08-20/21 after §8 was committed; evidence `phase_q_seeds.json`,
+collected by `phaseQ_collect.py --seeds` — every cell parsed from the runs' own
+JSONs, and the §8.4 anomaly rules evaluated in code rather than by eye)*
+
+Twelve runs, recipe verbatim, caches untouched, `--seed` the only varying
+quantity. All twelve exports cleared the **default 1e-3** parity tolerance with
+**100/100 argmax** (sliced 7.25e-05 … 4.27e-04, he 1.83e-04 / 3.51e-04 — the
+v2-era he flag does not recur at any seed).
+
+### 10.1 The three-seed tables
+
+Each script's own v3 holdout, 10,000 rows, CKDT preset. **Mean and sample sd
+(n = 3)**; the EN-control margins are recomputed at the seed mean, and the
+controls themselves are seed-independent (§8.2) so they are the same fixed
+numbers all three seeds are measured against.
+
+| script | s1234 | s4321 | s7777 | **mean** | sd | greedy mean (sd) | ch192-EN | **margin at mean** | ch80-EN | margin | permuted |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| **ru** | 88.14 | 88.01 | 87.65 | **87.93** | 0.254 | 56.68 (0.233) | 74.91 | **+13.02** | 75.82 | +12.11 | 0.00 |
+| **el** | 92.12 | 92.18 | 92.26 | **92.19** | 0.070 | 74.01 (0.144) | 85.11 | **+7.08** | 86.05 | +6.14 | 0.00 |
+| **uk** | 88.96 | 89.43 | 88.98 | **89.12** | 0.266 | 60.37 (0.465) | 75.94 | **+13.18** | 77.05 | +12.07 | 0.00 |
+| **bg** | 86.76 | 86.86 | 87.11 | **86.91** | 0.180 | 65.42 (0.209) | 76.71 | **+10.20** | 76.03 | +10.88 | 0.00 |
+| **mk** | 91.55 | 91.45 | 91.69 | **91.56** | 0.121 | 71.58 (0.199) | 86.55 | **+5.01** | 85.98 | +5.58 | 0.00 |
+| **he** | 80.69 | 80.22 | 80.39 | **80.43** | 0.238 | 64.04 (0.140) | 64.64 | **+15.79** | 63.89 | +16.54 | 0.00 |
+
+ru's EN-control and permuted arms on `cache_ru_v3/holdout.npz` were **never read
+at s1234** — Phase Q evaluated ru only on the real probe plus the GQ-T
+diagnostic. They are read here for the first time and apply to all three seeds:
+the ru holdout carries a **+13.02** margin over the shipped English model, the
+second largest of the six, and permuted geometry collapses it to 0.00 like
+everything else.
+
+**Every §7.5 margin survives replication**, and four of five move by ≤ 0.20
+(el +7.01 → +7.08, uk +13.02 → +13.18, bg +10.05 → +10.20, mk +5.00 → +5.01,
+he +16.05 → +15.79). The widening-against-P6 finding is not a seed artifact.
+
+Selection-side variance, for completeness (best val-greedy, the quantity
+checkpoint selection actually used): ru 57.79 ± 0.463, el 74.51 ± 0.200,
+uk 61.98 ± 0.131, bg 65.49 ± 0.583, mk 72.68 ± 0.156, he 63.60 ± 0.125.
+
+### 10.2 The ru real probe — **85.07 holds, and it is the pessimistic draw**
+
+Same 8,471 in-dict Yandex rows, eval-only footing, CKDT preset, fp32 export,
+each replicate paired **per row** against s1234 rather than compared as an
+independent point estimate:
+
+| | s1234 (shipped) | s4321 | s7777 | **mean** | **sd** |
+|---|---|---|---|---|---|
+| **in-dict t1** | **85.07** | 85.36 | 85.47 | **85.30** | **0.207** |
+| greedy | 65.66 | 65.10 | 65.74 | 65.50 | 0.349 |
+| ≤3 | 89.15 | 89.76 | 90.16 | 89.69 | 0.509 |
+| ≥4 | 82.49 | 82.58 | 82.50 | 82.52 | **0.049** |
+| t3 / t5 | 93.35 / 95.16 | 93.09 / 94.88 | 93.05 / 95.12 | 93.16 / 95.05 | — |
+
+| paired vs s1234 (exact McNemar, n = 8,471) | Δ t1 | p | Δ greedy | p |
+|---|---|---|---|---|
+| s4321 | +0.30 | 0.242 | −0.55 | 0.116 |
+| s7777 | +0.40 | 0.105 | +0.08 | 0.838 |
+
+**The answer to the question the round was run to ask: yes, 85.07 holds.** The
+seed-mean is **85.30 ± 0.207**, the shipped s1234 bytes are the **lowest** of the
+three, and neither replicate is distinguishable from them (p = 0.24, p = 0.11).
+Phase Q's headline is if anything understated by 0.23. Restated on the
+seed-mean footing, the ledger of §7.4 becomes:
+
+```
+79.73          v2 ship (single seed, not replicated)
+85.30 ± 0.21   v3 ship, 3-seed mean          ← the quotable tier
+85.95          U, the sealed in-domain bound (single seed)
+88.69          real-trained ceiling (single seed)
+```
+
+so **v3 sits 0.65 below the upper bound at the seed mean** rather than 0.89, and
+the 2.74 that generation itself costs is unchanged in kind. Both U and the
+ceiling remain single-seed and are *not* re-quoted with error bars they do not
+have — the comparison is a 3-seed mean against two single draws, and that
+asymmetry is stated rather than hidden.
+
+### 10.3 The finding nobody registered: the resolution floor is ~5× too wide
+
+The campaign has priced single-seed resolution at **±1.0 top-1** since
+PHASE_P §7.5, and §4 of this phase set the G5-Q ship bar at +1.0 for exactly
+that reason. **Measured directly, on the instrument that matters, the seed sd is
+0.207** — a 95 % interval of roughly **±0.4** on a single seed, not ±1.0. On the
+five synthesis holdouts the sds are tighter still (0.070 … 0.266).
+
+Three honest qualifications, because this is the kind of number a later phase
+will want to lean on:
+
+1. **n = 3.** A sample sd from three draws carries roughly 40 % relative
+   uncertainty; 0.207 could comfortably be 0.13 or 0.32. It is not a constant,
+   it is one measurement of one model family on one probe.
+2. **It re-decides nothing retroactively.** Every gate in this campaign was
+   judged against the bar written before it ran, and a narrower floor found
+   afterwards does not promote anything that missed. In particular the Phase-P
+   ≤3 corollary miss and the §9.7 λ shortfall stay exactly as recorded.
+3. **It was cheap only because the caches were fixed.** These twelve runs vary
+   the decoder seed alone; generator-seed and data-draw variance are *not* in
+   this number and would widen it.
+
+What it does justify prospectively: a future ship gate on this instrument can
+credibly use a **+0.5** band instead of +1.0, and the §9.7 λ shortfall of
+−0.63 — which looked like noise against a ±1.0 floor — is **larger than three
+seed sds** and is therefore a real effect awaiting a confirm read, not a rounding
+artifact. That is the closing round's one genuinely new inference, and it comes
+from replication rather than from a new lever.
+
+### 10.4 Where the seed variance actually lives
+
+The ≥4-letter stratum is astonishingly stable — **sd 0.049**, three seeds inside
+0.09 points — while the ≤3 stratum reads **sd 0.509**, ten times wider, and
+greedy sits between them at 0.349. Seeds disagree about **short words**, and
+almost not at all about long ones.
+
+That is the same stratum that carried Phase P's missed ≤3 corollary, the same
+stratum where the lexicon prior rather than the encoder does the work, and the
+same stratum §9.7's λ sweep moved most (−0.79 at λ 2.0 vs λ 1.1). Three separate
+lines of evidence now point at the short-word/prior interaction as the live
+residual on the ru path, and none of them point at the encoder. A future phase
+that wants a point on this probe should look there and nowhere else.
+
+### 10.5 Anomaly rules — **none fired; s1234 stays the shipped artifact**
+
+All four §8.4 rules were evaluated in code (`phaseQ_collect.py --seeds`, field
+`anomalies`, empty for all six scripts):
+
+* **A1** — every one of the twelve exports: 100/100 argmax at the default 1e-3,
+  no relaxed-tolerance retry anywhere. Not fired.
+* **A2** — no replicate's best val-greedy sits more than 1.0 below its triple's
+  mean; the largest deviation is bg's s4321 at 0.67. Not fired.
+* **A3** — no holdout t1 outside mean ± 3 sd on any script. Not fired.
+* **A4** — ru's replicates beat s1234 by +0.30 and +0.40, both far under the
+  +1.0 trigger and neither significant. Not fired.
+
+**Therefore the export set is unchanged.** `{ru,el,uk,bg,mk,he}_synth_v3_ch80*`
+still carry the §7.7 hashes, every golden fixture is still valid for the bytes
+it was generated from, and no fixture is regenerated. The replicate checkpoints
+stay in `~/ctc-train/ckpt/phaseQ-*-v3-s{4321,7777}/` as evidence; **they are not
+exported to `artifacts/` and must not be wired** — the registry's rule is that a
+hash in `artifacts/` is a shipped byte, and only one seed per script is.
+
+The **seed-mean is now the quoted tier** in `MODELS_TABLE.md` §4.17 and in this
+document's §7.3/§7.5, with the s1234 row kept beside it because that is what the
+shipped bytes measure.
+
+### 10.6 What Q-A did NOT establish
+
+1. **Only the decoder seed was varied.** The generator is one training run at
+   seed 1234, the caches are one draw, and the word/noise seeds are fixed. The
+   0.207 is decoder-seed variance and nothing else.
+2. **U and the ceiling are still single-seed**, so `U − v3` and `ceiling − U`
+   are a 3-seed mean differenced against two single draws.
+3. **The five corpus-less scripts are still corpus-less.** Replication tightens
+   a generator-relative number; it does not make it a language accuracy figure.
+   §7.6 item 1 is unchanged and unchangeable without target-script corpora.
+4. **v2 was not re-seeded**, so the +5.34 is a 3-seed mean against a single-seed
+   baseline. It is 26 seed-sds wide, which is why nobody should spend a GPU-hour
+   closing that particular hole.
