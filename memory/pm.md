@@ -1753,15 +1753,25 @@ committed BEFORE the first decode of the round.
       mean, ru real-probe seed-mean + pairwise McNemar vs s1234. Update
       `PHASE_Q.md` §7.3/§7.5 and `MODELS_TABLE.md` §4.17 so the seed-mean is the
       quoted tier. Anomaly rule = §8.4 (A1-A4); otherwise s1234 stays the shipped bytes.
-- [ ] **Q-B lambda re-tune.** Grid {1.1,1.5,2.0,2.5,3.0,4.0} on the ru real probe's
+- [x] **Q-B lambda re-tune — DONE, verdict INCONCLUSIVE (`3e6e7e6`).** lambda* = 1.1 is the
+      low grid endpoint and t1 is monotone decreasing across the whole grid (85.65 -> 80.69), so
+      the interior-optimum rule refused adoption; the confirm half was NOT read and stays
+      unspent. `tunedRuCkdt` unchanged, no fixture regeneration, no app-side item. Recorded
+      shortfall: the incumbent 2.0 is off-peak by -0.63 t1 on the tune half. Evidence
+      `ctc/phaseQ_QB_lambda_tune.json`, record `PHASE_Q.md` §9.7. Original text: Grid {1.1,1.5,2.0,2.5,3.0,4.0} on the ru real probe's
       PHASE_J §6.9 tune half (rows 0:4708), interior-optimum rule, confirm on
       4708:9416, adopt iff confirm-half gain >= +0.30 over lambda 2.0. Overrides the
       standing PHASE_P §4.2 refusal by explicit user direction; erosion priced in §9.5.
-- [ ] **Q-B consequences (iff adopted).** Regenerate the ru golden fixture at the new
+- [x] **Q-B consequences — NOT TRIGGERED** (nothing adopted). Original text: Regenerate the ru golden fixture at the new
       preset (fixture-and-preset rule), update artifact hashes, add the app-side
       `CtcScoringParams.tunedRuCkdt` change to `APP_WIRING_CHECKLIST.md`. ru only —
       the five corpus-less scripts keep 2.0 (their probe is generator-relative).
-- [ ] **Q-C guide v3 section.** `ctc/ctc-architecture-and-multiscript-guide.md`:
+- [x] **Q-C guide v3 section — DONE (`959871e`).** Guide §3.3 rewritten around the learned
+      generator with the upper-bound decomposition and the licence seal as a mechanism; §3.3a
+      keeps the v1->v2 material; §4.1/4.2/4.3/4.5/4.7/§5/§7 onto generation 4 with hashes taken
+      off disk. `APP_WIRING_CHECKLIST.md` §2.2 byte table onto v3, the suffix-split retirement
+      called out, the lambda result recorded, and §3 restated as "the app copy is TWO
+      generations stale, and the app repo was not touched from this side". Original text: `ctc/ctc-architecture-and-multiscript-guide.md`:
       concise v3-synthesis section (what the generator is, generation-4 artifact
       names + sha256s, evidence tiers incl. the upper-bound decomposition one-liner,
       the license seal), superseding stale v2/v2full text. Note in
