@@ -1,20 +1,23 @@
 # CTC architecture and the multi-script question — the definitive guide
 
-**Status**: reference. **Written**: 2026-08-18. **Revised**: 2026-08-20 (generator v2 / P6, and
-the app at `d717bda7`).
+**Status**: reference. **Written**: 2026-08-18. **Revised**: 2026-08-20 (**generator v3 /
+generation 4**, the sealed upper bound, and the app at `d717bda7`).
 **App state described**: `d717bda7` — `ctc` is the DEFAULT `swipe_engine_mode`, seven served
 languages, the neural engine deleted, and the 2026-08-20 remediation wave landed.
-**Training-side source of truth**: `CleverKeys-ML` @ `ctc/` — `MODELS_TABLE.md` §4.16,
-`PHASE_O.md`, **`PHASE_P.md` (v2 generator, §6.1 and §8.4 artifact registries)**,
-`PHASE_I_DATA.md` §4–§6, `PHASE_J.md` §6.9, `ALT_LAYOUT_EVAL.md`,
-`YANDEX_LICENSE_RESEARCH.md`, `APP_INTEGRATION_AUDIT.md`.
+**Training-side source of truth**: `CleverKeys-ML` @ `ctc/` — `MODELS_TABLE.md` §4.17,
+**`PHASE_Q.md` (v3 generator, §7.7 artifact registry; §9.7 the λ sweep)**,
+`PHASE_P.md` (v2 generator, §6.1/§8.4), `PHASE_O.md`, `PHASE_I_DATA.md` §4–§6,
+`PHASE_J.md` §6.9, `ALT_LAYOUT_EVAL.md`, `YANDEX_LICENSE_RESEARCH.md`,
+`APP_INTEGRATION_AUDIT.md`.
 
 > **Mirror warning.** This file has an app-repo copy at
 > `docs/specs/ctc-architecture-and-multiscript-guide.md`. The two were byte-identical when written
-> and **have since diverged**: the app copy is still at the pre-Phase-P text — `cyrillic_synth.py`,
-> `weight = 255 − rank`, "real data is worth ~13 points", greedy 37, and the v1 `ru_synth_ch80*`
-> hashes. The sections that must be brought across are enumerated in `APP_WIRING_CHECKLIST.md` §3.
-> Until that lands, **this copy is the authority** and the app copy is one model generation stale.
+> and **have since diverged by two generations**: the app copy is still at the pre-Phase-P text —
+> `cyrillic_synth.py`, `weight = 255 − rank`, "real data is worth ~13 points", greedy 37, and the
+> v1 `ru_synth_ch80*` hashes. It never received the v2/v2full edit and it has not received this
+> v3 one. The sections that must be brought across are enumerated in `APP_WIRING_CHECKLIST.md` §3.
+> Until that lands, **this copy is the authority** and the app copy is **two** model generations
+> stale.
 
 This document exists to kill four recurring confusions permanently:
 
@@ -220,21 +223,27 @@ not zero-shot another script. The geometry is a model input, but the *motor stat
 *implicit character-transition prior the encoder learns* are trained. Do not route a non-Latin
 layout at CTC and hope.
 
-**Cheap.** The residual-transplant synthesis pipeline generalizes to **any** script given only
-(i) a word list and (ii) the layout geometry. No data collection, no corpus licensing, no human
-subjects. Measured cost for Russian: 94 k steps of `resbn:80` — well under an hour of a single
-RTX 5080 — plus a few minutes to export and evaluate.
+**Cheap.** The synthesis pipeline generalizes to **any** script given only (i) a word list and
+(ii) the layout geometry. No data collection, no corpus licensing, no human subjects. Measured
+cost for Russian: 94 k steps of `resbn:80` — well under an hour of a single RTX 5080 — plus a few
+minutes to export and evaluate. Generation 4 adds a one-off generator training (~70 min) and
+~30 min of sampling per million-row cache, both amortized across every script (the generator's
+conditioning is pure geometry, so one MIT-trained generator serves all six).
 
-**Proven, not projected.** `phaseP-ru-v2full` was trained on 1,000,000 rows in which **no real
+**Proven, not projected.** `phaseQ-ru-v3` was trained on 1,000,000 rows in which **no real
 Cyrillic sample appears anywhere** (checkpoint selection ran on a synthetic val split too), and
-it decodes **real** Russian swipes at in-dict top-1 **79.73** with greedy **56.12** (§4.3). Its
-v1 predecessor read 77.41 / 37.07 on the same rows; the +2.31 is paired at p = 2.6e-09. Both are
-above the shipped geometric engine's cross-layout anchors (71–77).
+it decodes **real** Russian swipes at in-dict top-1 **85.07** with greedy **65.66** (§4.3). Its
+v2 predecessor read 79.73 / 56.12 and its v1 predecessor 77.41 / 37.07 on the same rows; the
++5.34 is paired at p = 5.4e-53. All three are above the shipped geometric engine's cross-layout
+anchors (71–77), and 85.07 is within **3.6 points of a model trained on a million real Russian
+swipes** (§3.3).
 
 **And the cheaper option first, because this is where the accuracy actually is.** The shipped
 **English** model, zero-shot on real Russian with nothing but the right layout and the right
-trie, reads **76.32** in-dict top-1 (`PHASE_O.md` §2.1). The purpose-built ru model adds
-**+3.41** on top of that. So of the ~79.7 points available, the app wiring — per-script alphabet,
+trie, reads **76.32** in-dict top-1 (`PHASE_O.md` §2.1). The purpose-built generation-4 ru model
+adds **+8.75** on top of that — generation 2 added only +3.41, so the model asset now carries
+materially more of the total than the "wiring first" staging argument assumed when it was
+written. So of the ~85 points available, the app wiring — per-script alphabet,
 routing, trie, projection — delivers 76.3 of them **before any model ships**, and the model
 delivers the last three. If the work has to be staged, stage the wiring first; a script with the
 wiring and no model is already at the geometric engine's level or above.
@@ -311,39 +320,106 @@ All tools live in `CleverKeys-ML/ctc/`.
 8. **Measure on real data if any exists** — as a held-out *eval-only* probe. Synthesis is the
    training story; real data is how you find out whether the synthesis worked.
 
-### 3.3 What synthesis buys and what it costs
+### 3.3 SYNTH v3 — the generator is a learned model now, not a transplant
 
-The paired arms answer this exactly. Same recipe, same eval, same 9,416 real rows
-(8,471 in-dict; the v2 row is at the app CKDT preset λ 2.0, the two older rows at E1 λ 1.1):
+**Generation 4 (`*_synth_v3_ch80*`) is what to deploy.** Full record `PHASE_Q.md`;
+this is the section that matters if you are wiring bytes rather than training.
+
+**What the generator is.** SYNTH v3 is a **conditional rectified-flow (OT flow-matching)
+model over the residual field** of a swipe: for a target word it builds the ideal
+arc-uniform polyline `R` on that script's layout, and learns the conditional density of
+`x₁ = (P − R)/σ` — everything the trace *is* beyond its ideal geometry: dwell, overshoot,
+corner-cutting, jitter, tempo shape, the 60 Hz acquisition signature. 1.94 M params, a
+1-D dilated residual conv net over the 64-sample axis with FiLM-injected time embedding,
+32 Euler steps at sampling. Conditioning is **pure geometry** (polyline, tangent, arc
+position, vertex distance, turn angle, length), so cross-script transfer is by
+construction — the same property the v2 warp had, without the donors.
+
+Three consequences that matter downstream:
+
+* **there are no donors at generation time.** v2's whole scaffolding — donor draw, warp,
+  re-timing, bandwidth — is gone; a conditional density *given* geometry has nothing to
+  re-time. What survives from v2 is the draw policy (`script_synth.token_mass`, the
+  wordfreq draw), the npz schema and the split seeds, so every downstream driver consumes
+  v3 caches unchanged;
+* **one repair round was spent and is on the record** (`PHASE_Q.md` §7.1a): a continuous
+  flow emits exact zero-length steps with probability zero, and real featurized traces are
+  full of them (a stationary finger emits identical samples). The fix is an **acquisition
+  imprint** at sampling time — a duration drawn from the generator's own corpus' law,
+  re-featurized through the real 60 Hz chain, then a dwell snap with ε fit so generated
+  `dup_frac` matches the training bank's own. No target-script statistic enters it;
+* **throughput regressed**, 1,141 CPU rows/s (v2) → 541 GPU rows/s (v3, 32 NFE). Offline
+  only, ~30 min per million-row cache.
+
+**What it bought, on the only real probe that exists.** Same 8,471 in-dict Yandex rows,
+CKDT preset, per-row paired:
 
 | arm | training data | in-dict t1 | greedy |
 |---|---|---|---|
-| `phaseIB-ru-real` | 1 M **real** Yandex rows | 89.64 | 75.23 |
-| `phaseIB-ru-synth` — generator **v1** | 1 M synthetic rows, zero real | 76.21 (77.42 at λ 2.0) | 37.07 |
-| **`phaseP-ru-v2full`** — generator **v2** | 1 M synthetic rows, zero real | **79.73** | **56.12** |
+| `phaseIB-ru-real` re-decoded at this preset | 1 M **real** Yandex rows (unshippable) | 88.69 | 75.23 |
+| **`phaseQ-ru-v3`** — generator **v3** | 1 M synthetic rows, zero real | **85.07** | **65.66** |
+| `phaseP-ru-v2full` — generator **v2** | 1 M synthetic rows, zero real | 79.73 | 56.12 |
+| `phaseIB-ru-synth` — generator **v1** | 1 M synthetic rows, zero real | 77.42 | 37.07 |
 
-Two readings, and the second is the one that changed.
+v3 vs v2 is **+5.34 real top-1** (exact McNemar p = 5.4e-53) and **+9.54 greedy**, five
+times the pre-registered +1.0 ship bar, with both length strata significant (≤3 +3.38,
+≥4 +6.57) — and the ≤3 stratum clears the 86.4 corollary v2 itself missed.
 
-**Real data is still worth ~10 top-1 points**, down from ~13. That gap is the honest price of
-having no corpus, and `DATASET_SCOUT.md` §4.4 argues causing collection is the only clean route
-to closing it.
+**The one-line decomposition, and why it inverts the Phase-P ledger.** A sealed research
+twin — the same architecture trained on 1 M *real* Russian swipes, permanently unshippable
+(§0 below) — puts the upper bound at **U = 85.95**:
 
-**But half of what looked like "the price of synthesis" was generator error.** v2 is +2.31 real
-top-1 over v1 (paired McNemar p = 2.6e-09) and **+19.05 real greedy** — the encoder's own
-emissions, with no real Cyrillic row in training. v1's greedy of 37 was read as "English-magnitude
-start noise on a denser board"; it was mostly a speed profile that made synthetic traces 90 %
-separable from real ones. Consequences for anyone launching a script:
+> Of the 8.96-point v2→ceiling gap: the **English-trained** learned generator closes
+> **5.34** (86 % of the 6.22 that any generator of this family could reach), in-domain
+> target-script data would add only **0.89** (and **0.31, p = 0.47** on ≥4-letter words —
+> indistinguishable), and **generation itself still costs 2.74**.
 
-* a v2-trained model still leans on its trie, but far less — budget the lexicon accordingly,
-  and note that **λ = 2.0 was tuned against a weak-emission model** and probably wants revisiting
-  once a second real corpus exists to tune it on;
-* the gain lands on **long words** (≥4 letters: +4.22, p = 3.6e-17). Short words were already
-  carried by the lexicon prior and moved −0.70 (n.s.);
-* an English-donor transplant **cannot** be made statistically indistinguishable from real
-  target-script swipes. The English→English control — same generator, same script, disjoint
-  halves of one corpus — closes 84 % of the gap to a measured 0.50 floor, while the Russian arm
-  closes 36 %. The difference is the donor bank's population, and the only lever on it is
-  target-script motor data.
+Phase P priced the donor **population** as the dominant unreachable residual; that was
+true *for a transplant*, and a conditional density fixes most of it from English data
+alone. **Real data is now worth ~3.6 top-1 points, not ~10 and not ~13** — and the binding
+constraint on synthetic-data quality is generator fidelity, not data domain. Anyone
+budgeting "collect target-script swipes" should price it against 0.89, not against the old
+10-point gap.
+
+**The licence seal — non-negotiable, and the reason the number above is quotable at all.**
+The twin generator, its samples, its decoder, its onnx and its dumps are Yandex-derived.
+They carry a `RESEARCH_ONLY` suffix, live under `~/ctc-train/research_only/`, are untracked,
+and never enter `ctc/artifacts/`, the registry, `exports/`, an app asset or a donor bank;
+`synth_v3.py` enforces the path prefix mechanically when the corpus is flagged
+`--research-yandex` and stamps the licence into every provenance blob. `YANDEX_LICENSE_RESEARCH.md`
+§8.1 draws the line at the training-pipeline boundary: the ст. 1335.1 научные limb covers
+local research training for **measurement**, and covers nothing that ships, because every
+available permission theory is non-commercial and GPL-3.0 is not. **Nothing in
+`ctc/artifacts/` derives from Yandex**, and there is no laundering path — a shipping v3
+retrains from MIT data.
+
+**Evidence tiers, unchanged in kind by v3.** ru is real-validated (Yandex eval-only,
+val-tier permanently — no Cyrillic test split exists or can); the other five remain
+**synthesis-holdout-only, calibrated against ru rather than measured on their own script**.
+What v3 changed there is the *margin* against the fixed English zero-shot controls on the
+same rows, which **widened** on every script (el +6.11 → +7.01, uk +5.09 → +13.02,
+bg +5.47 → +10.05, mk +5.23 → +5.00, he +7.92 → +16.05): the v3 distribution is
+simultaneously easier for its own model and harder for an English zero-shot, which is the
+direction ru's real probe independently verified. Levels are generator-relative and are
+still not accuracy figures for those languages.
+
+**λ was swept and is unchanged** (`PHASE_Q.md` §9.7): on the ru probe's tune half, in-dict
+t1 is **monotone decreasing** in λ across {1.1 … 4.0}, so the optimum is off-grid *below*
+E1's 1.1 and the pre-registered interior-optimum rule refused adoption. `tunedRuCkdt` stays
+at λ = 2.0, and its **measured, unconfirmed shortfall is −0.63 t1** on that half. The
+mechanism is the one Phase P predicted in words: λ = 2.0 was fitted to a greedy-37 model
+whose beam did the work, and a greedy-66 model wants the lexicon prior turned down.
+
+#### 3.3a What generation 1→2 established, kept because the numbers are still cited
+
+v2 (residual transplant from English donors) was +2.31 real top-1 over v1 (p = 2.6e-09) and
++19.05 real greedy. v1's greedy of 37 was read as "English-magnitude start noise on a denser
+board"; it was mostly a speed profile that made synthetic traces 90 % separable from real
+ones. The gain landed on long words (≥4: +4.22, p = 3.6e-17). The English→English control —
+same generator, same script, disjoint halves of one corpus — closed 84 % of the gap to a
+measured 0.50 floor while the Russian arm closed 36 %, which is what priced the donor
+population as a transplant's unreachable term. **All of that stands as measured; §3.3 is why
+it is no longer the binding term.**
 
 ---
 
@@ -353,10 +429,12 @@ separable from real ones. Consequences for anyone launching a script:
 
 | model | in-dict t1 | status |
 |---|---|---|
-| `phaseIB-ru-real` (1 M real Yandex rows) | 89.64 | **LICENSE-BLOCKED FOREVER.** Not shippable in any form, at any time. |
+| `phaseIB-ru-real` (1 M real Yandex rows) | 89.64 (88.69 re-decoded at the CKDT preset) | **LICENSE-BLOCKED FOREVER.** Not shippable in any form, at any time. The ceiling, quotable only as a ceiling. |
+| `phaseQ-ru-yxgen_RESEARCH_ONLY` (v3 twin trained on 1 M real Yandex rows) | 85.95 | **SEALED, PERMANENTLY UNSHIPPABLE.** Not an artifact — a *measurement*: the upper bound U on what any generator of this family could reach with in-domain data (§3.3). Untracked, `RESEARCH_ONLY`-marked, never in `ctc/artifacts/`. |
 | `phaseJ-joint` (single en+ru model) | 78.23 confirm-half @ λ 2.0 | **REJECTED.** Its data is license-clean, but it cost **−0.42 en top-1** against a 0.3 tolerance and was not adopted. Its ru lead over the bar-holder is +0.31 on the confirm half — inside one binomial SE (±0.64 at n = 4,240) — and it *loses* t3 and t5 on that same half. |
-| `phaseIB-ru-synth` = `ru_synth_ch80` (generator v1) | 77.41 full-set / 77.92 confirm-half @ λ 2.0 | **SUPERSEDED.** Shippable, but beaten by its own successor at matched everything. |
-| **`phaseP-ru-v2full`** = **`ru_synth_v2_ch80`** (generator v2, full donor pool) | **79.73** full-set @ λ 2.0, greedy 56.12 | **THE SHIPPABLE ONE.** Trained purely on residual-transplant synthesis; zero Yandex rows anywhere in its pipeline. G5 PASS against a pre-registered ≥ 79.41 floor. |
+| `phaseIB-ru-synth` = `ru_synth_ch80` (generator v1) | 77.41 full-set / 77.92 confirm-half @ λ 2.0 | **SUPERSEDED.** |
+| `phaseP-ru-v2full` = `ru_synth_v2_ch80` (generator v2, full donor pool) | 79.73 full-set @ λ 2.0, greedy 56.12 | **SUPERSEDED** by generation 4 at matched everything — same recipe, same seed, same rows, only the training distribution differs. |
+| **`phaseQ-ru-v3`** = **`ru_synth_v3_ch80`** (generator **v3**, learned) | **85.07** full-set @ λ 2.0, greedy **65.66** | **THE SHIPPABLE ONE.** Trained purely on the learned MIT-data generator; zero Yandex rows anywhere in its pipeline. G5-Q PASS against a pre-registered ≥ 80.73 bar, cleared five times over (+5.34, p = 5.4e-53). |
 | the shipped **English** model, zero-shot on ru | 76.32 | not a Russian model at all — the baseline the wiring alone reaches (§3.1). |
 
 **The licensing line, stated exactly** (`YANDEX_LICENSE_RESEARCH.md`, 941 lines of it): the
@@ -371,47 +449,59 @@ footing. `ru-real` is a research artifact and stays one.
 
 ### 4.2 The artifacts
 
-Committed in `CleverKeys-ML/ctc/artifacts/`. **Generation 2 supersedes generation 1 for
-deployment** (`PHASE_P.md` §6.1); the v1 bytes stay because every pre-Phase-P number was
-measured on them.
+Committed in `CleverKeys-ML/ctc/artifacts/`. **Generation 4 (`*_synth_v3_ch80*`) supersedes
+every earlier generation for deployment on all six scripts** (`PHASE_Q.md` §7.7); the older
+bytes stay because every published number was measured on them.
+
+Generation 4 — **what to wire**, all six scripts:
 
 | file | bytes | sha256 |
 |---|---|---|
-| **`ru_synth_v2_ch80.onnx`** (fp32, **generator v2**) | 1,142,727 | `763190f9bc9854a3183f10d7dba7d8e1de1c101812b5958ee9bdbb403b93089b` |
-| **`ru_synth_v2_ch80_fp16w.onnx`** (**ship bytes**) | 589,406 | `9004befb6ff07b744c65d3c13481539e758ebe10d4f47cbeffe68d39d12b0e52` |
-| **`ru_synth_v2_ch80_fp16w_golden.json`** (fixture) | 160,282 | `a5ed2b9f62843d085779f5ab7457e6608f5c47e8994c224146ebdaf32fcdb82d` |
-| `ru_synth_ch80.onnx` (fp32, generator v1 — superseded) | 1,142,727 | `d78a9fb9f8e170595a7714220cf5fd9dfc2324935900aec6cb6d7a2ec1a36666` |
-| `ru_synth_ch80_fp16w.onnx` (v1 — superseded) | 589,406 | `84ac284d4f0d0cb86061df9c557507e1489ab93a75b40885a4431976cee32469` |
-| `ru_synth_ch80_fp16w_golden.json` (v1 fixture — superseded) | 160,876 | `041c20722a957d1341108eb969dc677a123363011094ad05b36fdc1baa1050b0` |
+| **`ru_synth_v3_ch80.onnx`** (fp32) | 1,142,727 | `b4ad3aab1a7d15dc94c6e69a459991f76e95e2828a12abe1594a377c80e52ac0` |
+| **`ru_synth_v3_ch80_fp16w.onnx`** (**ship bytes**) | 589,406 | `8fffa75c722eb61e9e8c80d919fbca3e73eb698ebe3e3909cb766b3b8489962c` |
+| **`ru_synth_v3_ch80_fp16w_golden.json`** (fixture) | 160,384 | `2e8de3c5a15e5874366f44f725aeec2eb72befd89b503d4b24b8b4a8d82fdde5` |
+| `el_synth_v3_ch80.onnx` / `_fp16w.onnx` / `_fp16w_golden.json` | 1,142,727 / 589,406 / 144,427 | `abc86626d34c287beee2ac1b1a67795763a01a15407d6a7e2dae3522ac4bb2c8` / `7083794c501566f411b1f81495ba1f7f3df273c3eb58f6ee635caf168a4f8c3d` / `d08d5501961e971db2ca120f6ee868b7b67ed37e34b6412dddbc7f7116de5753` |
+| `uk_synth_v3_ch80.onnx` / `_fp16w.onnx` / `_fp16w_golden.json` | 1,142,727 / 589,406 / 155,068 | `7fe52e7dd3f76c03fa92bfb575ad6fa3948ed58af22d21ca6c6823c106d7bb82` / `af9959a8954961eec117808371937cb26152c82a82cad0fc6a0ac06fd695db76` / `93602db1200a3b37ef11570d4f4ee3afdad2a45b0ca4f857a784728cdbb5cc98` |
+| `bg_synth_v3_ch80.onnx` / `_fp16w.onnx` / `_fp16w_golden.json` | 1,142,727 / 589,406 / 154,835 | `c41e9ed8e7a014e85f95705eff7ddef494b3cd4be5d5633e4dfc5078e0849bb3` / `119d42f70cc763336f9a86efdc5ae4f562ba4a28179c2d386026bef674c039a7` / `f776ea03ab675ff6b741a3297c4f88b11f7af2cb183ce7b2604f082ed8420b9d` |
+| `mk_synth_v3_ch80.onnx` / `_fp16w.onnx` / `_fp16w_golden.json` | 1,142,727 / 589,406 / 160,674 | `812909e9ee9fb1b9b8a2bb39a668594528c071a4e50b840c4f02b28a2e4560f1` / `4e371d967bf24f260eb539848ead7860f56dc904f6bfc74235879b76e81ae022` / `015c9bae7e25a97b0ac8bd6062bb58376caaa3aca99c138d0d531ff1887e0ccf` |
+| `he_synth_v3_ch80.onnx` / `_fp16w.onnx` / `_fp16w_golden.json` | 1,142,727 / 589,406 / 140,129 | `e79357b95cd0f6707970f46c85bdabcc0d0fbd43c104e03e71965b7716b65c7a` / `a382371363653fbe7c806482035aa9e27968b9c098591910d24f9f1ba43212c7` / `b29a99f4ac2c4f82547d040131ea48771f2791817287de6e3f9ec52fc9758ad9` |
 
-The v2 source checkpoint is `~/ctc-train/ckpt/phaseP-ru-v2full/best.pt` — same architecture,
-same 94 k schedule, same seed, **different training distribution**. The app-side contract is
-unchanged: same alphabet string, same slot order, same preset, same fixture shape, so swapping
-generations is a model-and-fixture swap and nothing else. The five other scripts have the same
-pair of generations (`{el,uk,bg,mk,he}_synth_v2_ch80*`); hashes in `PHASE_P.md` §6.1.
-Those five then gained a **third** generation in P6 — `*_synth_v2full_ch80*`, the same
-generator on the full donor pool, which is what should be wired if any of them is —
-hashes in `PHASE_P.md` §8.4. ru has no third generation: `ru_synth_v2_ch80` is already
-the full-pool arm.
+Superseded ru generations, kept for the numbers measured on them:
 
+| file | bytes | sha256 |
+|---|---|---|
+| `ru_synth_v2_ch80.onnx` (fp32, generator v2) | 1,142,727 | `763190f9bc9854a3183f10d7dba7d8e1de1c101812b5958ee9bdbb403b93089b` |
+| `ru_synth_v3_ch80_fp16w.onnx` | 589,406 | `9004befb6ff07b744c65d3c13481539e758ebe10d4f47cbeffe68d39d12b0e52` |
+| `ru_synth_v2_ch80_fp16w_golden.json` | 160,282 | `a5ed2b9f62843d085779f5ab7457e6608f5c47e8994c224146ebdaf32fcdb82d` |
+| `ru_synth_ch80.onnx` (fp32, generator v1) | 1,142,727 | `d78a9fb9f8e170595a7714220cf5fd9dfc2324935900aec6cb6d7a2ec1a36666` |
+| `ru_synth_ch80_fp16w.onnx` | 589,406 | `84ac284d4f0d0cb86061df9c557507e1489ab93a75b40885a4431976cee32469` |
+| `ru_synth_ch80_fp16w_golden.json` | 160,876 | `041c20722a957d1341108eb969dc677a123363011094ad05b36fdc1baa1050b0` |
 
-Architecture, identical across both generations: `resbn:80`, dil `1,2,4,8`, embed_hid 96,
+The v3 source checkpoint is `~/ctc-train/ckpt/phaseQ-ru-v3/best.pt`. **The app-side contract is
+unchanged across all four generations**: same alphabet string, same slot order, same preset, same
+fixture shape, same 1,142,727 / 589,406 byte graphs — v3 changes the *training distribution*, not
+the contract, so swapping generations is a model-and-fixture swap and nothing else. The five
+other scripts now have four generations each (`*_synth_ch80*` v1 → `*_synth_v2_ch80*` →
+`*_synth_v2full_ch80*` → `*_synth_v3_ch80*`); ru has three, because it was always full-pool.
+
+Architecture, identical across every generation: `resbn:80`, dil `1,2,4,8`, embed_hid 96,
 feat_v1, `t_out` 32, 279,346 params, 94,000-step schedule, batch 256, lr 3e-3, wd 0.01,
 warmup 1,000, coupled affine sampler, no layout-alt, greedy checkpoint selection, seed 1234.
 The v1 fp32 re-export was **byte-identical** to the artifact its 2026-08-09 training run
 produced — a free determinism check on the whole export path.
 
-Export gates for the **v2 ship bytes**, all passed (`PHASE_P.md` §5):
+Export gates for the **generation-4 bytes**, all passed (`PHASE_Q.md` §7.7):
 
-- BN fold: max |Δlog_emissions| **1.20e-04** on the sliced contract view (tolerance 5e-3);
-- fp32 export parity vs torch, real traces on `ru_jcuken_default`: sliced **9.92e-05**, argmax
-  **100/100** (tolerance 1e-3, and argmax is the binding gate);
-- fp16w vs fp32, real traces: sliced **1.06e-01**, argmax **93/100**. This residue is large —
-  larger than the ch192 ship model's 2.30e-02 — and it is **disclosed, not hidden**: the binding
-  check is the decode, and the decode costs **+0.02 t1** (79.73 → 79.75).
+- every fp32 export cleared at the **default 1e-3** tolerance with **100/100 argmax** on the
+  sliced contract view; ru read **7.63e-05**, and he's 3.57e-04 sits inside the historical
+  envelope — **the v2-era he parity flag does not recur in this generation**;
+- fp16w decode cost is **≤ 0.01 t1 on every script** (ru 85.07 → 85.08). The large sliced
+  emission residue that generation 2 disclosed is a property of fp16 weight rounding, not of a
+  generation; the binding check is and remains the decode.
 
-(The v1 numbers, for anyone reading a pre-Phase-P document: BN fold 1.60e-04, fp32 sliced
-1.14e-04 argmax 100/100, fp16w sliced 1.16e-01 argmax 98/100.)
+(The v2 numbers, for anyone reading a Phase-P document: BN fold 1.20e-04, fp32 sliced 9.92e-05
+argmax 100/100, fp16w sliced 1.06e-01 argmax 93/100, decode cost +0.02. The v1 numbers: BN fold
+1.60e-04, fp32 sliced 1.14e-04 argmax 100/100, fp16w sliced 1.16e-01 argmax 98/100.)
 
 ### 4.3 Validation of the exported artifact
 
@@ -420,38 +510,40 @@ CKDT v2 50 k trie), preset `1.05, 2.0, 0.2, 0.3734, 0.9882` = the app's
 `CtcScoringParams.tunedRuCkdt` verbatim, beam 100. Probe = the untouched Yandex valid-10k, all
 9,416 default-grid rows, 8,471 in-dict, **eval-only footing**.
 
-The generation-2 gate (`PHASE_P.md` §4, G5 — the only gate that decided shipping):
+The generation-4 gate (`PHASE_Q.md` §7.3, G5-Q — the only gate that decided shipping), with
+every earlier generation on the identical rows:
 
 | arm | training cache | in-dict t1 | ≤3 | ≥4 | greedy | t3 | t5 |
 |---|---|---|---|---|---|---|---|
 | `ru_synth_ch80` — the v1 baseline | v1, full donor pool | 77.42 | 86.47 | 71.70 | 37.07 | 89.06 | 91.76 |
-| `phaseP-ru-v1ctl` — paired v1 control | v1, 90/10 train side | 75.73 | 83.66 | 70.71 | 31.34 | 88.44 | 90.93 |
-| `phaseP-ru-v2` | v2, 90/10 train side | 78.87 | 83.60 | 75.88 | 55.67 | 90.73 | 93.13 |
-| **`phaseP-ru-v2full` = `ru_synth_v2_ch80` — SHIP** | **v2, full donor pool** | **79.73** | 85.77 | **75.92** | **56.12** | **90.77** | **93.26** |
+| `phaseP-ru-v2full` = `ru_synth_v2_ch80` | v2, full donor pool | 79.73 | 85.77 | 75.92 | 56.12 | 90.77 | 93.26 |
+| **`phaseQ-ru-v3` = `ru_synth_v3_ch80` — SHIP** | **v3 learned**, `cache_ru_v3` | **85.07** | **89.15** | **82.49** | **65.66** | **93.35** | **95.16** |
+| *`phaseQ-ru-yxgen_RESEARCH_ONLY`* — the sealed twin | *v3 trained on 1 M real Yandex rows* | *85.95* | *90.95* | *82.79* | *69.72* | *93.74* | *95.37* |
+| *`phaseIB-ru-real`* re-decoded at this preset | *1 M real Yandex rows* | *88.69* | *93.90* | *85.39* | *75.23* | *95.28* | *96.82* |
 
 | paired comparison (exact McNemar, n = 8,471) | Δ t1 | p |
 |---|---|---|
-| **v2 full pool vs the v1 baseline** | **+2.31** | **2.6e-09** |
-| v2 vs v1 at matched donor footing | +3.14 | 6.4e-14 |
-| the cost of the 90/10 donor split, v1 arm | −1.69 | 5.2e-07 |
-| v2 full pool vs v2 train side | +0.86 | 0.0023 |
+| **v3 vs v2full** | **+5.34** | **5.4e-53** |
+| v3 vs v2full, greedy | +9.54 | 1.4e-100 |
+| v3 vs v2full, ≤3 stratum | +3.38 | 1.5e-11 |
+| v3 vs v2full, ≥4 stratum | +6.57 | 8.8e-44 |
+| U (sealed twin) vs v3 — *the whole in-domain-data premium* | *+0.89* | *0.0025* |
+| U vs v3 on ≥4-letter words | *+0.31* | *0.47 — indistinguishable* |
+| ceiling vs U — *what generation itself costs* | *+2.74* | *5.6e-23* |
 
-**G5 PASS** — 79.73 against a pre-registered floor of 79.41. Two honest qualifications carried
-from `PHASE_P.md` §4.2: the ≥4-letter stratum gained **+4.22** (p = 3.6e-17, and 61 % of real
-usage lives there), while the ≤3 stratum **missed its registered corollary** at 85.77 against
-86.4 — indistinguishable from zero (p = 0.27), entirely carried by the donor-side term rather
-than by v2, and in the stratum where the lexicon prior rather than the encoder does the work.
-Re-tuning λ to recover it was **refused**: λ is already one validator-fit parameter and the
-Yandex probe is the only real one that exists.
+**G5-Q PASS** — 85.07 against a pre-registered bar of 80.73, cleared five times over. The ≤3
+corollary v2 **missed** (85.77 against 86.4) is now **cleared at 89.15**. Two qualifications
+carried from `PHASE_Q.md` §7.2/§7.6 and not rounded away: the generator battery **missed 2 of
+13 instruments** — step_cv 0.165 against a 0.15 bar and MLP-speed 0.7640 against v2's 0.7412 —
+both on the *same* axis, the speed-marginal texture of a model whose tempo is English, and the
+§2 proceed-rule deviation that miss triggered is disclosed rather than laundered. And the
+UCL₉₅ ≤ 0.60 separability target is **still not met**: v3 is distinguishable from real Russian.
 
-**Export gates** for the v2 bytes: BN fold 1.20e-04 (sliced), fp32-vs-torch 9.92e-05 with argmax
-**100/100** on real traces, fp16w-vs-fp32 1.06e-01 with argmax 93/100 — and the decode cost of
-fp16w is **+0.02 t1** (79.73 → 79.75). The large fp16w emission residue is disclosed rather than
-hidden, exactly as in generation 1; the binding gate is the decode and the decode is free.
+**Export gates** for the v3 bytes: fp32-vs-torch **7.63e-05** with argmax **100/100** on real
+traces at the default 1e-3 tolerance, and the fp16w decode costs **+0.01 t1** (85.07 → 85.08).
 
-The v1 numbers, for anyone reading a pre-Phase-P document: fp16w full set **77.41** / 89.07 /
-91.76, confirm half 77.92, tune half 76.88. Those are the bytes every number published before
-2026-08-19 was measured on.
+Earlier generations, for anyone reading an older document: v2 fp16w full set 79.75; v1 fp16w
+full set **77.41** / 89.07 / 91.76, confirm half 77.92, tune half 76.88.
 
 ### 4.4 The preset, the trie and the layout
 
@@ -496,11 +588,13 @@ Unpacked:
   (test-2400, ledger reads) has **no Cyrillic counterpart** and never will. Russian numbers can
   never be called "test-validated".
 - **single seed** (1234). Every other campaign bar is a seed-mean bar; this is not one.
-- **no per-language preset sweep beyond λ**, and λ itself is now suspect in a new way: it was
-  tuned in `PHASE_J.md` §6.9 against a *weak-emission* model (greedy 37). The v2 model reads
-  greedy 56 and leans on the prior far less, so λ = 2.0 is probably no longer the right balance.
-  Registered open, deliberately not re-tuned (`PHASE_P.md` §4.2). γ, β and the prune constants
-  are E1's, carried.
+- **no per-language preset sweep beyond λ**, and **λ = 2.0 is now measured to be off-peak**.
+  It was tuned in `PHASE_J.md` §6.9 against a *weak-emission* model (greedy 37); the generation-4
+  model reads greedy 66 and leans on the prior far less. `PHASE_Q.md` §9.7 swept
+  {1.1, 1.5, 2.0, 2.5, 3.0, 4.0} on the probe's tune half and found t1 **monotone decreasing** —
+  the optimum is off-grid *below* 1.1, so the pre-registered interior-optimum rule refused
+  adoption and the confirm half was not spent. The shipped constant is unchanged and carries a
+  **measured, unconfirmed −0.63 t1 shortfall**. γ, β and the prune constants are E1's, carried.
 - **the eval corpus is Yandex.** Permitted (research/held-out eval), but it means the *only*
   real-Russian evidence for this model comes from a source whose data can never enter training
   or the APK.
@@ -529,18 +623,18 @@ favourable — expectation is not measurement.
 
 ### 4.7 The other five scripts — the per-script wiring table, refreshed
 
-Supersedes `PHASE_O.md` §3.2/§3.5, which named the generation-1 artifacts. **Wire
-`*_synth_v2full_ch80_fp16w*` for the five, and `ru_synth_v2_ch80_fp16w*` for Russian** — see §5
-for the hashes and §4.2 for why ru has no `v2full`.
+Supersedes `PHASE_O.md` §3.2/§3.5 (generation 1) and this section's own Phase-P revision
+(generation 2/3). **Wire `*_synth_v3_ch80_fp16w*` — generation 4 — for all six scripts**; hashes
+in §4.2, derivation in `PHASE_Q.md` §7.7.
 
 | script | layout XML (`src/main/layouts/`) | K | alphabet / slot order (codepoint-sorted — **this IS the app's array**) | ship bytes | lexicon | preset |
 |---|---|---|---|---|---|---|
-| **ru** | `cyrl_jcuken_ru.xml` | 31 | `абвгдежзийклмнопрстуфхцчшщыьэюя` | `ru_synth_v2_ch80_fp16w.onnx` | `langpack-ru.zip` — exists, importable today | `tunedRuCkdt` |
-| **el** | `grek_qwerty.xml` (now correctly `script="greek"`) | 25 | `αβγδεζηθικλμνξοπρςστυφχψω` | `el_synth_v2full_ch80_fp16w.onnx` | `langpack-el.zip` — exists, **needs the full el projection**, not just the ς repair (§7 item 9) | same numbers as `tunedRuCkdt` |
-| **uk** | `cyrl_jcuken_uk.xml` | 31 | `абвгдежзийклмнопрстуфхцчшщьюяєі` | `uk_synth_v2full_ch80_fp16w.onnx` | **must be built** (`build_wordlist.py --lang uk`) | same |
-| **bg** | `cyrl_ueishsht.xml` | 30 | `абвгдежзийклмнопрстуфхцчшщъьюя` | `bg_synth_v2full_ch80_fp16w.onnx` | **must be built** | same |
-| **mk** | `cyrl_lynyertdz_mk.xml` | 31 | `абвгдежзиклмнопрстуфхцчшѓѕјљњќџ` | `mk_synth_v2full_ch80_fp16w.onnx` | **must be built** | same |
-| **he** | `hebr_1_il.xml` | 27 | `אבגדהוזחטיךכלםמןנסעףפץצקרשת` | `he_synth_v2full_ch80_fp16w.onnx` | **must be built**, and `build_wordlist._is_script_word` needs a new `hebrew` branch (0x0590–0x05FF) | same |
+| **ru** | `cyrl_jcuken_ru.xml` | 31 | `абвгдежзийклмнопрстуфхцчшщыьэюя` | `ru_synth_v3_ch80_fp16w.onnx` | `langpack-ru.zip` — exists, importable today | `tunedRuCkdt` |
+| **el** | `grek_qwerty.xml` (now correctly `script="greek"`) | 25 | `αβγδεζηθικλμνξοπρςστυφχψω` | `el_synth_v3_ch80_fp16w.onnx` | `langpack-el.zip` — exists, **needs the full el projection**, not just the ς repair (§7 item 9) | same numbers as `tunedRuCkdt` |
+| **uk** | `cyrl_jcuken_uk.xml` | 31 | `абвгдежзийклмнопрстуфхцчшщьюяєі` | `uk_synth_v3_ch80_fp16w.onnx` | **must be built** (`build_wordlist.py --lang uk`) | same |
+| **bg** | `cyrl_ueishsht.xml` | 30 | `абвгдежзийклмнопрстуфхцчшщъьюя` | `bg_synth_v3_ch80_fp16w.onnx` | **must be built** | same |
+| **mk** | `cyrl_lynyertdz_mk.xml` | 31 | `абвгдежзиклмнопрстуфхцчшѓѕјљњќџ` | `mk_synth_v3_ch80_fp16w.onnx` | **must be built** | same |
+| **he** | `hebr_1_il.xml` | 27 | `אבגדהוזחטיךכלםמןנסעףפץצקרשת` | `he_synth_v3_ch80_fp16w.onnx` | **must be built**, and `build_wordlist._is_script_word` needs a new `hebrew` branch (0x0590–0x05FF) | same |
 
 **Preset: there is no per-script preset.** All six use γ 1.05 / **λ 2.0** / β 0.2 / γp 0.3734 /
 βp 0.9882. λ = 2.0 is a **frequency-scale** constant (`LAMBDA_CKDT_SCALE`), not a Russian one —
@@ -568,20 +662,26 @@ through `PHASE_P.md` §5.1 and §8.6):
 > synthesis-holdout-only, single-seed, and calibrated against Russian rather than measured on
 > their own script.**
 
-Their v2full holdout numbers — el 90.78, uk 87.67, bg 82.52, mk 88.68, he 76.86 — are **not
-accuracy figures for those languages**. A v2 holdout is generated by v2, and Phase O proved this
-class of probe inverts model comparisons on capacity and on λ; Phase P §8 makes it three, adding
-donor footing. What the holdouts establish is a *margin against a fixed control* (every script
-beats the 3×-capacity English zero-shot by +5.1 … +7.9, where on the v1 holdouts every script
-**lost**), and that a change measured as +0.86 real points on ru costs nothing on their own
-distribution. Never quote the levels as if they were ru's 79.73.
+Their generation-4 holdout numbers — el 92.12, uk 88.96, bg 86.76, mk 91.55, he 80.69 — are
+**not accuracy figures for those languages**, and the point is sharper for v3 than it was for
+v2: a v3 holdout is generated by v3, from the same weights, with only fresh noise and a fresh
+word draw — there is not even a donor split left to be disjoint in. Phase O proved this class of
+probe inverts model comparisons on capacity and on λ; Phase P §8 made it three, adding donor
+footing. What the holdouts establish is a *margin against a fixed control*, and those margins
+**widened** in generation 4 — el +7.01, uk +13.02, bg +10.05, mk +5.00, he +16.05 against the
+3×-capacity English zero-shot, from P6's +5.1 … +7.9, where on the v1 holdouts every script
+**lost**. The v3 distribution is simultaneously easier for its own model and harder for an
+English zero-shot: the texture moved toward the target scripts, which is the direction ru's real
+probe independently verified at +5.34. Permuted-geometry falsification still collapses every
+script to ~0.00. **Never quote the levels as if they were ru's 85.07.**
 
-**he carries a history flag that does not apply to its ship bytes.** The generation-2
-`he_synth_v2_ch80` fp32 export needed `--parity-tol 2e-3` (sliced residue 1.16e-03 against a
-historical 0.8e-4…7.6e-4 envelope, argmax 100/100 on both probes) and is **flagged in the
-registry**. The generation-3 `he_synth_v2full_ch80` export needed **no relaxation** — 4.04e-04
-at the default 1e-3, argmax 100/100, and 100/100 on the fp16w probe too. The flag stays on the
-P4 bytes because that exceedance was real; it does **not** carry to the bytes you would wire.
+**he's history flag does not apply to its ship bytes, and generation 4 did not revive it.** The
+generation-2 `he_synth_v2_ch80` fp32 export needed `--parity-tol 2e-3` (sliced residue 1.16e-03
+against a historical 0.8e-4…7.6e-4 envelope, argmax 100/100 on both probes) and is **flagged in
+the registry**. Generation 3 (`he_synth_v2full_ch80`) needed no relaxation at 4.04e-04, and
+**generation 4 (`he_synth_v3_ch80`) cleared at 3.57e-04 with argmax 100/100** — inside the
+historical envelope, no flag. The flag stays on the P4 bytes because that exceedance was real;
+it does **not** carry to the bytes you would wire.
 
 ---
 
@@ -592,35 +692,39 @@ P4 bytes because that exceedance was real; it does **not** carry to the bytes yo
 | artifact | ships? | bytes | sha256 | serves | tier |
 |---|---|---|---|---|---|
 | `src/main/assets/models/ctc_swipe_encoder.onnx` = `ctc/artifacts/phaseM_kd_fresh_w1_s1234_fp16w.onnx` | **YES — the only one** | 3,052,318 | `84718e6ebc8020176f27b9668e50922a765c96838307b640a8db9ab0549e88e5` | en + fr/de/es/it/pt/sv on any a–z-complete Latin layout | **test-validated**, both footings, every seed |
-| `ctc/artifacts/ru_synth_v2_ch80_fp16w.onnx` | no — **the ru ship candidate**, not wired | 589,406 | `9004befb6ff07b744c65d3c13481539e758ebe10d4f47cbeffe68d39d12b0e52` | Russian ЙЦУКЕН (31-letter default grid) | **val-only**, single seed, generator-v2 synth-trained, Yandex-eval-only |
-| `ctc/artifacts/{el,uk,bg,mk,he}_synth_v2full_ch80_fp16w.onnx` | no — **the five ship candidates**, not wired | 589,406 each | §4.7 / `PHASE_P.md` §8.4 | Greek, Ukrainian, Bulgarian, Macedonian, Hebrew | **synthesis-holdout-only**, single seed, calibrated against ru rather than measured |
+| `ctc/artifacts/ru_synth_v3_ch80_fp16w.onnx` | no — **the ru ship candidate**, not wired | 589,406 | `8fffa75c722eb61e9e8c80d919fbca3e73eb698ebe3e3909cb766b3b8489962c` | Russian ЙЦУКЕН (31-letter default grid) | **val-only**, generator-**v3** synth-trained, Yandex-eval-only |
+| `ctc/artifacts/{el,uk,bg,mk,he}_synth_v3_ch80_fp16w.onnx` | no — **the five ship candidates**, not wired | 589,406 each | §4.2 / `PHASE_Q.md` §7.7 | Greek, Ukrainian, Bulgarian, Macedonian, Hebrew | **synthesis-holdout-only**, calibrated against ru rather than measured |
 | `ctc/artifacts/{ru,el,uk,bg,mk,he}_synth_ch80*` (generation 1) | no — **superseded** | — | `PHASE_O.md` §2.6 | — | kept because every pre-Phase-P number was measured on them |
-| `ctc/artifacts/{el,uk,bg,mk,he}_synth_v2_ch80*` (generation 2) | no — **superseded by v2full** | — | `PHASE_P.md` §6.1 | — | kept because `PHASE_P.md` §5 was measured on them; `he_synth_v2_ch80` carries a parity flag its v2full successor does not |
+| `ctc/artifacts/{ru,el,uk,bg,mk,he}_synth_v2_ch80*` (generation 2) | no — **superseded** | — | `PHASE_P.md` §6.1 | — | kept because `PHASE_P.md` §5 was measured on them; `he_synth_v2_ch80` carries a parity flag no later generation revives |
+| `ctc/artifacts/{el,uk,bg,mk,he}_synth_v2full_ch80*` (generation 3) | no — **superseded** | — | `PHASE_P.md` §8.4 | — | kept because `PHASE_P.md` §8 was measured on them |
 | `src/androidTest/assets/ctc_bench/{ch192,ch128,fast_resbn80,fast_resbn72}_s1234.onnx` | no — androidTest only, 11.0 MB | — | — | **nothing.** Superseded Campaign-2 arch-comparison artifacts, one of them still labelled "the ship candidate" in the benchmark's KDoc (audit MEDIUM-4, open) | historical |
 | `phaseIB-ru-real` encoder (`cb8ece6b…`) | **NEVER** | 1,142,727 | — | — | license-blocked research artifact |
 | `phaseJ-joint`, `sw2345`, `resbn192i`, `phaseL_*`, `phaseK_*`, `ch128/ch192`, `fast_resbn*` | no | — | — | — | superseded campaign arms |
 
-**Three generations exist and all three stay in the registry**, which is deliberate and is the
+**Four generations exist and all four stay in the registry**, which is deliberate and is the
 commonest source of a wrong hash: `*_synth_ch80*` (v1, Phase O), `*_synth_v2_ch80*` (v2, Phase P
-§5), `*_synth_v2full_ch80*` (v2 on the full donor pool, Phase P §8). **Deploy the newest one that
-exists for the script**: `ru_synth_v2_ch80*` for Russian (ru has no v2full — it was already
-trained on the full pool), `*_synth_v2full_ch80*` for the other five. The older generations are
-kept only because published numbers were measured on them.
+§5), `*_synth_v2full_ch80*` (v2 on the full donor pool, Phase P §8 — five scripts only, ru was
+always full-pool), `*_synth_v3_ch80*` (**v3, the learned generator, Phase Q §7.7**). **Deploy
+`*_synth_v3_ch80_fp16w*` — the newest generation exists for all six scripts.** The older
+generations are kept only because published numbers were measured on them.
 
-**Phase Q (synth v3) is open and produces nothing deployable yet.** It runs two twin generators
-on separated licence tracks — a shipping track fitted only to MIT data, and a **sealed research
-track** fitted to Yandex residuals whose weights, samples and downstream decoders are permanently
-unshippable and live under `~/ctc-train/research_only/` with a `RESEARCH_ONLY` marker, never in
-`ctc/artifacts/`. The operative rule for anyone wiring bytes: **if it is not in `ctc/artifacts/`,
-it is not wirable.**
+**Phase Q closed, and generation 4 is what it produced.** It ran two twin generators on
+separated licence tracks — a shipping track fitted only to MIT data (FUTO t3 + HWS), whose
+outputs trained every `*_synth_v3_ch80*` artifact above, and a **sealed research track** fitted
+to Yandex residuals whose generator weights, samples, decoder, onnx and dumps are permanently
+unshippable, carry a `RESEARCH_ONLY` suffix, live untracked under `~/ctc-train/research_only/`,
+and never enter `ctc/artifacts/`, the registry, `exports/`, an app asset or a donor bank. The
+sealed track exists to produce **one number** — the upper bound U = 85.95 (§3.3) — and produces
+no bytes. The operative rule for anyone wiring bytes is unchanged, and it is the seal's
+enforcement surface: **if it is not in `ctc/artifacts/`, it is not wirable.**
 
 Golden fixtures:
 
 | fixture | pairs with | preset |
 |---|---|---|
 | `src/test/resources/ctc/ctc_golden.json` = `src/androidTest/assets/ctc/ctc_golden.json`, sha `2a449c4f2de19505131b396655ae01d3e3c325e40249446ff6e7a40c2b27559c`, 140,462 B | the shipped ONNX (`84718e6e…`) — the **header sha** is asserted in CI, the **emission matrices are not**; see `APP_INTEGRATION_AUDIT.md` §6.2 | `tunedV2` = 0.9 / 4.0 / 0.25 / 0.25 / 0.9882 |
-| `ctc/artifacts/ru_synth_v2_ch80_fp16w_golden.json`, 160,282 B, sha `a5ed2b9f6284…` | `ru_synth_v2_ch80_fp16w.onnx` (`9004befb…`) | `tunedRuCkdt` = 1.05 / 2.0 / 0.2 / 0.3734 / 0.9882 |
-| `ctc/artifacts/{el,uk,bg,mk,he}_synth_v2full_ch80_fp16w_golden.json` | the matching v2full fp16w bytes | same `tunedRuCkdt` numbers |
+| `ctc/artifacts/ru_synth_v3_ch80_fp16w_golden.json`, 160,384 B, sha `2e8de3c5a15e…` | `ru_synth_v3_ch80_fp16w.onnx` (`8fffa75c…`) | `tunedRuCkdt` = 1.05 / 2.0 / 0.2 / 0.3734 / 0.9882 |
+| `ctc/artifacts/{el,uk,bg,mk,he}_synth_v3_ch80_fp16w_golden.json` | the matching v3 fp16w bytes (§4.2) | same `tunedRuCkdt` numbers |
 
 Every script fixture is 10 cases (5 pure-featurizer branch probes, 1 word-path featurizer case,
 4 model-backed beam cases) at the same preset — the same shape as the shipped en fixture, so
@@ -704,12 +808,17 @@ NEW-2 (the `grek_qwerty` script tag, plus `LayoutScriptDeclarationTest`), NEW-4.
    el model's slot order contains no accented vowels, so an unprojected `λόγος` has a character
    with no emission slot. Repairing sigma alone converts "one word in four is mis-keyed" into
    "most of the pack is unrepresentable". Both halves or neither.
-10. **Do not wire a `*_synth_v2_ch80*` model for el/uk/bg/mk/he.** Those are generation 2; the
-    deployment bytes are `*_synth_v2full_ch80*` (`PHASE_P.md` §8.4). The v2 rows survive in the
+10. **Do not wire a `*_synth_ch80*`, `*_synth_v2_ch80*` or `*_synth_v2full_ch80*` model for any
+    script.** Those are generations 1–3; the deployment bytes for **all six** are
+    `*_synth_v3_ch80_fp16w*` (`PHASE_Q.md` §7.7, hashes in §4.2). The older rows survive in the
     registry only because §5's numbers were measured on them, and `he_synth_v2_ch80` additionally
-    carries a parity flag that its successor does not. For **ru** the opposite holds:
-    `ru_synth_v2_ch80` *is* the full-pool arm and there is no `v2full`.
-11. **Do not quote a script's synthesis-holdout number as an accuracy figure.** el 90.78 is not
-    "Greek at 90.78"; it is fit to the v2 generator's own distribution, on a probe this campaign
+    carries a parity flag no later generation revives.
+11. **Do not quote a script's synthesis-holdout number as an accuracy figure.** el 92.12 is not
+    "Greek at 92.12"; it is fit to the v3 generator's own distribution, on a probe this campaign
     has now shown three separate times to rank things real swipes do not rank (capacity, λ,
-    donor footing). Quote margins against a fixed control, never levels. §4.7 gives the wording.
+    donor footing) — and a v3 holdout is one turn *more* generator-relative than a v2 one,
+    because there is no donor split left to be disjoint in. Quote margins against a fixed
+    control, never levels. §4.7 gives the wording.
+12. **Do not copy a `RESEARCH_ONLY` byte anywhere.** The sealed twin generator, its samples and
+    its decoder are Yandex-derived and permanently unshippable. They exist to produce the upper
+    bound U (§3.3) and nothing else. If a file is not in `ctc/artifacts/`, it is not wirable.

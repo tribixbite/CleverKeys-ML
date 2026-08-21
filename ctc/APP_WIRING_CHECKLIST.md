@@ -2,7 +2,8 @@
 
 **Written**: 2026-08-20. **App HEAD it is written against**: `d717bda7`
 (`/home/will/git/swype/CleverKeys`, read-only from this side — nothing here was committed there).
-**ML HEAD**: this repo, after Phase P6.
+**ML HEAD**: this repo, after **Phase Q and its closing round** (generation 4 = `*_synth_v3_ch80*`
+for all six scripts; the λ sweep left `tunedRuCkdt` unchanged — §2.2).
 
 **What this file is.** The three CTC documents in this repo answer different questions and it is
 worth not confusing them:
@@ -93,8 +94,9 @@ condemn them*.
 
 `memory/HANDOFF.md` says *"**Russian is delivered**: `CleverKeys-ML/ctc/artifacts/ru_synth_ch80_fp16w.onnx`,
 589,406 B, sha `84ac284d…`"* and *"decodes real Russian at 77.41 in-dict top-1"*. Both were true
-on 2026-08-18 and are now superseded: the ru ship bytes are `ru_synth_v2_ch80_fp16w.onnx`, sha
-`9004befb…`, at **79.73**. The guide mirror is the larger half of this — see §3.
+on 2026-08-18 and are now **two generations** superseded: the ru ship bytes are
+`ru_synth_v3_ch80_fp16w.onnx`, sha `8fffa75c…`, at **85.07** (`PHASE_Q.md` §7.3). The guide
+mirror is the larger half of this — see §3.
 
 ### 1.5 — MEDIUM-4: 11 MB of superseded ONNX in `androidTest` · **OPEN**
 
@@ -175,11 +177,20 @@ than weaken it.
 
 ### 2.2 — Per script: bytes, alphabet, lexicon, preset
 
-**Preset is the same for all six**: γ 1.05 / **λ 2.0** / β 0.2 / γ-prune 0.3734 / β-prune 0.9882
-= `CtcScoringParams.tunedRuCkdt` verbatim. λ = 2.0 is a **frequency-scale** constant
-(`LAMBDA_CKDT_SCALE`), not a Russian one — every lexicon here is on the CKDT `255 − rank` scale,
-the same scale `fr/de/es/it/pt/sv` already run at in production. Item 5 of §2.1 is therefore
-"make one existing preset reachable", not "add six presets".
+**Preset is the same for all six and does NOT change**: γ 1.05 / **λ 2.0** / β 0.2 /
+γ-prune 0.3734 / β-prune 0.9882 = `CtcScoringParams.tunedRuCkdt` verbatim. λ = 2.0 is a
+**frequency-scale** constant (`LAMBDA_CKDT_SCALE`), not a Russian one — every lexicon here is on
+the CKDT `255 − rank` scale, the same scale `fr/de/es/it/pt/sv` already run at in production.
+Item 5 of §2.1 is therefore "make one existing preset reachable", not "add six presets".
+
+> **λ was re-swept in the Phase-Q closing round and the answer is "no change — but the constant
+> is off-peak."** `PHASE_Q.md` §9.7: on the ru real probe's tune half, in-dict t1 is **monotone
+> decreasing** across λ ∈ {1.1, 1.5, 2.0, 2.5, 3.0, 4.0} — 85.65 → 80.69 — so the optimum lies
+> *below* the grid and the pre-registered interior-optimum rule refused adoption. **Do not change
+> `tunedRuCkdt`.** But do not read the sweep as "2.0 is right" either: λ = 2.0 was fitted against
+> a greedy-37 model and the generation-4 decoder reads greedy 66, so it carries a **measured,
+> unconfirmed −0.63 t1 shortfall**. Deciding it needs one more ML-side phase, not an app change,
+> and if it ever lands it changes ru's fixture too (fixture-and-preset rule).
 
 **Model + fixture bytes.** All six ONNX are 589,406 B; the fp32 sources are 1,142,727 B each and
 are not shipped. Six scripts is ~3.5 MB, which is the argument for gating them behind the langpack
@@ -187,20 +198,32 @@ import rather than bundling all of them.
 
 | script | ship ONNX | sha256 | golden fixture | sha256 |
 |---|---|---|---|---|
-| **ru** | `ru_synth_v2_ch80_fp16w.onnx` | `9004befb6ff07b744c65d3c13481539e758ebe10d4f47cbeffe68d39d12b0e52` | `ru_synth_v2_ch80_fp16w_golden.json` (160,282 B) | `a5ed2b9f62843d085779f5ab7457e6608f5c47e8994c224146ebdaf32fcdb82d` |
-| **el** | `el_synth_v2full_ch80_fp16w.onnx` | `6b82b4db9eb8bad9f9c075e5fcdf99a6a0f7fac5a076aebf647ee8f79b14eece` | `el_synth_v2full_ch80_fp16w_golden.json` (144,407 B) | `d35b14e010512642765cae048fab2c2280c12c3a499f625d6f81e1a2bdcceb30` |
-| **uk** | `uk_synth_v2full_ch80_fp16w.onnx` | `e3e6ff1cce3599c3d8299480bc6786cf1fb87f8970ca5d349dea3055bcdec50b` | `uk_synth_v2full_ch80_fp16w_golden.json` (155,663 B) | `5afe7fd42cff3d81ab388872e23ca2361df2146dd6a8e12ef20cf54dd3746be8` |
-| **bg** | `bg_synth_v2full_ch80_fp16w.onnx` | `0345f222ca3e845b01a4f7d96ca4756c796cd38fbbe5eeb772bcc7da8aad558b` | `bg_synth_v2full_ch80_fp16w_golden.json` (154,670 B) | `028b5ea8e2ebaccd978f84b97cd16dfb5eb15026bfb239fccf95f9fac65e1839` |
-| **mk** | `mk_synth_v2full_ch80_fp16w.onnx` | `82d8eda4ee7739178187aab4ac5086ba2eda681e9e47ae413f6b6019a6dca57d` | `mk_synth_v2full_ch80_fp16w_golden.json` (160,122 B) | `6000f88ba16ce742b13e94fae3818404999aefc494c70a8ddf3e8a916ec7cf74` |
-| **he** | `he_synth_v2full_ch80_fp16w.onnx` | `0835d3f575de5378ba78829b9249c22e81e8f7231e414c15682d3f33f9b45ffa` | `he_synth_v2full_ch80_fp16w_golden.json` (140,247 B) | `adb5ea334fdff34fff378ce1edcedb9e2d6707b115c6c3a6649a5c28e28b7ae5` |
+| **ru** | `ru_synth_v3_ch80_fp16w.onnx` | `8fffa75c722eb61e9e8c80d919fbca3e73eb698ebe3e3909cb766b3b8489962c` | `ru_synth_v3_ch80_fp16w_golden.json` (160,384 B) | `2e8de3c5a15e5874366f44f725aeec2eb72befd89b503d4b24b8b4a8d82fdde5` |
+| **el** | `el_synth_v3_ch80_fp16w.onnx` | `7083794c501566f411b1f81495ba1f7f3df273c3eb58f6ee635caf168a4f8c3d` | `el_synth_v3_ch80_fp16w_golden.json` (144,427 B) | `d08d5501961e971db2ca120f6ee868b7b67ed37e34b6412dddbc7f7116de5753` |
+| **uk** | `uk_synth_v3_ch80_fp16w.onnx` | `af9959a8954961eec117808371937cb26152c82a82cad0fc6a0ac06fd695db76` | `uk_synth_v3_ch80_fp16w_golden.json` (155,068 B) | `93602db1200a3b37ef11570d4f4ee3afdad2a45b0ca4f857a784728cdbb5cc98` |
+| **bg** | `bg_synth_v3_ch80_fp16w.onnx` | `119d42f70cc763336f9a86efdc5ae4f562ba4a28179c2d386026bef674c039a7` | `bg_synth_v3_ch80_fp16w_golden.json` (154,835 B) | `f776ea03ab675ff6b741a3297c4f88b11f7af2cb183ce7b2604f082ed8420b9d` |
+| **mk** | `mk_synth_v3_ch80_fp16w.onnx` | `4e371d967bf24f260eb539848ead7860f56dc904f6bfc74235879b76e81ae022` | `mk_synth_v3_ch80_fp16w_golden.json` (160,674 B) | `015c9bae7e25a97b0ac8bd6062bb58376caaa3aca99c138d0d531ff1887e0ccf` |
+| **he** | `he_synth_v3_ch80_fp16w.onnx` | `a382371363653fbe7c806482035aa9e27968b9c098591910d24f9f1ba43212c7` | `he_synth_v3_ch80_fp16w_golden.json` (140,129 B) | `b29a99f4ac2c4f82547d040131ea48771f2791817287de6e3f9ec52fc9758ad9` |
 
 All twelve live in `CleverKeys-ML/ctc/artifacts/`.
 
-**Note the two different generation suffixes and do not normalise them.** ru ships `_v2_`; the
-other five ship `_v2full_`. That is not an inconsistency — ru's v2 arm was *already* trained on the
-full donor pool, so P6 had nothing to change for it and its hash is untouched. Wiring
-`ru_synth_v2full_*` (does not exist) or `el_synth_v2_*` (exists, superseded) are both mistakes the
-naming invites.
+**The suffix is now uniform, and that is the change most likely to be missed.** Generation 4
+(`PHASE_Q.md` §7.7) gave all six scripts the **same** `_v3_` suffix, retiring the old ru `_v2_` /
+five-script `_v2full_` split that this file previously warned about. Every `*_synth_ch80*`,
+`*_synth_v2_ch80*` and `*_synth_v2full_ch80*` file still in `ctc/artifacts/` is a **superseded**
+generation kept only because published numbers were measured on it. The twelve hashes above were
+produced by `sha256sum` against the files on disk on 2026-08-20.
+
+**What generation 4 is, in one paragraph.** The synthesis generator was replaced by a learned
+one — a conditional rectified-flow model over the trace's residual field from the ideal polyline,
+trained on MIT data only (FUTO t3 + HWS), conditioned on pure geometry so one generator serves
+every script. Nothing about the app-side contract moves: same alphabet strings, same slot order,
+same preset, same 589,406-byte graphs, same fixture shape. On the real Yandex probe ru went
+**79.73 → 85.07** (+5.34, exact McNemar p = 5.4e-53; greedy 56.12 → 65.66), which also clears the
+≤3-stratum corollary generation 2 missed. A sealed, permanently unshippable twin trained on real
+Russian swipes puts the upper bound at 85.95 — i.e. **the English-trained generator is within
+0.89 of what in-domain data would buy**, and within 3.6 of a model trained on a million real
+Russian swipes.
 
 **Alphabet, K, layout, lexicon:**
 
@@ -270,13 +293,19 @@ Applied to the lexicon **and** to anything compared against a decode (`PHASE_O.m
 
 ---
 
-## 3. The app-repo copy of the guide — the v2/v2full edit it still needs
+## 3. The app-repo copy of the guide — the v2 **and** v3 edits it still needs
 
 `docs/specs/ctc-architecture-and-multiscript-guide.md` was byte-identical to this repo's copy when
-both landed at `d76be9a6`. This repo's copy has since taken the Phase P and P6 edits; the app copy
-has taken none of them and is **one model generation stale**. Nothing shipped depends on it, but
-it is the document `CLAUDE.md`'s spec-driven workflow points a maintainer at, which is exactly the
-MEDIUM-3 failure shape.
+both landed at `d76be9a6`. This repo's copy has since taken the Phase P/P6 edits **and the Phase-Q
+generation-4 edit**; the app copy has taken none of them and is **two model generations stale**.
+Nothing shipped depends on it, but it is the document `CLAUDE.md`'s spec-driven workflow points a
+maintainer at, which is exactly the MEDIUM-3 failure shape.
+
+**The app repo was not touched by the ML side.** This is the whole edit, described; someone with
+write access to `/home/will/git/swype/CleverKeys` has to make it. The cheapest correct action is
+to **copy this repo's file over the app's** — they were meant to be a mirror and the divergence is
+entirely one-directional — and then re-check the app-state paragraphs against the app's real HEAD.
+The section-by-section list below is for anyone who would rather merge than replace.
 
 Bring across, from `CleverKeys-ML/ctc/ctc-architecture-and-multiscript-guide.md`:
 
@@ -288,14 +317,14 @@ Bring across, from `CleverKeys-ML/ctc/ctc-architecture-and-multiscript-guide.md`
 | §3.1 | v2 headline 79.73 / greedy 56.12, and the zero-shot staging argument (76.32 from wiring alone, +3.41 from the model) |
 | §3.2 step 3 | `script_synth.py --code <script>` at generator v2 and its five stages (S0 wordfreq token mass, S1/S2 geometry-matched donor draw, S4 vertex-aligned re-timing, S5 acquisition-bandwidth matching, and the never-fit-on-the-validator rule) — the app copy still describes `cyrillic_synth.py` and `weight = 255 − rank` |
 | §3.2 step 7 | new — the 32-frame lexicon budget gate |
-| §3.3 | the three-arm table (real 89.64 / v1 76.21 / **v2 79.73**), "real data is worth ~10 points" not ~13, and the three consequences for a script launch |
-| §4.1, §4.2, §4.3 | the v2 ship row, the v2 artifact hashes with v1 marked superseded, the G5 gate table, the v2 export gates |
-| §4.5 | the λ-was-tuned-against-a-weak-emission-model caveat |
+| §3.3 | **rewritten for v3**: what the learned generator is (conditional rectified flow over the residual field, MIT-only training, the acquisition-imprint repair round, the throughput regression), the four-arm table (ceiling 88.69 / **v3 85.07** / v2 79.73 / v1 77.42), the upper-bound one-liner (of the 8.96-point gap: the English-trained generator closes 5.34, in-domain data adds 0.89, generation itself costs 2.74 — so **real data is worth ~3.6 points now, not ~10 and not ~13**), the licence seal stated as a mechanism, the evidence tiers, and the λ result. The old v1→v2 material survives as §3.3a because its numbers are still cited |
+| §4.1, §4.2, §4.3 | the **v3** ship row (85.07) plus the sealed-twin and ceiling rows, the generation-4 hash table for all six scripts with v1/v2 marked superseded, the G5-Q gate table with its paired McNemar block, and the v3 export gates (fp32 7.63e-05 argmax 100/100 at the default tolerance; fp16w +0.01 t1) |
+| §4.5 | the λ line, now a **measurement** rather than a suspicion: swept, monotone decreasing, optimum off-grid low, **−0.63 t1 unconfirmed shortfall**, constant unchanged |
 | §4.6 | the ru wiring items with their `d717bda7` status |
 | **§4.7 (new)** | the refreshed per-script table, the projection rules, the evidence-tier wording, the he flag history |
-| §5 | three generations in the inventory; the ru/el-uk-bg-mk-he suffix split; the fixture table's note that CI checks the header sha and not the emission matrices |
+| §5 | **four** generations in the inventory and the uniform `_v3_` suffix that retires the ru/el-uk-bg-mk-he split; "Phase Q is open and produces nothing deployable" replaced by the closed-phase text and the seal's enforcement rule; the fixture table's note that CI checks the header sha and not the emission matrices |
 | §6 | replace the `9a6ffdd2` findings table with the `d717bda7` summary |
-| §7 | items 9, 10, 11 — el's two projection halves, `v2` vs `v2full`, and never quoting a synthesis-holdout level as accuracy |
+| §7 | items 9–12 — el's two projection halves, "wire generation 4, not 1/2/3", never quoting a synthesis-holdout level as accuracy (el 92.12 is not "Greek at 92.12"), and never copying a `RESEARCH_ONLY` byte |
 
 Also update `memory/HANDOFF.md`'s "Russian is delivered" paragraph (§1.4).
 
@@ -311,30 +340,34 @@ Also update `memory/HANDOFF.md`'s "Russian is delivered" paragraph (§1.4).
    shippable — and is permanently unusable. If a proposal's accuracy sounds too good, check
    whether it is that model.
 
-   **This now has a second live instance.** Phase Q (opened 2026-08-20, `PHASE_Q.md`) runs two
-   twin generators on deliberately separated licence tracks: a **shipping track** fitted only to
-   MIT data (FUTO t3 + HWS), and a **sealed research track** fitted to Yandex residuals whose
-   weights, samples, and any decoder trained on them are permanently unshippable. Sealed
-   artifacts carry a `RESEARCH_ONLY` marker, live under `~/ctc-train/research_only/`, and never
-   enter `ctc/artifacts/`, the registry, or `exports/`. **If a file is not in `ctc/artifacts/`,
-   it is not wirable** — that is the operative test, and it is why the registry is the only
-   place §2.2's hashes come from.
+   **This now has a second live instance, and it is permanent.** Phase Q (`PHASE_Q.md`, closed
+   2026-08-20) ran two twin generators on deliberately separated licence tracks: a **shipping
+   track** fitted only to MIT data (FUTO t3 + HWS), which produced every generation-4 artifact in
+   §2.2, and a **sealed research track** fitted to Yandex residuals whose generator weights,
+   samples, decoder, onnx and dumps are permanently unshippable. Sealed artifacts carry a
+   `RESEARCH_ONLY` suffix, live untracked under `~/ctc-train/research_only/`, and never enter
+   `ctc/artifacts/`, the registry, or `exports/`; `synth_v3.py` enforces the path prefix
+   mechanically. The sealed track produced **one number** — the upper bound U = 85.95 — and no
+   bytes. **If a file is not in `ctc/artifacts/`, it is not wirable** — that is the operative
+   test, and it is why the registry is the only place §2.2's hashes come from.
 2. **No FUTO weights and no FUTO model outputs** in anything trained or shipped. The corpus and
    the decode-algorithm lineage are the permitted inheritance; `NOTICE:46-64` states it correctly.
    Do not "improve" that wording; do not add a FUTO teacher.
-3. **Not the `*_synth_ch80*` (v1) bytes**, and for el/uk/bg/mk/he **not the `*_synth_v2_ch80*`
-   (v2) bytes either.** Both generations remain in the registry because published numbers were
-   measured on them, not because they are deployable. §2.2 has the twelve files that are.
-   **Nor anything from Phase Q / synth v3**: that phase is open, its gates are pre-registered
-   and unrun, and it has produced no registry artifact. v2 / v2full remain the deployable
-   generation until `PHASE_Q.md` says otherwise and a hash lands in `ctc/artifacts/`.
+3. **Not the `*_synth_ch80*` (v1), `*_synth_v2_ch80*` (v2) or `*_synth_v2full_ch80*` (v3-of-name,
+   generation 3) bytes.** All three generations remain in the registry because published numbers
+   were measured on them, not because they are deployable. **Generation 4 — `*_synth_v3_ch80*`,
+   uniform across all six scripts — is the deployable one**, and §2.2 has the twelve files with
+   hashes taken off disk. Phase Q is closed and its gate passed; the previous edition of this
+   line said "v2 / v2full remain the deployable generation until `PHASE_Q.md` says otherwise and
+   a hash lands in `ctc/artifacts/`" — both conditions are now met.
 4. **he's parity flag is history, not a property of the bytes you would wire.** The generation-2
    `he_synth_v2_ch80` fp32 export needed `--parity-tol 2e-3` (sliced residue 1.16e-03 against a
    0.8e-4…7.6e-4 historical envelope; argmax 100/100 on both probes). It is flagged in the
    registry and stays flagged, because that exceedance was real. The generation-3
    `he_synth_v2full_ch80` export **needed no relaxation**: 4.04e-04 at the default 1e-3, argmax
    100/100, and 100/100 on the fp16w probe too. If you read "he is flagged" somewhere, check which
-   generation is meant before treating it as a reason to hold he back.
+   generation is meant before treating it as a reason to hold he back. **Generation 4
+   (`he_synth_v3_ch80`) is likewise clean**: 3.57e-04 at the default 1e-3 with argmax 100/100.
 5. **Not a per-node cap back in the trie.** `MAX_CHILDREN = 26` was removed on purpose; the real
    bound is the constructor's alphabet-vs-head-width check.
 6. **Not `CtcFeaturizer.normalizeRawX/Y`** in `CtcEngineAdapter`. The shipped encoder was trained

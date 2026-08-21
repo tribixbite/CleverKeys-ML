@@ -816,7 +816,10 @@ v2 missed; ≥4 +6.57, p = 8.8e-44) · U vs v3 **+0.89, p = 0.0025** (≥4 strat
 Decomposition: of the 8.96-point v2→ceiling gap, the English-trained learned
 generator closes 5.34 (86 % of the 6.22 any learned generator of this family
 could reach), the in-domain data adds 0.89, and generation itself costs 2.74.
-fp16w decode cost +0.01. λ untouched.
+fp16w decode cost +0.01. λ untouched — and in the closing round λ was
+**swept and still untouched**: monotone decreasing across {1.1 … 4.0} on the
+probe's tune half, optimum off-grid low, adoption refused by the interior-optimum
+rule, incumbent 2.0 carrying a measured −0.63 shortfall (`PHASE_Q.md` §9.7).
 
 **The battery** (`phaseQ_gates_v3.json`): G1 PASS (start-hit 0.885 vs real
 0.915; v2 0.730) · G3 6/7 with step_cv 0.165 vs 0.15 the sole MISS and
@@ -1029,7 +1032,7 @@ phrasing, and its corrections list makes attaching the footing a required change
 | **E1** — the benchmark preset | **1.05, 1.1, 0.2, 0.3734, 0.9882** | every CleverKeys number from Phase E on, on the AOSP trie. **It transferred unchanged for five model families in a row** — a symmetric stratum-aware sweep landed both the Phase-J finalist and the incumbent back on their own E1 numbers — `PHASE_J.md` §6.8b summarizes that as "within ±0.07 on every metric", though its own table's largest deviation is **0.13** (`sw2345` 4+ 87.13 vs 87.26). Either way it is the strongest evidence that E1 is a property of the emission/trie pair rather than of any model |
 | **app preset** | **0.9, 4.0, 0.25, 0.25, 0.9882** | the shipping footing. Fitted on `resbn80g` (`PHASE_G.md` §6) and never swept for **this** family, and now test-validated on `phaseM_kd_fresh_w1` as config B. (`resbn192i` did receive its own app-footing sweep — next row — so "never swept again" would be wrong.) λ moves 1.1 → 4.0 because the app trie's `log_freq` spread is 0.64 against AOSP's 5.40 — an 8× scale collapse |
 | `resbn192i` app preset | 0.975, 3.0, 0.35, 0.25, 0.9882 | holdout-confirmed for `resbn192i` only (`PHASE_I.md` §7.4) |
-| ru | λ ≈ **2.0** | the Cyrillic path only — the app ru lexicon stores `freq = 255 − rank`. Does **not** touch E1 on the en footings |
+| ru | λ ≈ **2.0** | the Cyrillic path only — the app ru lexicon stores `freq = 255 − rank`. Does **not** touch E1 on the en footings. **Re-swept on generation 4 and left unchanged** (`PHASE_Q.md` §9.7): on the real ru probe's tune half, in-dict t1 is monotone decreasing across {1.1 … 4.0} (85.65 → 80.69), so λ\* = 1.1 is a grid endpoint, the pre-registered interior-optimum rule refused adoption, and the confirm half was not spent. The constant stands with a **measured, unconfirmed −0.63 t1 shortfall** — λ 2.0 was fitted to a greedy-37 model and generation 4 reads greedy 66 |
 
 **The λ 4.0 caveat that travels with the app preset:** the user-dictionary merge
 injects top-of-scale (freq 255) competitors and a 3.6× larger λ amplifies them.
