@@ -235,7 +235,11 @@ def main() -> int:
     out_path = resolve(args.workdir, args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(
-        {"source_onnx": str(resolve(args.workdir, args.onnx)),
+        # LOW-6 / ARC-061: basenames only — the fixture ships into the app repo,
+        # and an absolute path would leak the generating host's home directory
+        # (both shipped ctc_golden.json copies carried /home/will/…). Identity
+        # is pinned by source_onnx_sha256; the basename is enough provenance.
+        {"source_onnx": ",".join(Path(p).name for p in str(args.onnx).split(",")),
          "source_onnx_sha256": [sha256_file(resolve(args.workdir, p))
                                 for p in str(args.onnx).split(",")],
          "preset": [gamma, lam, beta, gamma_prune, beta_prune],
