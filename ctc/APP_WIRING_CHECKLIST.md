@@ -231,10 +231,13 @@ Russian swipes.
 |---|---|---|---|---|
 | ru | `cyrl_jcuken_ru.xml` | 31 | `абвгдежзийклмнопрстуфхцчшщыьэюя` | `scripts/dictionaries/langpack-ru.zip` — **exists**, importable today. 533,916 B; `dictionary.bin` 2,088,865 B, magic `CKDT` v2, 50 k words. `eval_cyrillic.build_trie` reads this exact zip, so every ru number is on the app's own lexicon. |
 | el | `grek_qwerty.xml` | 25 | `αβγδεζηθικλμνξοπρςστυφχψω` | `scripts/dictionaries/langpack-el.zip` — **exists**, needs the full projection (§2.3) |
-| uk | `cyrl_jcuken_uk.xml` | 31 | `абвгдежзийклмнопрстуфхцчшщьюяєі` | **must be built** — `build_wordlist.py --lang uk`; the `cyrillic` script gate already exists |
-| bg | `cyrl_ueishsht.xml` | 30 | `абвгдежзийклмнопрстуфхцчшщъьюя` | **must be built** |
-| mk | `cyrl_lynyertdz_mk.xml` | 31 | `абвгдежзиклмнопрстуфхцчшѓѕјљњќџ` | **must be built** |
-| he | `hebr_1_il.xml` | 27 | `אבגדהוזחטיךכלםמןנסעףפץצקרשת` | **must be built**, and `build_wordlist._is_script_word` needs a new `hebrew` branch (0x0590–0x05FF) — it currently `raise`s on any script but latin/greek/cyrillic |
+| uk | `cyrl_jcuken_uk.xml` | 31 | `абвгдежзийклмнопрстуфхцчшщьюяєі` | `scripts/dictionaries/langpack-uk.zip` — **exists** since ARC-056 (app commit `86156ea3`, 2026-09-01), built by `build_wordlist.py --lang uk`; CKDT v2, 50,000 words |
+| bg | `cyrl_ueishsht.xml` | 30 | `абвгдежзийклмнопрстуфхцчшщъьюя` | `langpack-bg.zip` — **exists** (ARC-056); CKDT v2, 35,027 words |
+| mk | `cyrl_lynyertdz_mk.xml` | 31 | `абвгдежзиклмнопрстуфхцчшѓѕјљњќџ` | `langpack-mk.zip` — **exists** (ARC-056); CKDT v2, 50,000 words |
+| he | `hebr_1_il.xml` | 27 | `אבגדהוזחטיךכלםמןנסעףפץצקרשת` | `langpack-he.zip` — **exists** (ARC-056); CKDT v2, 50,000 words. The `hebrew` branch of `build_wordlist._is_script_word` (0x0590–0x05FF) also landed with ARC-056 — no app-side lexicon work remains |
+
+> Provenance: the published Phase-O holdout numbers for uk/bg/mk/he predate ARC-056 — they were
+> measured on raw wordfreq top-50k lexicons, not the shipped CKDT packs above.
 
 **el's layout prerequisite is already done.** `src/main/layouts/grek_qwerty.xml` declared
 `script="latin"` for months (the `6af11da7` fix landed in `srcs/layouts/`, which no build task

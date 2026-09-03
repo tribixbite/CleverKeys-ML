@@ -414,6 +414,8 @@ Probe: each script's own 10,000-row synthesis holdout, disjoint donor half,
 independent word draw, decoded at the adopted preset (λ = 2.0) through the
 exported fp32 graph. **Read every row of this table through §2.1: these are
 generator numbers, and the generator over-credits capacity and misranks models.**
+Provenance: the uk/bg/mk/he rows here (and in §2.3) were measured against raw
+wordfreq top-50k lexicons — the shipped ARC-056 CKDT packs did not exist yet.
 
 | script | K | greedy | **in-dict t1** | t3 | t5 | ≤3 t1 | 4+ t1 | ≥70 gate |
 |---|---|---|---|---|---|---|---|---|
@@ -610,10 +612,10 @@ normalisation box is built from letter-centre rects only.
 |---|---|---|---|---|---|
 | ru | `cyrl_jcuken_ru.xml` | `абвгдежзийклмнопрстуфхцчшщыьэюя` | 31 | `langpack-ru.zip` (importable today) | `tunedRuCkdt` = 1.05 / **2.0** / 0.2 / 0.3734 / 0.9882 |
 | el | `grek_qwerty.xml` | `αβγδεζηθικλμνξοπρςστυφχψω` | 25 | `langpack-el.zip` **with final sigma repaired** (§1.3) | CKDT preset, λ per §2.2 |
-| uk | `cyrl_jcuken_uk.xml` | `абвгдежзийклмнопрстуфхцчшщьюяєі` | 31 | **none — must be built** (`build_wordlist.py --lang uk`, the `cyrillic` script gate already exists) | CKDT preset |
-| bg | `cyrl_ueishsht.xml` | `абвгдежзийклмнопрстуфхцчшщъьюя` | 30 | **none — must be built** (`cyrillic` gate exists) | CKDT preset |
-| mk | `cyrl_lynyertdz_mk.xml` | `абвгдежзиклмнопрстуфхцчшѓѕјљњќџ` | 31 | **none — must be built** (`cyrillic` gate exists) | CKDT preset |
-| he | `hebr_1_il.xml` | `אבגדהוזחטיךכלםמןנסעףפץצקרשת` | 27 | **none — must be built**, and `build_wordlist._is_script_word` needs a **new `hebrew` branch** (0x0590–0x05FF); it currently `raise`s on any script but latin/greek/cyrillic | CKDT preset |
+| uk | `cyrl_jcuken_uk.xml` | `абвгдежзийклмнопрстуфхцчшщьюяєі` | 31 | `langpack-uk.zip` — **exists** since ARC-056 (app commit `86156ea3`, 2026-09-01; `build_wordlist.py --lang uk`; CKDT v2, 50,000 words) | CKDT preset |
+| bg | `cyrl_ueishsht.xml` | `абвгдежзийклмнопрстуфхцчшщъьюя` | 30 | `langpack-bg.zip` — **exists** (ARC-056; CKDT v2, 35,027 words) | CKDT preset |
+| mk | `cyrl_lynyertdz_mk.xml` | `абвгдежзиклмнопрстуфхцчшѓѕјљњќџ` | 31 | `langpack-mk.zip` — **exists** (ARC-056; CKDT v2, 50,000 words) | CKDT preset |
+| he | `hebr_1_il.xml` | `אבגדהוזחטיךכלםמןנסעףפץצקרשת` | 27 | `langpack-he.zip` — **exists** (ARC-056; CKDT v2, 50,000 words); the `hebrew` branch of `build_wordlist._is_script_word` (0x0590–0x05FF) also landed with ARC-056 | CKDT preset |
 
 ### 3.3 Two app fixes that must land before any of this
 
@@ -647,16 +649,17 @@ decode; the campaign's ALT_LAYOUT §3 policy. From `script_registry.py`:
 
 For each script: the layout XML is already in the app; the model, the fixture and
 the preset are in `ctc/artifacts/`; the alphabet string is §3.2; the projection is
-§3.4. What is *missing* is the lexicon for four of the six.
+§3.4. As of ARC-056 (app commit `86156ea3`, 2026-09-01) every script below has a
+shipped lexicon pack — no lexicon is missing.
 
 | script | model asset | golden fixture | preset | lexicon status | blocking app work |
 |---|---|---|---|---|---|
 | ru | `ru_synth_ch80_fp16w.onnx` | `ru_synth_ch80_fp16w_golden.json` | `tunedRuCkdt` | `langpack-ru.zip` exists (import) | §3.1 items 1–6 |
 | el | `el_synth_ch80_fp16w.onnx` | `el_synth_ch80_fp16w_golden.json` | same numbers as `tunedRuCkdt` | `langpack-el.zip` exists, **needs the ς repair** | §3.1 items 1–6 **+ the `script="latin"` fix** |
-| uk | `uk_synth_ch80_fp16w.onnx` | `uk_synth_ch80_fp16w_golden.json` | same | **must be built** (`build_wordlist.py --lang uk`) | §3.1 items 1–6 |
-| bg | `bg_synth_ch80_fp16w.onnx` | `bg_synth_ch80_fp16w_golden.json` | same | **must be built** | §3.1 items 1–6 |
-| mk | `mk_synth_ch80_fp16w.onnx` | `mk_synth_ch80_fp16w_golden.json` | same | **must be built** | §3.1 items 1–6 |
-| he | `he_synth_ch80_fp16w.onnx` (**flagged**, §2.2) | `he_synth_ch80_fp16w_golden.json` | same | **must be built**, plus a `hebrew` branch in `build_wordlist._is_script_word` | §3.1 items 1–6 |
+| uk | `uk_synth_ch80_fp16w.onnx` | `uk_synth_ch80_fp16w_golden.json` | same | `langpack-uk.zip` exists (ARC-056) | §3.1 items 1–6 |
+| bg | `bg_synth_ch80_fp16w.onnx` | `bg_synth_ch80_fp16w_golden.json` | same | `langpack-bg.zip` exists (ARC-056) | §3.1 items 1–6 |
+| mk | `mk_synth_ch80_fp16w.onnx` | `mk_synth_ch80_fp16w_golden.json` | same | `langpack-mk.zip` exists (ARC-056) | §3.1 items 1–6 |
+| he | `he_synth_ch80_fp16w.onnx` (**flagged**, §2.2) | `he_synth_ch80_fp16w_golden.json` | same | `langpack-he.zip` exists (ARC-056, incl. the `hebrew` `_is_script_word` branch) | §3.1 items 1–6 |
 
 Sizes: every model is **589,406 B** as fp16w — a fifth of the shipped English
 model's 2.91 MB. Six scripts is 3.5 MB of assets, which is the argument for
