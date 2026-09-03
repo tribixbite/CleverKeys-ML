@@ -290,17 +290,20 @@ EL = ScriptSpec(
           "accent_aigu/trema/grave are dead keys); word-final σ restored to ς.",
 )
 
-#: Ukrainian — layout present, **no app lexicon**; wordfreq supplies one on the
-#: app's own rank scale.  ї and ґ live on ``loc`` corner slots of the ЙЦУКЕН-uk
-#: grid, so they are not swipe-typeable and words needing them are rejected.
+#: Ukrainian — app pack exists since ARC-056 (app commit ``86156ea3``,
+#: 2026-09-01): ``langpack-uk.zip``, built by the app's own ``build_wordlist.py
+#: --lang uk``.  ї and ґ live on ``loc`` corner slots of the ЙЦУКЕН-uk grid, so
+#: they are not swipe-typeable and words needing them are rejected.
 UK = ScriptSpec(
     code="uk", name="Ukrainian",
     app_xml="cyrl_jcuken_uk.xml", layout_json="layouts/uk_jcuken.json",
     letters="абвгдежзийклмнопрстуфхцчшщьюяєі",
     corner_only="їґ",
-    lexicon=Lexicon(kind="wordfreq", lang="uk",
-                    tier="wordfreq top-50k, app rank formula — NOT the app's "
-                         "curated build_wordlist output (no spell oracles)"),
+    lexicon=Lexicon(kind="ckdt", path=APP_DICTS / "langpack-uk.zip",
+                    tier="app-importable langpack-uk (CKDT v2, 50,000 words; "
+                         "ARC-056). Published Phase-O holdout numbers predate "
+                         "this pack — they were measured on the raw wordfreq "
+                         "top-50k lexicon, not this shipped pack."),
     notes="ї/ґ are corner-only on this layout: rejected, cost measured.",
 )
 
@@ -311,8 +314,10 @@ BG = ScriptSpec(
     letters="абвгдежзийклмнопрстуфхцчшщъьюя",
     corner_only="ѝ",
     folds={"ѝ": "и"},
-    lexicon=Lexicon(kind="wordfreq", lang="bg",
-                    tier="wordfreq top-50k, app rank formula"),
+    lexicon=Lexicon(kind="ckdt", path=APP_DICTS / "langpack-bg.zip",
+                    tier="app-importable langpack-bg (CKDT v2, 35,027 words; "
+                         "ARC-056). Published Phase-O holdout numbers predate "
+                         "this pack — measured on the raw wordfreq lexicon."),
     notes="ѝ (grave-и, a disambiguating pronoun spelling) folds to и.",
 )
 
@@ -323,8 +328,10 @@ MK = ScriptSpec(
     letters="абвгдежзиклмнопрстуфхцчшѓѕјљњќџ",
     corner_only="ѐѝ",
     folds={"ѐ": "е", "ѝ": "и"},
-    lexicon=Lexicon(kind="wordfreq", lang="mk",
-                    tier="wordfreq top-50k, app rank formula"),
+    lexicon=Lexicon(kind="ckdt", path=APP_DICTS / "langpack-mk.zip",
+                    tier="app-importable langpack-mk (CKDT v2, 50,000 words; "
+                         "ARC-056). Published Phase-O holdout numbers predate "
+                         "this pack — measured on the raw wordfreq lexicon."),
     notes="ѐ/ѝ (accented disambiguators) fold to е/и.",
 )
 
@@ -355,8 +362,11 @@ HE = ScriptSpec(
     letters="אבגדהוזחטיךכלםמןנסעףפץצקרשת",
     corner_only="",
     strip_combining=True,
-    lexicon=Lexicon(kind="wordfreq", lang="he",
-                    tier="wordfreq top-50k, app rank formula"),
+    lexicon=Lexicon(kind="ckdt", path=APP_DICTS / "langpack-he.zip",
+                    tier="app-importable langpack-he (CKDT v2, 50,000 words; "
+                         "ARC-056, using build_wordlist's hebrew script gate). "
+                         "Published Phase-O holdout numbers predate this pack "
+                         "— measured on the raw wordfreq lexicon."),
     notes="niqqud stripped (not keys); final forms are distinct keys and are "
           "kept distinct, exactly as Hebrew orthography requires.",
 )
