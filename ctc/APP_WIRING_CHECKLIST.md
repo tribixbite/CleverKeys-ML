@@ -198,7 +198,7 @@ import rather than bundling all of them.
 
 | script | ship ONNX | sha256 | golden fixture | sha256 |
 |---|---|---|---|---|
-| **ru** | `ru_synth_v3_ch80_fp16w.onnx` | `8fffa75c722eb61e9e8c80d919fbca3e73eb698ebe3e3909cb766b3b8489962c` | `ru_synth_v3_ch80_fp16w_golden.json` (160,384 B) | `2e8de3c5a15e5874366f44f725aeec2eb72befd89b503d4b24b8b4a8d82fdde5` |
+| **ru** | `ru_synth_v3_ch80_fp16w.onnx` | `8fffa75c722eb61e9e8c80d919fbca3e73eb698ebe3e3909cb766b3b8489962c` | `ru_synth_v3_ch80_fp16w_golden.json` (159,778 B, refrozen at the ARC-060 geometry 2026-09-03) | `8951d7a3f725e54df735804ae981ba96038f8f6a5609edf52a56f699914982d3` |
 | **el** | `el_synth_v3_ch80_fp16w.onnx` | `7083794c501566f411b1f81495ba1f7f3df273c3eb58f6ee635caf168a4f8c3d` | `el_synth_v3_ch80_fp16w_golden.json` (144,427 B) | `d08d5501961e971db2ca120f6ee868b7b67ed37e34b6412dddbc7f7116de5753` |
 | **uk** | `uk_synth_v3_ch80_fp16w.onnx` | `af9959a8954961eec117808371937cb26152c82a82cad0fc6a0ac06fd695db76` | `uk_synth_v3_ch80_fp16w_golden.json` (155,068 B) | `93602db1200a3b37ef11570d4f4ee3afdad2a45b0ca4f857a784728cdbb5cc98` |
 | **bg** | `bg_synth_v3_ch80_fp16w.onnx` | `119d42f70cc763336f9a86efdc5ae4f562ba4a28179c2d386026bef674c039a7` | `bg_synth_v3_ch80_fp16w_golden.json` (154,835 B) | `f776ea03ab675ff6b741a3297c4f88b11f7af2cb183ce7b2604f082ed8420b9d` |
