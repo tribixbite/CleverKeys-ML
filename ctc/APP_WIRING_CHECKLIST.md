@@ -298,6 +298,11 @@ Applied to the lexicon **and** to anything compared against a decode (`PHASE_O.m
 
 ## 3. The app-repo copy of the guide — the v2 **and** v3 edits it still needs
 
+> **CLOSED 2026-08-25.** The app repo refreshed its copy by copying this repo's file verbatim
+> (the app copy's own header records it), then layered app-state addenda of its own — so the
+> app copy is now *ahead* on app-state. The section list below is retained as the record of
+> what that refresh carried across; nothing in it is pending.
+
 `docs/specs/ctc-architecture-and-multiscript-guide.md` was byte-identical to this repo's copy when
 both landed at `d76be9a6`. This repo's copy has since taken the Phase P/P6 edits **and the Phase-Q
 generation-4 edit**; the app copy has taken none of them and is **two model generations stale**.
