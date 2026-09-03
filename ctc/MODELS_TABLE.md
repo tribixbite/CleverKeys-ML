@@ -667,6 +667,9 @@ table** — `PHASE_O.md` §2.1 measures the probe inverting both the capacity ax
 and the λ choice against real data. Russian rows are the calibration anchor and
 carry a real-corpus column (Yandex, eval-only). All arms: `resbn:80` dil 1,2,4,8,
 embed_hid 96, 94 k steps, greedy selection, **single seed 1234**, no layout-alt.
+Lexicon provenance (applies to every uk/bg/mk/he holdout row here and in
+§4.16–§4.17): measured on raw wordfreq top-50k lexicons — the shipped ARC-056
+CKDT packs (app commit `86156ea3`, 2026-09-01) did not exist yet.
 
 | arm | K | script holdout t1/t3/t5 | greedy | ch192-EN zero-shot (same probe) | ch80-EN zero-shot (same probe) | real-corpus column | verdict |
 |---|---|---|---|---|---|---|---|

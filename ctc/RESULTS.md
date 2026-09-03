@@ -205,7 +205,9 @@ expensive half is the data, not the model.
 
 **Five new models, exported.** Same recipe as `phaseIB-ru-synth`, verbatim,
 single seed. On their own 10 k synthesis holdouts at the adopted preset:
-**el 82.54 · uk 79.27 · bg 71.80 · mk 71.69 · he 65.36** in-dict t1. Four clear
+**el 82.54 · uk 79.27 · bg 71.80 · mk 71.69 · he 65.36** in-dict t1 (uk/bg/mk/he
+measured on raw wordfreq top-50k lexicons — the ARC-056 CKDT packs the app now
+ships did not exist yet, at this or any later generation). Four clear
 the registered ≥70 gate; **he fails it** at the adopted preset (70.28 at λ 1.1)
 and is exported flagged. Against the capacity-matched English control every
 script model wins by +4.9…+7.3; against the 3×-capacity ship model every one
