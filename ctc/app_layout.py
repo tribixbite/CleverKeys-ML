@@ -60,13 +60,18 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import unicodedata
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
-#: The app repo is a READ-ONLY reference for this campaign.
-APP_REPO = Path("/home/will/git/swype/CleverKeys")
+#: The app repo is a READ-ONLY reference for this campaign.  Overridable via
+#: ``CK_APP_REPO`` so the extractor runs on any checkout of the app (the
+#: Termux device keeps it at ``~/git/swype/cleverkeys``); the default is the
+#: original WSL path every Phase-O json was generated against.
+APP_REPO = Path(os.environ.get("CK_APP_REPO",
+                               "/home/will/git/swype/CleverKeys")).expanduser()
 
 #: The layout dir that actually SHIPS.  ``build.gradle``'s ``copyLayoutDefinitions``
 #: copies ``src/main/layouts/*.xml`` into ``build/generated/layouts/res/raw``;
